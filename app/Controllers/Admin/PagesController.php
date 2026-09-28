@@ -86,12 +86,12 @@ final class PagesController extends BaseController
                 'h1'               => mb_substr(Request::post('h1'), 0, 500),
                 'meta_description' => Request::post('meta_description'),
                 'meta_keywords'    => Request::post('meta_keywords'),
-                'content'          => self::html('content'),
+                'content'          => self::html('content', $old),   // без правок — как в базе (виджет со <script> от администратора)
                 'status'           => Request::post('status') === '1' ? 1 : 0,
                 'in_menu'          => Request::post('in_menu') === '1' ? 1 : 0,
                 'sort'             => max(-99999, min(99999, Request::postInt('sort'))),
                 'canonical'        => self::normalizeCanonical(Request::post('canonical')),
-            ] + self::ukValues(self::UK_FIELDS, ['content_uk']);
+            ] + self::ukValues(self::UK_FIELDS, ['content_uk'], $old);
             $data = AdminCatalog::keepUnchanged($data, $old);   // без правок — байт в байт (CRLF в текстах из Webasyst)
             if ($data['name'] === '') $errors['name'] = 'Укажите название страницы';
             if ($data['url'] === '' && $data['name'] !== '') $data['url'] = Str::slug($data['name'], 120) . '/';
@@ -214,13 +214,13 @@ final class PagesController extends BaseController
 
     /**
      * Значения украинских полей из POST: [колонка => строка], с обрезкой по длине.
-     * $html — колонки с HTML (не обрезаются trim'ом по краям).
+     * $html — колонки с HTML (не обрезаются trim'ом по краям); $old — запись из базы (HTML без правок остаётся как есть, см. html()).
      */
-    public static function ukValues(array $fields, array $html = []): array
+    public static function ukValues(array $fields, array $html = [], array $old = []): array
     {
         $out = [];
         foreach ($fields as $k => $max) {
-            $v = in_array($k, $html, true) ? self::html($k) : Request::post($k);
+            $v = in_array($k, $html, true) ? self::html($k, $old) : Request::post($k);
             $out[$k] = $max > 0 ? mb_substr($v, 0, $max) : $v;
         }
         return $out;
@@ -229,12 +229,13 @@ final class PagesController extends BaseController
     /**
      * HTML-поле формы (пустое — если одни пробелы). Администратору — как есть, остальным сотрудникам — без скриптов
      * и опасных атрибутов (HtmlSanitizer::staff): иначе менеджер мог бы выполнить свой код в браузере администратора.
+     * $old — запись из базы: поле без правок сохраняется прежним, без очистки (AdminCatalog::staffHtml).
      */
-    public static function html(string $key): string
+    public static function html(string $key, array $old = []): string
     {
         $v = $_POST[$key] ?? '';
         $v = is_string($v) ? str_replace("\r\n", "\n", $v) : '';
-        return trim($v) === '' ? '' : (HtmlSanitizer::staff($v) ?? '');
+        return trim($v) === '' ? '' : (AdminCatalog::staffHtml($v, $old[$key] ?? null) ?? '');
     }
 
     /** Канонический адрес: '' | '/path/' | 'https://…'; false — неверный */

@@ -370,17 +370,23 @@ $steps['customers'] = function () use ($old, $new) {
         $new->query("UPDATE customers SET email = NULL WHERE id IN ($ph)", $vals);
     }
     $taken = array_flip(array_map('strval', $new->col('SELECT email FROM customers WHERE email IS NOT NULL')));   // адреса клиентов нового сайта
-    $staff = 0; $withPass = 0; $n = 0;
+    // Сотрудники старого сайта, которые не входили больше полугода, переносятся обычными клиентами — без доступа в админку
+    // (решение владельца); личный кабинет покупателя у них остаётся. Вернуть права — «Сотрудники» или bin/create-admin.php.
+    $activeSince = date('Y-m-d H:i:s', strtotime('-6 months'));
+    $staff = 0; $staffOff = 0; $withPass = 0; $n = 0;
     foreach ($contacts as $id => $c) {
         $id = (int) $id;
         $email = $primary[$id] ?? null;
         if ($email !== null && isset($taken[$email])) $email = null;   // адрес уже занят клиентом, зарегистрированным на новом сайте
         $pass = (string) $c['password'] !== '' ? 'wa:' . $c['password'] : null;
+        $isStaff = (int) $c['is_user'] === 1;
+        $active = $isStaff && (string) dt($c['last_datetime']) >= $activeSince;
+        if ($isStaff && !$active) $staffOff++;
         $row = [
             'id' => $id, 'name' => mb_substr(trim((string) $c['name']), 0, 190), 'firstname' => mb_substr((string) $c['firstname'], 0, 100),
             'lastname' => mb_substr((string) $c['lastname'], 0, 100), 'company' => mb_substr((string) $c['company'], 0, 190),
             'email' => $email, 'phone' => nz($phones[$id] ?? null), 'login' => nz(trim((string) $c['login'])), 'city' => nz($cities[$id] ?? null),
-            'password' => $pass, 'role' => (int) $c['is_user'] === 1 ? 'admin' : 'customer', 'status' => 1,
+            'password' => $pass, 'role' => $active ? 'admin' : 'customer', 'status' => 1,
             'orders_count' => (int) ($cust[$id]['number_of_orders'] ?? 0), 'total_spent' => (float) ($cust[$id]['total_spent'] ?? 0),
             'created_at' => dt($c['create_datetime']) ?? date('Y-m-d H:i:s'), 'last_login_at' => dt($c['last_datetime']),
         ];
@@ -411,7 +417,7 @@ $steps['customers'] = function () use ($old, $new) {
     // иначе перезаписал бы ими новые записи — вплоть до e-mail администратора при сохранённых пароле и роли.
     $next = (int) $old->value('SELECT MAX(id) FROM wa_contact') + 100000;
     $new->query("ALTER TABLE customers AUTO_INCREMENT = $next");
-    say("Клиенты: $n (с паролем: $withPass, сотрудников: $staff, адресов для входа: " . count($emailRows) . ')');
+    say("Клиенты: $n (с паролем: $withPass, сотрудников: $staff, без доступа в админку — не входили полгода: $staffOff, адресов для входа: " . count($emailRows) . ')');
 };
 
 $steps['orders'] = function () use ($old, $new) {

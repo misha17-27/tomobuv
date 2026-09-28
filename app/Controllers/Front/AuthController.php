@@ -173,18 +173,25 @@ final class AuthController
         $token = Request::isPost() ? Request::post('t') : Request::get('t');
         $user = self::userByToken($token);
         $errors = [];
+        // считаем только неудачные отправки формы (как у входа): неверная/просроченная ссылка, ошибки в пароле — 10 за 15 минут на IP;
+        // успешная смена пароля попыткой не считается (несколько клиентов за одним IP офиса не упираются в лимит)
+        $kIp = 'reset:' . Request::ip();
 
-        if ($user && Request::isPost()) {
+        if (!$user && Request::isPost()) {
+            RateLimit::hit($kIp, 10, 900);                   // неверная или просроченная ссылка
+        } elseif ($user && Request::isPost()) {
             $password = (string) ($_POST['password'] ?? '');
             $password2 = (string) ($_POST['password2'] ?? '');
             if (!Csrf::check()) {
                 $errors['form'] = t('Страница устарела. Обновите её и попробуйте ещё раз.');
-            } elseif (!RateLimit::hit('reset:' . Request::ip(), 10, 900)) {
+            } elseif (RateLimit::exceeded($kIp, 10)) {
                 $errors['form'] = t('Слишком много попыток. Попробуйте через 15 минут.');
             } elseif (($pe = self::passwordError($password, (string) $user['role'])) !== '') {
                 $errors['password'] = $pe;          // сотрудник (ссылка-приглашение, восстановление) — правила админки
+                RateLimit::hit($kIp, 10, 900);
             } elseif ($password !== $password2) {
                 $errors['password2'] = t('Пароли не совпадают');
+                RateLimit::hit($kIp, 10, 900);
             } else {
                 // новый хеш пароля завершает остальные сеансы этой учётной записи (Auth: отпечаток пароля в сессии)
                 App::db()->update('customers', ['password' => password_hash($password, PASSWORD_DEFAULT),

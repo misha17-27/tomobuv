@@ -15,7 +15,8 @@
  *    API: window.AdmEditor.init(textarea), .upload(file) → Promise<{ok,url}>, .toast(msg, isErr), .withMedia(fn), .clean(html).
  *
  * 2) Переключатель «RU | UA» (партиал admin/partials/lang-bar): область [data-lang="ru|uk"] (форма или обёртка),
- *    поля .l-ru / .l-uk, поля UA [data-uk] — счётчик «заполнено N из M»; язык запоминается на вкладку браузера,
+ *    поля .l-ru / .l-uk, поля UA [data-uk] — счётчик «заполнено N из M» (+ data-uk-more="M N" на области — поля не на экране,
+ *    например значения характеристики на других страницах списка); язык запоминается на вкладку браузера,
  *    уходит с формой (_lang), ошибка или обязательное поле другого языка открывает его; событие 'langchange' на области.
  *    [data-copy-from][data-copy-to] — «Скопировать русский текст».
  *
@@ -657,10 +658,13 @@
       scope.__langInit = true;
       var btns = $$('[data-lang-to]', bar), hidden = $('input[name=_lang]', bar), counter = $('[data-uk-count]', bar);
       var ukFields = $$('[data-uk]', scope);
+      // поля UA, которых нет на экране (значения характеристики на других страницах списка): data-uk-more="всего заполнено" от сервера
+      var more = (scope.getAttribute('data-uk-more') || '').split(' ').map(function (x) { return parseInt(x, 10) || 0; });
+      var num = function (x) { return x.toLocaleString('ru-RU'); };
       var count = function () {
         if (!counter) return;
-        var n = ukFields.filter(function (el) { return el.value.trim() !== ''; }).length, all = ukFields.length;
-        counter.innerHTML = n ? '<span class="lw">заполнено </span>' + n + ' из ' + all : 'не заполнено';
+        var n = ukFields.filter(function (el) { return el.value.trim() !== ''; }).length + (more[1] || 0), all = ukFields.length + (more[0] || 0);
+        counter.innerHTML = n ? '<span class="lw">заполнено </span>' + num(n) + ' из ' + num(all) : 'не заполнено';
         counter.parentNode.title = 'Украинская версия: заполнено полей ' + n + ' из ' + all;
         counter.classList.toggle('full', all > 0 && n === all);
       };

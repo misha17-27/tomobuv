@@ -122,8 +122,9 @@ final class CategoriesController extends BaseController
 
         if (Request::isPost()) {
             $str = static fn(string $k, int $max = 500) => ($v = mb_substr(Request::post($k), 0, $max)) === '' ? null : $v;
-            // HTML-описания: у менеджера — без скриптов и опасных атрибутов (HtmlSanitizer::staff), у администратора — как есть
-            $html = static fn(string $k) => ($v = trim((string) ($_POST[$k] ?? ''))) === '' ? null : HtmlSanitizer::staff(mb_substr($v, 0, 1000000));
+            // HTML-описания: у менеджера — без скриптов и опасных атрибутов (HtmlSanitizer::staff), у администратора — как есть;
+            // поле без правок — как в базе, без очистки (AdminCatalog::staffHtml)
+            $html = static fn(string $k) => AdminCatalog::staffHtml(AdminCatalog::postHtml($k), $c[$k] ?? null);
             $d = [
                 'name'             => mb_substr(Request::post('name'), 0, 255),
                 'parent_id'        => max(0, Request::postInt('parent_id')),
@@ -143,7 +144,7 @@ final class CategoriesController extends BaseController
             // украинская версия (пусто — на /ua/ показывается русский текст)
             foreach (self::UK_FIELDS as $k) {
                 $d[$k . '_uk'] = in_array($k, ['description', 'seo_description'], true)
-                    ? HtmlSanitizer::staff(AdminCatalog::postHtml($k . '_uk'))
+                    ? $html($k . '_uk')
                     : AdminCatalog::postStr($k . '_uk', $k === 'name' ? 255 : (str_starts_with($k, 'meta_') && $k !== 'meta_title' ? 5000 : 500));
             }
             $d = AdminCatalog::keepUnchanged($d, $c);   // без правок — байт в байт (перевод строки в конце H1 из импорта)

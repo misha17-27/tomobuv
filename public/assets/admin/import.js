@@ -123,7 +123,6 @@
     var step = function () {
       if (!running) return;
       post(run.getAttribute('data-run'), {}).then(function (r) {
-        fails = 0;
         errBox.hidden = true;
         render(r);
         if (r.status === 'new' || (r.status === 'error' && !r.processed)) { running = false; location.href = r.redirect || run.getAttribute('data-page'); return; }
@@ -138,6 +137,7 @@
           setTimeout(step, fails * 3000);
           return;
         }
+        fails = 0;                                                         // счётчик сбоев — только после удачного шага (иначе «после 3 ошибок» не наступало)
         setTimeout(step, r.busy ? 3000 : 30);
       }).catch(function () {
         if (++fails > 6) { stop('Нет связи с сервером. Импорт сохранил прогресс — нажмите «Продолжить», когда связь восстановится.'); return; }

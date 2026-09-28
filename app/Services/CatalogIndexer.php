@@ -10,7 +10,7 @@ use App\Core\Cache;
  * Строит catalog_index (категория → активные товары с учётом подкатегорий и динамических
  * категорий) и category_facets (значения фильтров по категориям).
  *
- * Полная перестройка (~100 тыс. товаров) — 7–10 с: bin/reindex.php
+ * Полная перестройка (~100 тыс. товаров) — 4–5 с: bin/reindex.php
  * Точечная — после изменения товаров (1–10 товаров — десятки мс, 1000 — доли секунды):
  *   $s = CatalogIndexer::snapshot($ids);   // ДО изменения: характеристики и бренд товаров
  *   …изменения товаров…
@@ -27,11 +27,28 @@ use App\Core\Cache;
  *
  * Перестройки целых категорий (rebuildAll, много товаров сразу, «Завершение» импорта) идут по одной:
  * файловая блокировка storage/cache/reindex.lock (CatalogIndexer::exclusive).
+ *
+ * Витрина не видит перестройку на середине. Полная перестройка и перестройка категории — одна транзакция
+ * (atomic, READ COMMITTED): строки не стираются заранее, а сверяются — INSERT … ON DUPLICATE KEY UPDATE текущих
+ * и DELETE выбывших; неизменные строки не переписываются (4,4 с против 7,5 с у прежних TRUNCATE + INSERT).
+ * Витрина (обычные SELECT) до COMMIT читает прежний полный индекс, после — сразу новый (MVCC).
+ * Теневые таблицы + RENAME TABLE отвергнуты: не быстрее (7,8 с), нужны права CREATE/DROP, а RENAME ждёт конца
+ * всех запросов к таблице и на это время задерживает новые запросы витрины.
+ *
+ * Правки не теряются — блокировка записи индекса (locked: GET_LOCK на соединении MySQL; порядок взятия
+ * «файловая блокировка → блокировка индекса → строки InnoDB»). Её держат перестройка (всю транзакцию), точечное
+ * обновление (чтение состояния + запись) и импорт (всю транзакцию пачки). Сохранение товара во время
+ * bin/reindex.php пишет товар сразу, а индекс — после COMMIT перестройки, считая разницу уже от нового индекса.
+ * Чужие незавершённые записи в индекс (транзакция, отпустившая блокировку до COMMIT) перестройка пережидает
+ * блокирующим чтением строк индекса в начале своей транзакции (barrier). Пересчёт фильтров категории целиком
+ * снимает подписи товаров, чья переиндексация ещё впереди (dropStaleSigs), — иначе их учли бы дважды.
  */
 final class CatalogIndexer
 {
     /** Больше стольких товаров за раз — затронутые категории перестраиваются целиком (прежний путь) */
     public const INCREMENTAL_MAX = 2000;
+    /** Сколько точечная запись внутри чужой транзакции ждёт блокировку индекса (меньше innodb_lock_wait_timeout = 50 с) */
+    private const TX_WAIT = 20.0;
 
     private static ?bool $sigTable = null;
 
@@ -40,32 +57,186 @@ final class CatalogIndexer
     /** Сколько секунд последний exclusive() ждал чужую перестройку (для вывода bin/reindex.php) */
     public static float $waited = 0.0;
 
+    /** Глубина входа в locked(): блокировка записи индекса уже у этого соединения */
+    private static int $held = 0;
+    private static ?string $mutex = null;
+    /** Можно ли перестройке READ COMMITTED (null — ещё не проверяли) */
+    private static ?bool $rc = null;
+    /** Идёт своя транзакция atomic() в READ COMMITTED */
+    private static bool $rcTx = false;
+
+    /** Колонки строки индекса, которые перестройка сверяет с товаром (ключ — category_id, product_id) */
+    private const UPSERT = ' ON DUPLICATE KEY UPDATE in_stock = VALUES(in_stock), created_at = VALUES(created_at),
+        price = VALUES(price), sort = VALUES(sort), name = VALUES(name)';
+
     /**
-     * Полная перестройка индекса всех категорий. Идёт другая перестройка (bin/reindex.php, кнопка в «Состоянии системы»,
-     * импорт) — ждёт её до $wait секунд; не дождалась — false, ничего не сделано.
+     * Полная перестройка индекса всех категорий — одной транзакцией (см. atomic): витрина до конца видит прежний индекс.
+     * Идёт другая перестройка (bin/reindex.php, кнопка в «Состоянии системы», импорт) — ждёт её до $wait секунд;
+     * не дождалась — false, ничего не сделано.
      */
     public static function rebuildAll(?callable $log = null, float $wait = 600.0): bool
     {
         return self::exclusive(static function () use ($log): void {
-            $db = App::db();
-            $cats = $db->all('SELECT id, parent_id, lft, rgt, type, conditions, include_sub, status FROM categories ORDER BY lft');
-            $db->query('TRUNCATE catalog_index');
-            $db->query('TRUNCATE category_facets');
-            foreach ($cats as $c) {
-                self::retry(static fn() => self::rebuildCategory($c, $cats));   // и скрытые (status=0): они открываются по прямому адресу
-                if ($log) $log('категория ' . $c['id']);
-            }
-            self::retry(static fn() => self::rebuildSignatures());              // после фильтров: подпись = то, что в них учтено
-            self::retry(static fn() => self::updateCounters());
+            self::atomic(static function () use ($log): void {
+                $db = App::db();
+                self::barrier();
+                $cats = $db->all('SELECT id, parent_id, lft, rgt, type, conditions, include_sub, status FROM categories ORDER BY lft');
+                // строки удалённых категорий (прежний TRUNCATE убирал их вместе со всеми)
+                if ($cats) {
+                    [$ph, $vals] = $db->in(array_map(static fn($c) => (int) $c['id'], $cats));
+                    $db->query("DELETE FROM catalog_index WHERE category_id NOT IN ($ph)", $vals);
+                    $db->query("DELETE FROM category_facets WHERE category_id NOT IN ($ph)", $vals);
+                } else {
+                    $db->query('DELETE FROM catalog_index');
+                    $db->query('DELETE FROM category_facets');
+                }
+                foreach ($cats as $c) {
+                    self::fillCategory($c, $cats);                             // и скрытые (status=0): они открываются по прямому адресу
+                    if ($log) $log('категория ' . $c['id']);
+                }
+                self::fillSignatures(null);                                  // после фильтров: подпись = то, что в них учтено
+                self::updateCounters();
+            });
             Cache::flush();
         }, $wait);
     }
 
     /**
-     * Повтор шага перестройки, если InnoDB выбрал его жертвой взаимной блокировки (1213) или не дождался блокировки
-     * строк (1205): так бывает, когда в это же время импорт или админка пишут те же товары. Шаги повторяемы
-     * (удалить и вставить заново), а оборванная на середине полная перестройка оставила бы каталог неполным.
-     * В открытой транзакции не повторяем — её откатил сервер целиком, решает вызывающий.
+     * $fn одной транзакцией под блокировкой записи индекса (locked). READ COMMITTED: INSERT … SELECT читает товары
+     * без блокировок строк (при REPEATABLE READ сохранение товара и оформление заказа ждали бы конца перестройки).
+     * Внутри уже открытой транзакции (импорт) — в ней же. Взаимная блокировка или ожидание блокировки строк
+     * (1213, 1205) — транзакцию откатил сервер, повтор целиком; блокировка индекса на паузе отпускается, чтобы
+     * точечная запись, которую ждали, закончилась.
+     */
+    private static function atomic(callable $fn, int $tries = 3): void
+    {
+        $db = App::db();
+        if ($db->pdo()->inTransaction()) {
+            self::locked($fn);
+            return;
+        }
+        for ($i = 1; ; $i++) {
+            try {
+                self::locked(static function () use ($db, $fn): void {
+                    self::$rcTx = self::readCommitted();
+                    try {
+                        $db->transaction(static function () use ($fn): void { $fn(); });
+                    } finally {
+                        self::$rcTx = false;
+                    }
+                });
+                return;
+            } catch (\PDOException $e) {
+                if ($i >= $tries || !self::lockError($e)) throw $e;
+                \App\Core\Log::info('Индекс каталога: повтор транзакции после ' . (self::code($e) === 1213 ? 'взаимной блокировки' : 'ожидания блокировки') . ' (попытка ' . ($i + 1) . ')');
+                usleep(200000 * $i);
+            }
+        }
+    }
+
+    /**
+     * Выполнить $fn под блокировкой записи индекса: GET_LOCK на соединении MySQL (имя — с базой: сервер на хостинге
+     * общий). Повторный вход — без ожидания. Занята дольше $wait секунд: $force — выполнить и без неё (с записью
+     * в журнал; ночная перестройка выровняет), иначе false и $fn не выполнялась. GET_LOCK недоступен — без блокировки.
+     * Порядок: сначала эта блокировка, потом транзакция — внутри транзакции её ждать нельзя (держали бы строки,
+     * нужные перестройке).
+     */
+    public static function locked(callable $fn, float $wait = 120.0, bool $force = true): bool
+    {
+        if (self::$held > 0) {
+            self::$held++;
+            try { $fn(); } finally { self::$held--; }
+            return true;
+        }
+        $db = App::db();
+        try {
+            $got = $db->value('SELECT GET_LOCK(?, ?)', [self::mutexName(), max(0, (int) ceil($wait))]);
+        } catch (\PDOException) {
+            $got = null;
+        }
+        if ($got !== null && (int) $got !== 1) {
+            if (!$force) return false;
+            \App\Core\Log::info('Индекс каталога: блокировка записи занята дольше ' . $wait . ' с — запись без неё');
+        }
+        self::$held++;
+        try {
+            $fn();
+        } finally {
+            self::$held--;
+            if ((int) $got === 1) {
+                try { $db->value('SELECT RELEASE_LOCK(?)', [self::mutexName()]); } catch (\PDOException) {}
+            }
+        }
+        return true;
+    }
+
+    private static function mutexName(): string
+    {
+        return self::$mutex ??= 'tomobuv_ci_' . substr(md5((string) App::db()->value('SELECT DATABASE()')), 0, 16);
+    }
+
+    /** Следующая транзакция — READ COMMITTED, если позволяет binlog (STATEMENT запрещает INSERT … SELECT при нём, 1665) */
+    private static function readCommitted(): bool
+    {
+        $db = App::db();
+        if (self::$rc === null) {
+            try {
+                $r = $db->row('SELECT @@log_bin AS b, @@binlog_format AS f');
+                self::$rc = !($r && (int) $r['b'] === 1 && strtoupper((string) $r['f']) === 'STATEMENT');
+            } catch (\PDOException) {
+                self::$rc = false;
+            }
+        }
+        if (self::$rc) $db->query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        return self::$rc;
+    }
+
+    /**
+     * Суффикс проверочного SELECT рядом с INSERT … SELECT. В своей транзакции READ COMMITTED оба читают свежие данные
+     * без блокировок — ''. Иначе (REPEATABLE READ: транзакция импорта, точечная запись, binlog STATEMENT) INSERT … SELECT
+     * читает последние данные с блокировкой, а обычный SELECT — старый снимок транзакции; чтобы они видели одно и то же,
+     * SELECT тоже блокирующий.
+     */
+    private static function readLock(): string
+    {
+        return self::$rcTx ? '' : ' LOCK IN SHARE MODE';
+    }
+
+    /**
+     * Дождаться чужих незавершённых записей в индекс, прежде чем читать товары: блокирующее чтение строк индекса
+     * (всех или одной категории) ждёт COMMIT транзакций, которые их меняли, и держит строки до конца своей.
+     * Иначе запрос перестройки, начатый до чужого COMMIT, записал бы поверх него прежнее состояние товара.
+     * ~0,3 с на весь индекс (243 тыс. строк), ~0,05 с на «Женскую обувь».
+     */
+    private static function barrier(?int $categoryId = null): void
+    {
+        $db = App::db();
+        if ($categoryId !== null) {
+            $db->value('SELECT COUNT(*) FROM catalog_index WHERE category_id = ? FOR UPDATE', [$categoryId]);
+            $db->value('SELECT COUNT(*) FROM category_facets WHERE category_id = ? FOR UPDATE', [$categoryId]);
+            return;
+        }
+        $db->value('SELECT COUNT(*) FROM catalog_index FOR UPDATE');
+        $db->value('SELECT COUNT(*) FROM category_facets FOR UPDATE');
+        if (self::hasSigTable()) $db->value('SELECT COUNT(*) FROM catalog_index_sig FOR UPDATE');
+    }
+
+    private static function code(\PDOException $e): int
+    {
+        return (int) ($e->errorInfo[1] ?? 0);
+    }
+
+    /** Взаимная блокировка (1213) или не дождались блокировки строк (1205) — шаг можно повторить */
+    public static function lockError(\Throwable $e): bool
+    {
+        return $e instanceof \PDOException && in_array(self::code($e), [1213, 1205], true);
+    }
+
+    /**
+     * Повтор точечной записи или пересчёта счётчиков, если InnoDB выбрал их жертвой взаимной блокировки (1213) или
+     * не дождался блокировки строк (1205): так бывает, когда в это же время импорт или админка пишут те же строки.
+     * Шаги повторяемы (считаются заново от текущего состояния). В открытой транзакции не повторяем — её откатил
+     * сервер целиком, решает вызывающий. Транзакции перестройки повторяет atomic().
      */
     private static function retry(callable $fn, int $tries = 5): void
     {
@@ -74,8 +245,8 @@ final class CatalogIndexer
                 $fn();
                 return;
             } catch (\PDOException $e) {
-                $code = (int) ($e->errorInfo[1] ?? 0);
-                if ($i >= $tries || ($code !== 1213 && $code !== 1205) || App::db()->pdo()->inTransaction()) throw $e;
+                $code = self::code($e);
+                if ($i >= $tries || !self::lockError($e) || App::db()->pdo()->inTransaction()) throw $e;
                 \App\Core\Log::info('Индекс каталога: повтор после ' . ($code === 1213 ? 'взаимной блокировки' : 'ожидания блокировки') . ' (попытка ' . ($i + 1) . ')');
                 usleep(100000 * $i);
             }
@@ -113,20 +284,41 @@ final class CatalogIndexer
         return true;
     }
 
-    /** Перестроить одну категорию */
+    /**
+     * Перестроить одну категорию — одной транзакцией (витрина видит прежний список до COMMIT, потом новый):
+     * «Завершение» импорта, AdminCatalog::reindexCategories после правки категории.
+     */
     public static function rebuildCategory(array $c, ?array $all = null): void
+    {
+        self::atomic(static function () use ($c, $all): void {
+            self::barrier((int) $c['id']);
+            self::fillCategory($c, $all);
+            self::dropStaleSigs((int) $c['id']);
+        });
+    }
+
+    /**
+     * Строки индекса и фильтры категории по текущим товарам (без своей транзакции). Строки не стираются заранее:
+     * INSERT … ON DUPLICATE KEY UPDATE обновляет изменившиеся (неизменные не переписываются), DELETE убирает
+     * выбывшие — результат тот же, что у «удалить всё и вставить», но короче и без пустого окна.
+     */
+    private static function fillCategory(array $c, ?array $all): void
     {
         $db = App::db();
         $id = (int) $c['id'];
-        $db->query('DELETE FROM catalog_index WHERE category_id = ?', [$id]);
-        $db->query('DELETE FROM category_facets WHERE category_id = ?', [$id]);
-
         if ((int) $c['type'] === 1) {
             [$where, $params] = self::conditionSql((string) $c['conditions']);
-            if ($where === '') return;
-            $db->query("INSERT IGNORE INTO catalog_index (category_id, product_id, in_stock, created_at, price, sort, name)
+            if ($where === '') {                                         // условия нет — категория пуста
+                $db->query('DELETE FROM catalog_index WHERE category_id = ?', [$id]);
+                $db->query('DELETE FROM category_facets WHERE category_id = ?', [$id]);
+                return;
+            }
+            $db->query("INSERT INTO catalog_index (category_id, product_id, in_stock, created_at, price, sort, name)
                 SELECT ?, p.id, p.in_stock, p.created_at, p.price, 0, LEFT(p.name, 64) FROM products p
-                WHERE p.status = 1 AND $where", array_merge([$id], $params));
+                WHERE p.status = 1 AND $where" . self::UPSERT, array_merge([$id], $params));
+            // выбывшие: товар скрыт, удалён или больше не подходит под условие
+            $gone = $db->col("SELECT ci.product_id FROM catalog_index ci LEFT JOIN products p ON p.id = ci.product_id AND p.status = 1 AND $where
+                WHERE ci.category_id = ? AND p.id IS NULL" . self::readLock(), array_merge($params, [$id]));
         } else {
             $ids = [$id];
             if ((int) $c['include_sub']) {
@@ -136,20 +328,63 @@ final class CatalogIndexer
                 }
             }
             [$ph, $vals] = $db->in($ids);
-            $db->query("INSERT IGNORE INTO catalog_index (category_id, product_id, in_stock, created_at, price, sort, name)
+            $db->query("INSERT INTO catalog_index (category_id, product_id, in_stock, created_at, price, sort, name)
                 SELECT ?, p.id, p.in_stock, p.created_at, p.price, MIN(cp.sort), LEFT(p.name, 64)
                 FROM category_products cp JOIN products p ON p.id = cp.product_id AND p.status = 1
-                WHERE cp.category_id IN ($ph) GROUP BY p.id", array_merge([$id], $vals));
+                WHERE cp.category_id IN ($ph) GROUP BY p.id" . self::UPSERT, array_merge([$id], $vals));
+            // выбывшие: товар скрыт, удалён или отвязан от категории и её подкатегорий
+            $gone = $db->col("SELECT ci.product_id FROM catalog_index ci
+                LEFT JOIN category_products cp ON cp.product_id = ci.product_id AND cp.category_id IN ($ph)
+                LEFT JOIN products p ON p.id = cp.product_id AND p.status = 1
+                WHERE ci.category_id = ? GROUP BY ci.product_id HAVING COUNT(p.id) = 0" . self::readLock(), array_merge($vals, [$id]));
         }
-        self::rebuildFacets($id);
+        // отдельным SELECT, а не DELETE … JOIN: тот читал бы products с блокировкой строк (S) до конца транзакции —
+        // сохранение товара ждало бы конца перестройки, а бывало и взаимной блокировкой
+        foreach (array_chunk($gone, 1000) as $part) {
+            [$gph, $gvals] = $db->in($part);
+            $db->query("DELETE FROM catalog_index WHERE category_id = ? AND product_id IN ($gph)", array_merge([$id], $gvals));
+        }
+        self::fillFacets($id);
     }
 
     /**
-     * Значения фильтров категории с количеством товаров. ON DUPLICATE KEY — если ту же категорию одновременно
-     * перестраивает другой процесс (сохранение категории в админке во время bin/reindex.php), вставка не падает
-     * на повторе ключа: остаётся счёт того, кто посчитал последним.
+     * После пересчёта фильтров категории целиком: товары категории, чья подпись не совпадает с текущими
+     * характеристиками, теряют подпись. Это товары, характеристики которых уже записаны, а точечная переиндексация
+     * ещё впереди (ждёт блокировку индекса): пересчёт уже учёл их новые значения, и products() по снимку вычел бы
+     * прежние и прибавил новые второй раз. Без подписи products() пересчитает фильтры их категорий целиком — точно.
+     * Обычно таких товаров нет — ничего не удаляется (~0,25 с на «Женскую обувь», 57 тыс. товаров).
+     */
+    private static function dropStaleSigs(int $categoryId): void
+    {
+        if (!self::hasSigTable()) return;
+        $db = App::db();
+        [$fph, $fvals] = $db->in(self::filterIds() ?: [0]);
+        $db->query('SET SESSION group_concat_max_len = 1048576');
+        $stale = $db->col("SELECT ci.product_id FROM catalog_index ci
+            LEFT JOIN product_features pf ON pf.product_id = ci.product_id AND pf.feature_id IN ($fph)
+            JOIN catalog_index_sig s ON s.product_id = ci.product_id
+            WHERE ci.category_id = ? GROUP BY ci.product_id, s.sig
+            HAVING s.sig <> UNHEX(MD5(COALESCE(GROUP_CONCAT(pf.feature_id, ':', pf.value_id ORDER BY pf.feature_id, pf.value_id SEPARATOR ','), '')))"
+            . self::readLock(), array_merge($fvals, [$categoryId]));
+        foreach (array_chunk($stale, 1000) as $part) {
+            [$ph, $vals] = $db->in($part);
+            $db->query("DELETE FROM catalog_index_sig WHERE product_id IN ($ph)", $vals);
+        }
+    }
+
+    /**
+     * Значения фильтров категории с количеством товаров — одной транзакцией (без пустого окна между DELETE и INSERT).
+     * ON DUPLICATE KEY — на случай записи без блокировки индекса (GET_LOCK недоступен): остаётся счёт посчитавшего последним.
      */
     public static function rebuildFacets(int $categoryId): void
+    {
+        self::atomic(static function () use ($categoryId): void {
+            self::fillFacets($categoryId);
+            self::dropStaleSigs($categoryId);
+        });
+    }
+
+    private static function fillFacets(int $categoryId): void
     {
         $db = App::db();
         $fids = self::filterIds();
@@ -183,7 +418,10 @@ final class CatalogIndexer
     /**
      * Точечное обновление после изменения (создания, удаления) товаров. $before — CatalogIndexer::snapshot()
      * до изменения; $flush = false — не сбрасывать кэш (импорт сбросит один раз в конце).
-     * Работает и внутри открытой транзакции (импорт пишет пачку и индекс одной транзакцией).
+     * Под блокировкой записи индекса: идёт перестройка — ждём её конца и считаем от нового индекса.
+     * Работает и внутри открытой транзакции (импорт пишет пачку и индекс одной транзакцией; блокировку индекса
+     * импорт берёт до транзакции — Importer). Внутри транзакции без неё: ждём до TX_WAIT секунд, не дождались —
+     * исключение «ожидание блокировки» (1205): транзакцию откатит и повторит вызывающий (шаг импорта).
      */
     public static function products(array $productIds, ?array $before = null, bool $flush = true): void
     {
@@ -192,25 +430,34 @@ final class CatalogIndexer
         if (count($ids) > self::INCREMENTAL_MAX) {
             self::rebuildAffected($ids);
         } elseif (App::db()->pdo()->inTransaction()) {
-            self::productsNow($ids, $before);                           // транзакцию импорта при сбое откатит и повторит шаг
+            if (!self::locked(static fn() => self::productsNow($ids, $before), self::TX_WAIT, false)) {
+                $e = new \PDOException('Индекс каталога: блокировка записи занята дольше ' . self::TX_WAIT . ' с (идёт перестройка)');
+                $e->errorInfo = ['HY000', 1205, $e->getMessage()];
+                throw $e;
+            }
         } else {
-            // сервер выбрал запись жертвой взаимной блокировки (идёт bin/reindex.php) — считаем заново и повторяем
-            self::retry(static fn() => self::productsNow($ids, $before));
+            // сервер выбрал запись жертвой взаимной блокировки — считаем заново и повторяем
+            self::retry(static fn() => self::locked(static fn() => self::productsNow($ids, $before)));
         }
         if ($flush) Cache::flush();
     }
 
-    /** Точечное обновление (см. products): чтение текущего состояния и запись одной транзакцией */
+    /**
+     * Точечное обновление (см. products): чтение текущего состояния и запись одной транзакцией. Внутри чужой
+     * транзакции индекс и подписи читаются блокирующим чтением: снимок REPEATABLE READ мог быть взят до COMMIT
+     * перестройки, а разница «было − стало» должна считаться от того, что сейчас в таблицах.
+     */
     private static function productsNow(array $ids, ?array $before): void
     {
         $db = App::db();
         [$ph, $vals] = $db->in($ids);
         $fids = self::filterIds();
         $cats = $db->all('SELECT id, lft, rgt, type, conditions, include_sub FROM categories');
+        $lock = $db->pdo()->inTransaction() ? ' LOCK IN SHARE MODE' : '';
 
         // 1. было: категории, где товары сейчас в индексе (их фильтры уже учтены в category_facets)
         $old = [];
-        foreach ($db->all("SELECT category_id, product_id FROM catalog_index WHERE product_id IN ($ph)", $vals) as $r) {
+        foreach ($db->all("SELECT category_id, product_id FROM catalog_index WHERE product_id IN ($ph)" . $lock, $vals) as $r) {
             $old[(int) $r['product_id']][] = (int) $r['category_id'];
         }
 
@@ -224,7 +471,7 @@ final class CatalogIndexer
         $newPairs = self::pairs($ids, $fids);
 
         // 3. что было учтено в фильтрах: снимок (или текущие значения), если совпал с подписью индексации
-        $sigs = self::signatures($ids);
+        $sigs = self::signatures($ids, $lock);
         $inSnap = $before !== null ? array_flip(array_map('intval', (array) ($before['ids'] ?? []))) : [];
         $oldPairs = []; $recount = [];
         foreach ($old as $pid => $cids) {
@@ -258,7 +505,10 @@ final class CatalogIndexer
                 foreach ($newPairs[$pid] ?? [] as [$f, $v]) { $k = $cid . ':' . $f . ':' . $v; $delta[$k] = ($delta[$k] ?? 0) + 1; }
             }
             self::applyFacetDelta($delta);
-            foreach (array_keys($recount) as $cid) self::rebuildFacets((int) $cid);
+            foreach (array_keys($recount) as $cid) {
+                self::fillFacets((int) $cid);
+                self::dropStaleSigs((int) $cid);                       // чужие товары, ждущие своей переиндексации
+            }
 
             // подпись: что теперь учтено в фильтрах
             if ($sigs !== null) {
@@ -293,8 +543,18 @@ final class CatalogIndexer
         self::countBrands(null);
     }
 
-    /** Подписи всех товаров (или перечисленных) по текущим характеристикам — после перестройки их категорий */
+    /**
+     * Подписи всех товаров (или перечисленных) по текущим характеристикам — после перестройки их категорий.
+     * Одной транзакцией, без TRUNCATE (он бы закрыл транзакцию импорта и оставил таблицу пустой до вставки).
+     */
     public static function rebuildSignatures(?array $productIds = null): void
+    {
+        if (!self::hasSigTable()) return;
+        self::atomic(static fn() => self::fillSignatures($productIds));
+    }
+
+    /** Подписи (см. rebuildSignatures) без своей транзакции: изменившиеся — ON DUPLICATE KEY, удалённых товаров — DELETE */
+    private static function fillSignatures(?array $productIds): void
     {
         if (!self::hasSigTable()) return;
         $db = App::db();
@@ -304,16 +564,17 @@ final class CatalogIndexer
         $sql = "INSERT INTO catalog_index_sig (product_id, sig)
             SELECT p.id, UNHEX(MD5(COALESCE(GROUP_CONCAT(pf.feature_id, ':', pf.value_id ORDER BY pf.feature_id, pf.value_id SEPARATOR ','), '')))
             FROM products p LEFT JOIN product_features pf ON pf.product_id = p.id AND pf.feature_id IN ($fph)";
-        $dup = ' ON DUPLICATE KEY UPDATE sig = VALUES(sig)';     // одновременная перестройка — без ошибки повтора ключа
+        $dup = ' ON DUPLICATE KEY UPDATE sig = VALUES(sig)';
+        $gone = 'DELETE s FROM catalog_index_sig s LEFT JOIN products p ON p.id = s.product_id WHERE p.id IS NULL';
         if ($productIds === null) {
-            $db->query('TRUNCATE catalog_index_sig');
             $db->query($sql . ' GROUP BY p.id' . $dup, $fvals);
+            $db->query($gone);
             return;
         }
         foreach (array_chunk(self::ids($productIds), 1000) as $part) {
             [$ph, $vals] = $db->in($part);
-            $db->query("DELETE FROM catalog_index_sig WHERE product_id IN ($ph)", $vals);
             $db->query($sql . " WHERE p.id IN ($ph) GROUP BY p.id" . $dup, array_merge($fvals, $vals));
+            $db->query($gone . " AND s.product_id IN ($ph)", $vals);
         }
     }
 
@@ -350,6 +611,18 @@ final class CatalogIndexer
         return [implode(' AND ', $where), $params];
     }
 
+    /** Есть ли динамическая категория с условием по полю $field (rating, price, brand.value_id…) — разбор как в conditionSql */
+    public static function conditionUses(string $field): bool
+    {
+        $like = '%' . addcslashes($field, '%_\\') . '%';
+        foreach (App::db()->col('SELECT conditions FROM categories WHERE type = 1 AND conditions LIKE ?', [$like]) as $cond) {
+            foreach (explode('&', (string) $cond) as $part) {
+                if (preg_match('/^([a-z_0-9.]+)\s*(>=|<=|!=|=|>|<)\s*(.+)$/i', trim($part), $m) && $m[1] === $field) return true;
+            }
+        }
+        return false;
+    }
+
     // ============================================================ служебное
 
     private static function ids(array $ids): array
@@ -383,13 +656,13 @@ final class CatalogIndexer
         return md5(implode(',', array_map(static fn($p) => (int) $p[0] . ':' . (int) $p[1], $pairs)));
     }
 
-    /** Подписи товаров [pid => md5]; null — таблицы нет (миграция не применена) */
-    private static function signatures(array $ids): ?array
+    /** Подписи товаров [pid => md5]; null — таблицы нет (миграция не применена). $lock — ' LOCK IN SHARE MODE' или '' */
+    private static function signatures(array $ids, string $lock = ''): ?array
     {
         if (!self::hasSigTable()) return null;
         [$ph, $vals] = App::db()->in($ids);
         $out = [];
-        foreach (App::db()->pairs("SELECT product_id, LOWER(HEX(sig)) FROM catalog_index_sig WHERE product_id IN ($ph)", $vals) as $pid => $s) $out[(int) $pid] = (string) $s;
+        foreach (App::db()->pairs("SELECT product_id, LOWER(HEX(sig)) FROM catalog_index_sig WHERE product_id IN ($ph)" . $lock, $vals) as $pid => $s) $out[(int) $pid] = (string) $s;
         return $out;
     }
 
@@ -526,8 +799,8 @@ final class CatalogIndexer
     /**
      * Прежний путь для большого числа товаров: перестроить целиком категории, где товары есть или были
      * (прямые, их предки, где товары уже в индексе, и все динамические). Под блокировкой перестройки;
-     * внутри открытой транзакции — без неё: транзакция держит таблицы индекса, а TRUNCATE в rebuildAll
-     * ждал бы её конца — оба ждали бы друг друга. Не дождались блокировки — перестраиваем всё равно.
+     * внутри открытой транзакции — без неё: транзакция держит строки индекса, а rebuildAll под файловой
+     * блокировкой ждал бы их (barrier) — оба ждали бы друг друга. Не дождались блокировки — перестраиваем всё равно.
      */
     private static function rebuildAffected(array $ids): void
     {
@@ -556,9 +829,9 @@ final class CatalogIndexer
         }
         foreach ($all as $a) if ((int) $a['type'] === 1) $affected[(int) $a['id']] = 1;
         foreach (array_keys($affected) as $cid) {
-            if (isset($byId[$cid])) self::retry(static fn() => self::rebuildCategory($byId[$cid], $all));
+            if (isset($byId[$cid])) self::rebuildCategory($byId[$cid], $all);        // сама повторяет при взаимной блокировке
         }
-        self::retry(static fn() => self::rebuildSignatures($ids));
+        self::rebuildSignatures($ids);
         self::retry(static fn() => self::updateCounters());
     }
 }

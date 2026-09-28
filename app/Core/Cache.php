@@ -32,19 +32,42 @@ final class Cache
 
     public static function version(): int
     {
-        if (self::$ver === null) {
-            $f = STORAGE . '/cache/version';
-            self::$ver = is_file($f) ? (int) file_get_contents($f) : 1;
-        }
-        return self::$ver;
+        return self::$ver ??= self::readVersion();
     }
 
-    /** Сбросить весь кэш (данные + страницы): просто увеличиваем версию */
+    /**
+     * Номер версии из файла. Файл пишется атомарно (flush), но чтение всё равно может не удаться (Windows держит файл
+     * во время замены) — тогда несколько повторов; не прочитали — 1 (кэш просто не найдётся, версия не откатится: flush
+     * берёт не меньше текущего времени).
+     */
+    private static function readVersion(): int
+    {
+        $f = STORAGE . '/cache/version';
+        for ($i = 0; $i < 5; $i++) {
+            if (!is_file($f)) return 1;
+            $v = (int) @file_get_contents($f);
+            if ($v > 0) return $v;
+            usleep(3000);
+        }
+        return 1;
+    }
+
+    /**
+     * Сбросить весь кэш (данные + страницы): увеличиваем версию. Версия только растёт — не меньше текущего времени
+     * и больше прочитанной заново из файла, поэтому неудачное чтение в одном запросе не вернёт старые записи кэша.
+     */
     public static function flush(): void
     {
-        $v = self::version() + 1;
+        $v = max(self::readVersion(), self::$ver ?? 0) + 1;
+        $v = max($v, time());
         @mkdir(STORAGE . '/cache', 0775, true);
-        file_put_contents(STORAGE . '/cache/version', (string) $v, LOCK_EX);
+        $f = STORAGE . '/cache/version';
+        $tmp = $f . '.' . getmypid() . '.tmp';
+        // атомарная замена: читатели видят либо прежний номер, либо новый, но не пустой файл
+        if (file_put_contents($tmp, (string) $v) === false || !@rename($tmp, $f)) {
+            @unlink($tmp);
+            file_put_contents($f, (string) $v, LOCK_EX);   // rename не удался (Windows: файл открыт читателем)
+        }
         self::$ver = $v;
         self::$mem = [];
     }

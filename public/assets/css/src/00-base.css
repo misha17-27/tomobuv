@@ -1,5 +1,5 @@
 :root{
-  --blue:#0a74b2; --blue-d:#075e90; --blue-l:#e8f4fb; --orange:#ff7a1a; --orange-d:#e5630a;
+  --blue:#0a74b2; --blue-d:#075e90; --blue-l:#e8f4fb; --orange:#c05500; --orange-d:#a34700;
   --ink:#14212b; --muted:#5d6b76; --line:#e3e8ec; --bg:#f5f7f9; --white:#fff; --green:#137a45;
   /* blue/green чуть темнее прежних #0b7fc1/#1a9d5b: контраст текста ≥ 4.5 на белом и на --bg (WCAG AA, Lighthouse) */
   --r:14px; --shadow:0 6px 24px rgba(20,33,43,.08);

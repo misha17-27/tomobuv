@@ -386,7 +386,7 @@ final class ProductsController extends BaseController
         }
 
         if (Request::isPost()) {
-            [$data, $links, $state, $errors] = $this->validate($id, $features);
+            [$data, $links, $state, $errors] = $this->validate($id, $features, $p);
             if (!$errors) {
                 $newId = $this->save($id, $p, $data, $links, $state, $features);
                 if (!$id && $newId) {
@@ -462,8 +462,8 @@ final class ProductsController extends BaseController
     /** Снимок товара до сохранения — CatalogIndexer::snapshot (для точного пересчёта фильтров и счётчиков брендов) */
     private ?array $snap = null;
 
-    /** Разбор и проверка формы: [данные products, категории, характеристики, ошибки] */
-    private function validate(int $id, array $features): array
+    /** Разбор и проверка формы: [данные products, категории, характеристики, ошибки]; $old — товар из базы (описания без правок) */
+    private function validate(int $id, array $features, array $old): array
     {
         $db = App::db();
         $errors = [];
@@ -485,8 +485,9 @@ final class ProductsController extends BaseController
             'meta_description' => $str('meta_description', 5000),
             'meta_keywords'  => $str('meta_keywords', 5000),
             'summary'        => mb_substr(Request::post('summary'), 0, 60000),
-            // описания — HTML: у менеджера без скриптов (HtmlSanitizer::staff); краткое описание — простой текст (на сайте через e())
-            'description'    => HtmlSanitizer::staff(mb_substr(is_scalar($_POST['description'] ?? null) ? (string) $_POST['description'] : '', 0, 1000000)) ?? '',
+            // описания — HTML: у менеджера без скриптов (HtmlSanitizer::staff), без правок — как в базе (AdminCatalog::staffHtml);
+            // RU и UA читаются одинаково (postHtml: LF, без пробелов по краям); краткое описание — простой текст (на сайте через e())
+            'description'    => AdminCatalog::staffHtml(AdminCatalog::postHtml('description'), $old['description'] ?? null) ?? '',
             // украинская версия: пусто = на сайте русский текст
             'name_uk'        => AdminCatalog::postStr('name_uk', 255),
             'seo_name_uk'    => AdminCatalog::postStr('seo_name_uk'),
@@ -495,7 +496,7 @@ final class ProductsController extends BaseController
             'meta_description_uk' => AdminCatalog::postStr('meta_description_uk', 5000),
             'meta_keywords_uk' => AdminCatalog::postStr('meta_keywords_uk', 5000),
             'summary_uk'     => AdminCatalog::postStr('summary_uk', 60000),
-            'description_uk' => HtmlSanitizer::staff(AdminCatalog::postHtml('description_uk')),
+            'description_uk' => AdminCatalog::staffHtml(AdminCatalog::postHtml('description_uk'), $old['description_uk'] ?? null),
         ];
         $d['min_qty'] = Request::post('min_qty') === '' ? $d['box_qty'] : max(1, min(65535, Request::postInt('min_qty', 1)));
         if ($d['stock'] === 0) $d['in_stock'] = 0;                  // остаток 0 — нет в наличии

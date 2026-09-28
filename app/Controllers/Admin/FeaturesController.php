@@ -106,7 +106,7 @@ final class FeaturesController extends BaseController
             'statuses' => self::STATUSES,
             'types'    => self::TYPES,
             'rows'     => [], 'counts' => [], 'pg' => null, 'dups' => null, 'vq' => '', 'vsort' => 'sort', 'unused' => false, 'nouk' => false,
-            'dupsTooMany' => false, 'usedBy' => null,
+            'dupsTooMany' => false, 'usedBy' => null, 'ukMore' => null,
         ];
         if ($id) $data = array_merge($data, $this->valuesPage($id, $f));
         return $this->render('admin/features/form', $data);
@@ -159,8 +159,17 @@ final class FeaturesController extends BaseController
         $all = ($vq === '' && !$unused && !$nouk) ? $total : (int) $db->value('SELECT COUNT(*) FROM feature_values WHERE feature_id = ?', [$fid]);
         $dupsTooMany = $all > self::DUPS_MAX;
         $dups = Request::get('dups') === '1' && !$dupsTooMany ? $this->duplicates($fid) : null;
+        // счётчик «UA: заполнено N из M» — по всем значениям характеристики, а не по открытой странице списка: сервер отдаёт,
+        // сколько полей UA не показано и сколько из них заполнено, JS прибавляет поля страницы (с правками на лету).
+        // У «Даты съёмки» (190 тыс. значений) подсчёт ~0,1 с — в кэше на 5 минут, как количество (версия меняется в done())
+        $ukSql = "SELECT COUNT(*) FROM feature_values WHERE feature_id = ? AND value_uk IS NOT NULL AND TRIM(value_uk) <> ''";
+        $ukFilled = $all > self::DUPS_MAX
+            ? (int) Cache::remember('admin.fvuk.' . $fid . '.' . Cache::get('admin.fvver.' . $fid, 0), 300, static fn() => (int) $db->value($ukSql, [$fid]))
+            : (int) $db->value($ukSql, [$fid]);
+        $ukPage = count(array_filter($rows, static fn($r) => trim((string) $r['value_uk']) !== ''));
+        $ukMore = [max(0, $all - count($rows)), max(0, $ukFilled - $ukPage)];
         return ['rows' => $rows, 'counts' => $counts, 'pg' => $pg, 'vq' => $vq, 'vsort' => $vsort, 'unused' => $unused, 'nouk' => $nouk, 'dups' => $dups,
-            'vtotal' => $total, 'dupsTooMany' => $dupsTooMany, 'usedBy' => $this->usage($f)];
+            'vtotal' => $total, 'dupsTooMany' => $dupsTooMany, 'usedBy' => $this->usage($f), 'ukMore' => $ukMore];
     }
 
     /** Где используется характеристика (для удаления): товаров, условий категорий, фильтров категорий */

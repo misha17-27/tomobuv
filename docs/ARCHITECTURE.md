@@ -41,6 +41,9 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
    После изменения товаров: `$s = CatalogIndexer::snapshot($ids)` до изменения и `CatalogIndexer::products($ids, $s)` после
    (1–10 товаров — ~20 мс; без снимка тоже верно, ~0,15 с), после массового импорта — `CatalogIndexer::rebuildAll()`
    (полные перестройки — по одной за раз: `CatalogIndexer::exclusive`, блокировка `storage/cache/reindex.lock`).
+   Перестройка всего индекса и категории — одна транзакция: витрина до COMMIT видит прежний полный индекс. Всё, что пишет
+   в индекс, — под блокировкой записи индекса `CatalogIndexer::locked()` (GET_LOCK), взятой **до** своей транзакции
+   (так делает импорт); иначе правка во время перестройки может быть посчитана дважды или потеряна.
 3. **Фильтры**: `product_features (feature_id, value_id, product_id)`, заранее посчитанные `category_facets`.
 4. **Файловый кэш данных** (`Core/Cache`) для справочников — категории, бренды, настройки, меню.
 5. **Сессия только при необходимости** (`Session::start()` вызывается входом, оформлением, админкой).
@@ -61,7 +64,8 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
   через проверку `information_schema` (как в `database/migrations/admin-import.sql`); `bin/install.php` повторяет
   миграцию, зависящую от более поздней по алфавиту.
 - **Любой вывод в шаблонах — через `e()`**. HTML из базы (описания, страницы) выводится как есть — его пишет админ.
-  HTML-поле формы админки сохраняется через `HtmlSanitizer::staff()` (или `PagesController::html()`): администратору — как есть,
+  HTML-поле формы админки сохраняется через `AdminCatalog::staffHtml($html, $изБазы)` (или `PagesController::html($k, $old)`): поле без правок —
+  как в базе, изменённое — `HtmlSanitizer::staff()`: администратору — как есть,
   менеджеру — без скриптов, on*-атрибутов, javascript:-ссылок и чужих iframe; описания из импорта — `HtmlSanitizer::supplier()`,
   из файла своей выгрузки (колонки ID и updated_at, `Importer::ownExport`) — `HtmlSanitizer::clean()`, как у менеджера.
 - Формы витрины: CSRF «double submit» — `csrf_field()` в форме или заголовок `X-CSRF-Token` (JS: `UI.post()`),

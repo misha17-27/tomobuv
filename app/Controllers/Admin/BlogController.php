@@ -68,15 +68,15 @@ final class BlogController extends BaseController
             $data = [
                 'title'            => mb_substr(Request::post('title'), 0, 255),
                 'url'              => trim(Request::post('url'), " /\t"),
-                'text_before_cut'  => PagesController::html('text_before_cut'),
-                'text'             => PagesController::html('text'),
+                'text_before_cut'  => PagesController::html('text_before_cut', $post),   // без правок — как в базе, без очистки
+                'text'             => PagesController::html('text', $post),
                 'meta_title'       => mb_substr(Request::post('meta_title'), 0, 500),
                 'meta_description' => Request::post('meta_description'),
                 'meta_keywords'    => Request::post('meta_keywords'),
                 'image'            => Request::post('image'),
                 'status'           => array_key_exists(Request::post('status'), self::STATUSES) ? Request::post('status') : 'draft',
                 'published_at'     => self::parseDate(Request::post('published_at')),
-            ] + PagesController::ukValues(self::UK_FIELDS, ['text_before_cut_uk', 'text_uk']);
+            ] + PagesController::ukValues(self::UK_FIELDS, ['text_before_cut_uk', 'text_uk'], $post);
             $data = AdminCatalog::keepUnchanged($data, $post);   // без правок — байт в байт (CRLF в текстах из Webasyst)
             if ($data['title'] === '') $errors['title'] = 'Укажите заголовок статьи';
             if ($data['url'] === '' && $data['title'] !== '') $data['url'] = Str::slug($data['title'], 120);
@@ -111,7 +111,7 @@ final class BlogController extends BaseController
                     $msg .= ' ' . RedirectsController::put('/blog/' . $post['url'] . '/', '/blog/' . $row['url'] . '/', 301);
                 }
                 Cache::flush();
-                $this->flash($msg . HtmlSanitizer::notice());   // HTML-поля очищает PagesController::html()
+                $this->flash($msg . HtmlSanitizer::notice());   // HTML-поля очищает PagesController::html() (только изменённые)
                 return Response::redirect('/admin/blog/' . $postId . '/' . ($lang === 'uk' ? '?lang=uk' : ''));
             }
             $post = $data + $post;

@@ -108,17 +108,19 @@ final class BrandsController extends BaseController
                 'meta_keywords'    => AdminCatalog::postStr('meta_keywords', 5000),
                 'meta_description' => AdminCatalog::postStr('meta_description', 5000),
                 'summary'          => AdminCatalog::postStr('summary'),
-                // HTML: у менеджера — без скриптов и опасных атрибутов (HtmlSanitizer::staff); summary — простой текст (на сайте через e())
-                'description'      => HtmlSanitizer::staff(AdminCatalog::postHtml('description')),
-                'seo_description'  => HtmlSanitizer::staff(AdminCatalog::postHtml('seo_description')),
+                // HTML: у менеджера — без скриптов и опасных атрибутов (HtmlSanitizer::staff), поле без правок — как в базе
+                // (AdminCatalog::staffHtml); summary — простой текст (на сайте через e())
+                'description'      => AdminCatalog::staffHtml(AdminCatalog::postHtml('description'), $b['description'] ?? null),
+                'seo_description'  => AdminCatalog::staffHtml(AdminCatalog::postHtml('seo_description'), $b['seo_description'] ?? null),
                 'hidden'           => Request::post('hidden') === '1' ? 1 : 0,
                 'sort'             => max(-100000, min(100000, Request::postInt('sort'))),
             ];
             foreach (self::UK_FIELDS as $k) {
                 $d[$k . '_uk'] = in_array($k, ['description', 'seo_description'], true)
-                    ? HtmlSanitizer::staff(AdminCatalog::postHtml($k . '_uk'))
+                    ? AdminCatalog::staffHtml(AdminCatalog::postHtml($k . '_uk'), $b[$k . '_uk'] ?? null)
                     : AdminCatalog::postStr($k . '_uk', in_array($k, ['meta_keywords', 'meta_description'], true) ? 5000 : 500);
             }
+            $d = AdminCatalog::keepUnchanged($d, $b);   // без правок — байт в байт (перевод строки в конце meta_description из Webasyst)
             if ($d['name'] === '') $errors['name'] = 'Укажите название бренда.';
             elseif ($brandF && ($other = (int) $db->value('SELECT id FROM feature_values WHERE feature_id = ? AND value = ? AND id <> ?', [$brandF, $d['name'], $id]))) {
                 $errors['name'] = 'Бренд «' . $d['name'] . '» уже есть (№' . $other . '). Чтобы объединить дубли, используйте «Характеристики → Бренд → Найти похожие».';

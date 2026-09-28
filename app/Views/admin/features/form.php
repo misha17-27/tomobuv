@@ -4,6 +4,7 @@
  * @var array $f @var array $errors @var array $statuses @var array $types @var array $rows @var array $counts
  * @var ?App\Core\Paginator $pg @var ?array $dups @var string $vq @var string $vsort @var bool $unused @var bool $nouk
  * @var bool $dupsTooMany @var ?array $usedBy
+ * @var ?array $ukMore [полей UA значений не на этой странице, из них заполнено] — для счётчика «UA: заполнено N из M» по всем значениям
  */
 use App\Controllers\Admin\BaseController;
 use App\Services\AdminCatalog;
@@ -16,7 +17,7 @@ $qs = http_build_query(array_filter(['vq' => $vq, 'vsort' => $vsort !== 'sort' ?
 ?>
 <?php if ($errors): ?><div class="flash bad">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
 
-<div class="lang-scope" data-lang="ru">
+<div class="lang-scope" data-lang="ru"<?= !empty($ukMore) ? ' data-uk-more="' . (int) $ukMore[0] . ' ' . (int) $ukMore[1] . '"' : '' ?>>
 <?= $view->partial('admin/partials/lang-bar', ['note' => 'Названия характеристики и её значений на украинской версии сайта (<code>/ua/</code>). Пустое поле UA — показывается русское название.']) ?>
 <form method="post" class="card ed-form" action="<?= $id ? '/admin/features/' . $id . '/' : '/admin/features/new/' ?>">
   <?= BaseController::tokenField() ?>

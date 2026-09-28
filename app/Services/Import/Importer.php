@@ -121,6 +121,7 @@ final class Importer
     private const IMG_PER_PRODUCT = 10;
     private const FULL_REINDEX_FROM = 1500;     // больше изменённых товаров — перестраиваются все категории
     private const REINDEX_BUDGET = 8.0;         // секунд на перестройку категорий за один шаг
+    private const LOCK_RETRIES = 3;             // повторов шага после взаимной блокировки InnoDB (1213) или ожидания блокировки (1205)
 
     /** Синонимы заголовков для автосопоставления (сравниваются без регистра, пробелов и знаков) */
     private const SYNONYMS = [
@@ -1677,6 +1678,9 @@ final class Importer
     /**
      * Один шаг задания (вызывается из админки по AJAX и из bin/import.php).
      * Параллельный запуск одного задания исключён блокировкой GET_LOCK.
+     * Взаимная блокировка InnoDB (1213) или ожидание блокировки строк (1205) — например, в это же время идёт
+     * bin/reindex.php или админка сохраняет те же товары: транзакцию шага сервер откатил целиком, шаг повторяется
+     * здесь же (до LOCK_RETRIES раз, с паузой), пользователь ошибку не видит — в журнале app-*.log запись о повторе.
      */
     public static function step(int $jobId, float $budget = 15.0, bool $start = false): array
     {
@@ -1690,32 +1694,28 @@ final class Importer
         try {
             if (function_exists('set_time_limit')) @set_time_limit((int) $budget + 60);
             @ini_set('memory_limit', '512M');
-            $job = self::job($jobId);
-            if (!$job) return ['ok' => false, 'error' => 'Задание не найдено'];
-            if ($job['status'] === 'new' && $start) {
-                $db->update('import_jobs', ['status' => 'running', 'started_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$jobId]);
-                $job['status'] = 'running';
+            for ($try = 1; ; $try++) {
+                try {
+                    $res = self::runStep($jobId, max(2.0, $budget - (microtime(true) - $t0)), $start);
+                    break;
+                } catch (\PDOException $e) {
+                    if ($try > self::LOCK_RETRIES || !CatalogIndexer::lockError($e) || $db->pdo()->inTransaction()) throw $e;
+                    Log::info('import step #' . $jobId . ': повтор шага после ' . ((int) ($e->errorInfo[1] ?? 0) === 1213
+                        ? 'взаимной блокировки' : 'ожидания блокировки') . ' (попытка ' . ($try + 1) . '): ' . $e->getMessage());
+                    usleep(300000 * $try);
+                }
             }
-            switch ($job['status']) {
-                case 'parsing':
-                    return self::parse($jobId, min($budget, 12.0));
-                case 'running':
-                    self::processRows($job);
-                    $left = $budget - (microtime(true) - $t0);
-                    if (!empty($job['options']['images']) && $left > $budget / 2) self::downloadImages($jobId, self::IMG_PER_STEP, $left - 1);
-                    break;
-                case 'finishing':
-                    self::finish($job, min(self::REINDEX_BUDGET, $budget * 0.6));
-                    break;
-                case 'images':
-                    if (self::downloadImages($jobId, self::IMG_PER_STEP, $budget - (microtime(true) - $t0) - 1) === 0) self::done($jobId);
-                    break;
-            }
+            if (isset($res['return'])) return $res['return'];
             $st = self::job($jobId)['state'] ?? [];
             $st['time_ms'] = (int) (($st['time_ms'] ?? 0) + (microtime(true) - $t0) * 1000);
             $st['last_step_ms'] = (int) ((microtime(true) - $t0) * 1000);
             self::saveState($jobId, $st);
-            return self::progress(self::job($jobId));
+            $out = self::progress(self::job($jobId));
+            if (!empty($res['wait'])) {                                        // идёт перестройка индекса — следующий шаг через 3 с
+                $out['busy'] = true;
+                $out['note'] = 'Идёт перестройка индекса каталога — импорт продолжится, как только она закончится.';
+            }
+            return $out;
         } catch (\Throwable $e) {
             Log::error('import step #' . $jobId . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
             return ['ok' => false, 'error' => 'Ошибка на шаге импорта: ' . $e->getMessage()] + self::progress(self::job($jobId));
@@ -1725,12 +1725,48 @@ final class Importer
     }
 
     /**
+     * Работа шага (см. step): ['return' => ответ] — сразу вернуть его; ['wait' => true] — ждали блокировку индекса
+     * каталога (идёт перестройка) и не дождались, пачка не обработана; [] — шаг сделан. Повторяемо целиком:
+     * задание читается заново, транзакции шага при сбое откатываются.
+     */
+    private static function runStep(int $jobId, float $budget, bool $start): array
+    {
+        $db = App::db();
+        $t0 = microtime(true);
+        $job = self::job($jobId);
+        if (!$job) return ['return' => ['ok' => false, 'error' => 'Задание не найдено']];
+        if ($job['status'] === 'new' && $start) {
+            $db->update('import_jobs', ['status' => 'running', 'started_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$jobId]);
+            $job['status'] = 'running';
+        }
+        switch ($job['status']) {
+            case 'parsing':
+                return ['return' => self::parse($jobId, min($budget, 12.0))];
+            case 'running':
+                if (!self::processRows($job, min(10.0, $budget / 2))) return ['wait' => true];
+                $left = $budget - (microtime(true) - $t0);
+                if (!empty($job['options']['images']) && $left > $budget / 2) self::downloadImages($jobId, self::IMG_PER_STEP, $left - 1);
+                break;
+            case 'finishing':
+                if (!self::finish($job, min(self::REINDEX_BUDGET, $budget * 0.6))) return ['wait' => true];
+                break;
+            case 'images':
+                if (self::downloadImages($jobId, self::IMG_PER_STEP, $budget - (microtime(true) - $t0) - 1) === 0) self::done($jobId);
+                break;
+        }
+        return [];
+    }
+
+    /**
      * Обработать очередную пачку строк (одна транзакция). Индекс каталога обновляется сразу для товаров
      * пачки — точечно, в той же транзакции (снимок характеристик — до записи): после импорта 3 товаров
      * «Завершение» больше не перестраивает категории на 50 тыс. товаров. Когда изменённых за задание
      * набирается больше FULL_REINDEX_FROM, дальше — как раньше: в конце перестраиваются все категории.
+     * Транзакция с индексом — под блокировкой записи индекса (CatalogIndexer::locked, берётся ДО транзакции):
+     * перестройка не читает товары пачки, пока та не записана, а пачка не пишет в индекс во время перестройки.
+     * Не дождались её за $wait секунд (идёт bin/reindex.php) — false, пачка не тронута (шаг повторит админка).
      */
-    private static function processRows(array $job): void
+    private static function processRows(array $job, float $wait = 10.0): bool
     {
         $db = App::db();
         $batch = max(50, min(1000, (int) $job['options']['batch']));
@@ -1742,7 +1778,7 @@ final class Importer
                 $db->query('UPDATE import_jobs SET error_count = error_count + 1 WHERE id = ?', [$job['id']]);
             }
             $db->update('import_jobs', ['status' => 'finishing', 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$job['id']]);
-            return;
+            return true;
         }
         $data = [];
         foreach ($rows as $n => $json) $data[(int) $n] = json_decode((string) $json, true) ?: [];
@@ -1762,7 +1798,7 @@ final class Importer
             $inc = false;
             $st['reindex'] = 'full';                                          // много изменений — в конце перестроить все категории
         }
-        $db->transaction(static function () use ($db, $plan, $job, $lastN, $isLast, $upd, $inc, $st): void {
+        $run = static fn() => $db->transaction(static function () use ($db, $plan, $job, $lastN, $isLast, $upd, $inc, $st): void {
             $snap = $inc ? CatalogIndexer::snapshot($upd) : null;
             $changed = self::apply($plan, $job, $lastN, $isLast);
             if ($inc && $changed) {
@@ -1777,22 +1813,25 @@ final class Importer
             }
             if ($st !== $job['state']) $db->update('import_jobs', ['state' => self::json($st)], 'id = ?', [(int) $job['id']]);
         });
+        if (!$inc) { $run(); return true; }                              // индекс не трогаем — блокировка не нужна
+        return CatalogIndexer::locked($run, $wait, false);
     }
 
     /**
      * Завершение (может занять несколько шагов): скрыть отсутствующие товары поставщика и обновить
      * их в индексе (точечно), при большом числе изменений — перестроить все категории (порциями, чтобы
      * шаг укладывался в бюджет времени), пересчитать счётчики и сбросить кэш.
+     * false — идёт перестройка индекса (bin/reindex.php), не дождались её: шаг повторится.
      */
-    private static function finish(array $job, float $budget): void
+    private static function finish(array $job, float $budget): bool
     {
         $db = App::db();
         $jobId = (int) $job['id'];
         $opt = $job['options'];
         $state = $job['state'];
         // скрытие, его индексация и план перестройки — одной транзакцией: после обрыва шаг повторится целиком
-        // (иначе скрытые товары уже не «отсутствующие» и остались бы в индексе)
-        if (!isset($state['reindex_queue'])) $db->transaction(static function () use ($db, $job, $jobId, &$state): void {
+        // (иначе скрытые товары уже не «отсутствующие» и остались бы в индексе); блокировка записи индекса — до транзакции
+        $hide = static function () use ($db, $job, $jobId, &$state): void { $db->transaction(static function () use ($db, $job, $jobId, &$state): void {
             $state = self::hideMissing($job);
             $hidden = $state['hidden_ids'] ?? [];
             unset($state['hidden_ids']);
@@ -1816,7 +1855,8 @@ final class Importer
             }
             $state['reindex_total'] = count($state['reindex_queue']);
             self::saveState($jobId, $state);
-        });
+        }); };
+        if (!isset($state['reindex_queue']) && !CatalogIndexer::locked($hide, min(5.0, $budget / 2), false)) return false;
         // перестройка категорий порциями: одна категория на 50 тыс. товаров — 1–2 с. Под общей блокировкой с
         // bin/reindex.php и кнопкой «Перестроить индекс» (CatalogIndexer::exclusive): идёт другая перестройка —
         // ждём до min(5 с, половина бюджета шага), не дождались — продолжим на следующем шаге (очередь сохранена)
@@ -1837,13 +1877,13 @@ final class Importer
                     CatalogIndexer::updateCounters();
                 }
             }, min(5.0, $budget / 2));
-            if (!$ok) return;                                                 // не дождались — очередь сохранена, шаг повторится
+            if (!$ok) return false;                                           // не дождались — очередь сохранена, шаг повторится
         }
         $state['reindex_queue'] = $queue;
         if ($queue) {
             $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
             self::saveState($jobId, $state);
-            return;
+            return true;
         }
         $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
         if (($state['reindex'] ?? 'none') !== 'none') Cache::flush();
@@ -1852,6 +1892,7 @@ final class Importer
         $next = $pending && !empty($opt['images']) ? 'images' : 'done';
         $db->update('import_jobs', ['status' => $next, 'state' => self::json($state), 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$jobId]);
         if ($next === 'done') self::done($jobId, false);
+        return true;
     }
 
     /**

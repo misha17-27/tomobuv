@@ -9,6 +9,7 @@ use App\Core\Image;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\CatalogIndexer;
 
 /**
  * Отзывы: о товарах (product_reviews: moderation | approved | hidden) и о магазине (store_reviews: status 0/1).
@@ -102,14 +103,21 @@ final class ReviewsController extends BaseController
         return $this->answer(true, $msg);
     }
 
-    /** Рейтинг товара по опубликованным отзывам */
+    /**
+     * Рейтинг товара по опубликованным отзывам. Есть динамические категории с условием по рейтингу (rating>=4) —
+     * товар переиндексируется точечно (~20 мс), иначе попал бы в них (или выпал) только при полной перестройке.
+     * Без таких категорий рейтинг на индекс не влияет (в catalog_index его нет) — лишней работы нет.
+     */
     private static function recalcRating(int $productId): void
     {
         if ($productId <= 0) return;
-        App::db()->query("UPDATE products SET
+        $index = CatalogIndexer::conditionUses('rating');
+        $snap = $index ? CatalogIndexer::snapshot([$productId]) : null;   // характеристики и бренд рейтинг не меняет
+        $changed = App::db()->query("UPDATE products SET
             rating = (SELECT COALESCE(ROUND(AVG(rate), 2), 0) FROM product_reviews WHERE product_id = ? AND status = 'approved' AND rate > 0),
             rating_count = (SELECT COUNT(*) FROM product_reviews WHERE product_id = ? AND status = 'approved')
-            WHERE id = ?", [$productId, $productId, $productId]);
+            WHERE id = ?", [$productId, $productId, $productId])->rowCount();
+        if ($index && $changed) CatalogIndexer::products([$productId], $snap, false);   // кэш сбросит action()
     }
 
     private function answer(bool $ok, string $msg, int $code = 200): Response

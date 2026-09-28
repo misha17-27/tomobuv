@@ -15,10 +15,10 @@ $site = rtrim(url(\App\Core\Lang::path('/', $lang)), '/') . '/';
     <tr><td style="padding:20px 28px;font-size:15px;line-height:1.55">
       <p style="margin:0 0 12px"><?= e(t('Здравствуйте')) ?><?= trim((string) $order['name']) !== '' ? ', ' . e($order['name']) : '' ?>!</p>
       <p style="margin:0 0 12px"><?= t('Статус вашего заказа {num} от {date} изменён:', ['num' => '<b>' . e($num) . '</b>', 'date' => e(date('d.m.Y', strtotime((string) $order['created_at'])))]) ?>
-        <b style="color:#e5630a"><?= e($statusName) ?></b>.</p>
+        <b style="color:#a34700"><?= e($statusName) ?></b>.</p>
       <?php if ($comment !== ''): ?><p style="margin:0 0 12px;padding:12px 14px;background:#e8f4fb;border-radius:8px"><?= nl2br(e($comment)) ?></p><?php endif; ?>
       <p style="margin:0 0 16px"><?= e(t('Сумма заказа')) ?>: <b><?= e(price_format($order['total'])) ?></b> · <?= (int) $order['boxes'] ?> <?= e(t('ящ.')) ?> / <?= (int) $order['pairs'] ?> <?= e(t('пар')) ?></p>
-      <p style="margin:0 0 18px"><a href="<?= e($orderUrl) ?>" style="display:inline-block;background:#ff7a1a;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Посмотреть заказ')) ?></a></p>
+      <p style="margin:0 0 18px"><a href="<?= e($orderUrl) ?>" style="display:inline-block;background:#c05500;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Посмотреть заказ')) ?></a></p>
       <p style="margin:0;color:#5d6b76;font-size:13px"><?= e(t('Вопросы по заказу')) ?>: <?= e(implode(', ', array_map('strval', $phones))) ?></p>
     </td></tr>
     <tr><td style="padding:14px 28px 22px;font-size:13px;color:#5d6b76;border-top:1px solid #e3e8ec">

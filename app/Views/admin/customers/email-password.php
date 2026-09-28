@@ -21,10 +21,10 @@ $name = trim((string) (($c['firstname'] ?? '') ?: ($c['name'] ?? '')));
         <p style="margin:0 0 12px"><?= e(t('Для вашей учётной записи в интернет-магазине {store} установлен новый пароль:', ['store' => $store])) ?></p>
         <p style="margin:0 0 16px;font:bold 20px monospace;letter-spacing:1px;background:#fff8e6;padding:12px 14px;border-radius:8px"><?= e($pass) ?></p>
         <p style="margin:0 0 16px"><?= e(t('Логин — ваш e-mail или телефон. После входа пароль можно сменить в личном кабинете.')) ?></p>
-        <p style="margin:0 0 18px"><a href="<?= e($login) ?>" style="display:inline-block;background:#ff7a1a;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Войти в кабинет')) ?></a></p>
+        <p style="margin:0 0 18px"><a href="<?= e($login) ?>" style="display:inline-block;background:#c05500;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Войти в кабинет')) ?></a></p>
       <?php else: ?>
         <p style="margin:0 0 12px"><?= e(t('Менеджер интернет-магазина {store} отправил вам ссылку для установки нового пароля.', ['store' => $store])) ?></p>
-        <p style="margin:0 0 18px"><a href="<?= e($link) ?>" style="display:inline-block;background:#ff7a1a;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Задать новый пароль')) ?></a></p>
+        <p style="margin:0 0 18px"><a href="<?= e($link) ?>" style="display:inline-block;background:#c05500;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Задать новый пароль')) ?></a></p>
         <p style="margin:0 0 12px;font-size:13px;color:#5d6b76"><?= e(t('Ссылка действует {n} ч. Если кнопка не открывается, скопируйте ссылку в браузер:', ['n' => $hours])) ?><br>
           <a href="<?= e($link) ?>" style="color:#0b7fc1;word-break:break-all"><?= e($link) ?></a></p>
       <?php endif; ?>

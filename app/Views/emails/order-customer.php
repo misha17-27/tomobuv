@@ -21,7 +21,7 @@ $td = 'padding:10px 6px;border-top:1px solid #e3e8ec;vertical-align:middle;font-
 <p style="margin:0 0 16px;color:#5d6b76"><?= t('Ваш заказ {n} от {date} оформлен в магазине «{store}». Менеджер свяжется с вами для подтверждения заказа и расчёта доставки.', [
     'n' => '<b style="color:#14212b">' . e($o['number']) . '</b>', 'date' => e(date('d.m.Y H:i', strtotime((string) $o['created_at']))),
     'store' => e(Settings::get('store_name', 'Tomobuv'))]) ?></p>
-<p style="margin:0 0 20px"><a href="<?= e($orderUrl) ?>" style="display:inline-block;background:#ff7a1a;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Посмотреть заказ')) ?></a></p>
+<p style="margin:0 0 20px"><a href="<?= e($orderUrl) ?>" style="display:inline-block;background:#c05500;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:10px"><?= e(t('Посмотреть заказ')) ?></a></p>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
   <tr>

@@ -747,6 +747,20 @@ final class AdminCatalog
         return $new;
     }
 
+    /**
+     * HTML-поле формы админки ($html — из postHtml/PagesController::html, ещё не очищенное; $old — значение в базе).
+     * Без правок (совпадает с базой с точностью до keepUnchanged: CRLF/LF, пробелы по краям) — прежние байты из базы
+     * без очистки: менеджер правит на странице только title, а <script> виджета карты, записанный администратором
+     * (или перенесённый с Webasyst), остаётся. Неочищенный HTML в базу пишет только администратор, поэтому это безопасно.
+     * Изменённое поле — HtmlSanitizer::staff(): у менеджера очищается целиком, в том числе «почти такой же» HTML с добавкой.
+     * Пустое поле ($html null) при « » в базе (описания брендов из Webasyst) — тоже «без правок»: остаётся « ».
+     */
+    public static function staffHtml(?string $html, mixed $old): ?string
+    {
+        if (is_string($old) && $old !== '' && self::keepUnchanged(['v' => $html ?? ''], ['v' => $old])['v'] === $old) return $old;
+        return HtmlSanitizer::staff($html);
+    }
+
     public static function storeName(): string
     {
         return (string) Settings::get('store_name', 'Tomobuv');
