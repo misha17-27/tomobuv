@@ -5,7 +5,7 @@ use App\Services\WhatsApp;
 
 $v = static fn(string $k) => (string) ($post[$k] ?? $cfg[$k] ?? '');
 $on = static fn(string $k, string $def = '1') => ($post !== null ? isset($post[$k]) : (($cfg[$k] ?? '') === '' ? $def === '1' : $cfg[$k] === '1'));
-$err = static fn(string $k) => isset($errors[$k]) ? '<span class="hint" style="color:var(--bad)">' . e($errors[$k]) . '</span>' : '';
+$err = static fn(string $k) => isset($errors[$k]) ? '<span class="wa-err" role="alert">' . e($errors[$k]) . '</span>' : '';
 $prov = $v('provider');
 $dis = $canEdit ? '' : ' disabled';
 ?>
@@ -23,7 +23,7 @@ $dis = $canEdit ? '' : ' disabled';
       <div class="card">
         <h2>Куда отправлять</h2>
         <label class="check"><input type="checkbox" name="enabled" value="1"<?= $on('enabled', '0') ? ' checked' : '' ?><?= $dis ?>> Отправлять новые заказы в WhatsApp автоматически</label>
-        <label class="fld" style="margin-top:12px"><span>Номер WhatsApp (можно несколько через запятую)</span>
+        <label class="fld wa-to"><span>Номер WhatsApp (можно несколько через запятую)</span>
           <input name="to" value="<?= e($v('to')) ?>" placeholder="+38 093 275 30 70"<?= $dis ?>><?= $err('to') ?>
           <span class="hint">На эти номера придёт каждый новый заказ: номер, клиент, телефон, доставка, позиции в ящиках и сумма, ссылка на заказ в админке.</span></label>
         <div class="checks">
@@ -35,16 +35,16 @@ $dis = $canEdit ? '' : ' disabled';
 
       <div class="card">
         <h2>Сервис отправки</h2>
-        <p class="muted" style="font-size:14px">Сайт не может написать в WhatsApp сам — нужен шлюз. Выберите один.</p>
+        <p class="muted wa-lead">Сайт не может написать в WhatsApp сам — нужен шлюз. Выберите один.</p>
         <?= $err('provider') ?>
-        <div class="subtabs" role="tablist">
+        <div class="subtabs wa-prov" role="radiogroup" aria-label="Сервис отправки">
           <?php foreach (WhatsApp::PROVIDERS as $k => $name): ?>
-            <label class="check" style="margin-right:18px"><input type="radio" name="provider" value="<?= $k ?>"<?= $prov === $k ? ' checked' : '' ?><?= $dis ?> onchange="document.querySelectorAll('[data-prov]').forEach(function(b){b.hidden=b.dataset.prov!=='<?= $k ?>'})"> <?= e($name) ?></label>
+            <label class="check"><input type="radio" name="provider" value="<?= e($k) ?>"<?= $prov === $k ? ' checked' : '' ?><?= $dis ?>> <?= e($name) ?></label>
           <?php endforeach; ?>
         </div>
 
         <div data-prov="green"<?= $prov === 'green' ? '' : ' hidden' ?>>
-          <ol class="hint" style="font-size:13.5px;line-height:1.7;margin:0 0 14px 18px">
+          <ol class="hint wa-steps">
             <li>Зарегистрируйтесь на <a href="https://green-api.com" target="_blank" rel="noopener">green-api.com</a> и создайте инстанс.</li>
             <li>Отсканируйте QR-код в WhatsApp на телефоне, с которого будут уходить сообщения (Настройки → Связанные устройства).</li>
             <li>Скопируйте сюда <b>apiUrl</b>, <b>idInstance</b> и <b>apiTokenInstance</b> из кабинета Green-API.</li>
@@ -57,7 +57,7 @@ $dis = $canEdit ? '' : ' disabled';
         </div>
 
         <div data-prov="cloud"<?= $prov === 'cloud' ? '' : ' hidden' ?>>
-          <ol class="hint" style="font-size:13.5px;line-height:1.7;margin:0 0 14px 18px">
+          <ol class="hint wa-steps">
             <li>Нужен аккаунт Meta Business и отдельный номер для WhatsApp Business Platform (<a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener">инструкция</a>).</li>
             <li>Скопируйте <b>Phone number ID</b> и постоянный <b>токен доступа</b>.</li>
             <li>Правило Meta: обычный текст доходит, только если получатель писал бизнес-номеру за последние 24 часа. Для гарантированной доставки создайте шаблон сообщения с одним параметром {{1}} и укажите его имя.</li>
@@ -84,7 +84,7 @@ $dis = $canEdit ? '' : ' disabled';
       <div class="card">
         <h2>Так выглядит сообщение</h2>
         <?php if ($preview !== ''): ?>
-          <div style="background:#e7fcd8;border-radius:10px;padding:12px 14px;white-space:pre-wrap;font-size:13.5px;line-height:1.5;max-height:520px;overflow:auto"><?= e($preview) ?></div>
+          <div class="wa-bubble"><?= e($preview) ?></div>
           <p class="hint">Пример на последнем заказе.</p>
         <?php else: ?><p class="muted">Заказов пока нет.</p><?php endif; ?>
       </div>
@@ -107,12 +107,18 @@ $dis = $canEdit ? '' : ' disabled';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  // выбор сервиса: показать его поля
+  document.querySelectorAll('input[name=provider]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      document.querySelectorAll('[data-prov]').forEach(function (box) { box.hidden = box.dataset.prov !== r.value; });
+    });
+  });
   var b = document.getElementById('wa-test'), res = document.getElementById('wa-test-res');
   if (!b) return;
   b.addEventListener('click', function () {
-    b.disabled = true; res.textContent = 'Отправляем…';
+    b.disabled = true; res.className = 'hint'; res.textContent = 'Отправляем…';
     Adm.post('/admin/whatsapp/test/', {}).then(function (r) {
-      b.disabled = false; res.textContent = r.ok ? r.message : ('Ошибка: ' + r.error); res.style.color = r.ok ? 'var(--ok)' : 'var(--bad)';
+      b.disabled = false; res.textContent = r.ok ? r.message : ('Ошибка: ' + r.error); res.className = 'hint ' + (r.ok ? 'wa-ok' : 'wa-bad');
     }).catch(function () { b.disabled = false; res.textContent = 'Нет связи с сервером'; });
   });
 });

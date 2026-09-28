@@ -13,9 +13,11 @@ final class DashboardController extends BaseController
     {
         $db = App::db();
         $today = date('Y-m-d');
+        $new = OrdersController::newCounts();                // как счётчик в меню и список по ссылке с плитки
         $stats = [
             'orders_today'  => (int) $db->value('SELECT COUNT(*) FROM orders WHERE created_at >= ?', [$today]),
-            'orders_new'    => (int) $db->value("SELECT COUNT(*) FROM orders WHERE status = 'new'"),
+            'orders_new'    => $new['fresh'],
+            'orders_stale'  => $new['stale'],
             'sum_month'     => (float) $db->value("SELECT COALESCE(SUM(total),0) FROM orders WHERE created_at >= ? AND status NOT IN ('deleted','refunded')", [date('Y-m-01')]),
             'products'      => (int) $db->value('SELECT COUNT(*) FROM products WHERE status = 1'),
             'hidden'        => (int) $db->value('SELECT COUNT(*) FROM products WHERE status = 0'),

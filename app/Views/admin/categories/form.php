@@ -36,12 +36,13 @@ $img = (string) ($c['image'] ?? '');
 ?>
 <?php if ($errors): ?><div class="flash bad">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" id="cat-form" class="ac-form" action="<?= $id ? '/admin/categories/' . $id . '/' : '/admin/categories/new/' ?>">
+<form method="post" enctype="multipart/form-data" id="cat-form" class="ac-form ed-form" data-lang="ru" action="<?= $id ? '/admin/categories/' . $id . '/' : '/admin/categories/new/' ?>">
 <?= BaseController::tokenField() ?>
+<?= $view->partial('admin/partials/lang-bar', ['what' => 'категории']) ?>
 <div class="grid3">
   <div class="ac-col">
     <section class="card" aria-labelledby="h-main">
-      <div class="ac-cardhd"><h2 id="h-main">Основное</h2><?= AdminCatalog::langTabs() ?></div>
+      <h2 id="h-main">Основное</h2>
       <?= $i18n('text', 'name', 'Название *', $c, ['required' => true, 'max' => 255, 'id' => 'c-name', 'error' => $err('name')]) ?>
       <div class="fld">
         <label for="c-url"><span>Адрес на сайте</span></label>
@@ -87,21 +88,22 @@ $img = (string) ($c['image'] ?? '');
     </section>
 
     <section class="card" aria-labelledby="h-text">
-      <div class="ac-cardhd"><h2 id="h-text">Тексты</h2><?= AdminCatalog::langTabs() ?></div>
-      <?= $i18n('html', 'description', 'Описание над списком товаров (HTML)', $c, ['rows' => 8, 'id' => 'c-desc']) ?>
-      <?= $i18n('html', 'seo_description', 'SEO-текст под списком товаров (HTML)', $c, ['rows' => 12, 'id' => 'c-seodesc']) ?>
+      <h2 id="h-text">Тексты</h2>
+      <?= $i18n('html', 'description', 'Описание над списком товаров', $c, ['rows' => 8, 'id' => 'c-desc']) ?>
+      <?= $i18n('html', 'seo_description', 'SEO-текст под списком товаров', $c, ['rows' => 12, 'id' => 'c-seodesc']) ?>
     </section>
 
     <section class="card" aria-labelledby="h-seo">
-      <div class="ac-cardhd"><h2 id="h-seo">SEO</h2><?= AdminCatalog::langTabs() ?></div>
-      <p class="hint ac-small muted">Заполняйте только если нужно своё значение. Пустое поле — на сайте используется шаблон из настроек SEO (показан серым).</p>
-      <div data-l="ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'category', 'row' => $c]]) ?></div>
-      <div data-l="uk" hidden><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($c['url'] !== '' ? '/ua/category/' . $c['url'] . '/' : '', $c, $seoUk)]) ?></div>
-      <?= $i18n('text', 'seo_name', 'SEO-название ({$category.seo_name} в шаблонах)', $c, ['max' => 500, 'placeholder' => $c['name'], 'hint' => 'Пусто — используется название категории.', 'tpl_uk' => $seoUk['seo_name']]) ?>
-      <?= $i18n('text', 'meta_title', 'Title', $c, ['max' => 500, 'tpl' => $seoTpl['meta_title'] ?: $c['name'], 'tpl_uk' => $seoUk['meta_title']]) ?>
-      <?= $i18n('area', 'meta_description', 'Description', $c, ['max' => 5000, 'tpl' => $seoTpl['meta_description'], 'tpl_uk' => $seoUk['meta_description']]) ?>
-      <?= $i18n('area', 'meta_keywords', 'Keywords', $c, ['max' => 5000, 'tpl' => $seoTpl['meta_keywords'], 'tpl_uk' => $seoUk['meta_keywords']]) ?>
-      <?= $i18n('text', 'h1', 'Заголовок H1', $c, ['max' => 500, 'placeholder' => $c['name'],
+      <h2 id="h-seo">SEO</h2>
+      <p class="hint"><?= e(AdminCatalog::SEO_INTRO) ?> Шаблоны — в <a href="/admin/settings/seo/">SEO-шаблонах</a>.</p>
+      <div class="l-ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'category', 'row' => $c]]) ?></div>
+      <div class="l-uk"><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($c['url'] !== '' ? '/ua/category/' . $c['url'] . '/' : '', $c, $seoUk)]) ?></div>
+      <?= AdminCatalog::seoField('seo_name', 'seo_name', $c, ['placeholder' => $c['name'], 'empty' => 'Пусто — название категории.', 'tpl_uk' => $seoUk['seo_name'],
+        'hint' => 'Подставляется в SEO-шаблоны вместо названия ({$category.seo_name}).']) ?>
+      <?= AdminCatalog::seoField('meta_title', 'meta_title', $c, ['tpl' => $seoTpl['meta_title'] ?: $c['name'], 'tpl_uk' => $seoUk['meta_title']]) ?>
+      <?= AdminCatalog::seoField('meta_description', 'meta_description', $c, ['tpl' => $seoTpl['meta_description'], 'tpl_uk' => $seoUk['meta_description']]) ?>
+      <?= AdminCatalog::seoField('meta_keywords', 'meta_keywords', $c, ['tpl' => $seoTpl['meta_keywords'], 'tpl_uk' => $seoUk['meta_keywords']]) ?>
+      <?= AdminCatalog::seoField('h1', 'h1', $c, ['placeholder' => $c['name'],
         'hint' => 'Как на старом сайте, в заголовке страницы категории выводится её название; поле хранится для совместимости со старым сайтом и импортом.']) ?>
     </section>
   </div>
@@ -155,7 +157,7 @@ $img = (string) ($c['image'] ?? '');
 <div class="form-actions">
   <button type="submit" class="btn btn-p"><?= $id ? 'Сохранить' : 'Создать категорию' ?></button>
   <a class="btn" href="/admin/categories/">К списку</a>
-  <span class="hint">После сохранения индекс каталога и счётчики товаров пересчитываются автоматически.</span>
+  <span class="hint hide-sm">Ctrl+S — сохранить. Индекс каталога и счётчики товаров пересчитаются автоматически.</span>
 </div>
 </form>
 
@@ -180,3 +182,4 @@ $img = (string) ($c['image'] ?? '');
   <?php endif; ?>
 </form>
 <?php endif; ?>
+<?= $view->partial('admin/partials/editor') ?>

@@ -19,12 +19,13 @@ $paths = AdminCatalog::paths($cats);
 ?>
 <?php if ($errors): ?><div class="adm-flash err ac-flash">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" id="product-form" class="ac-form" action="<?= $id ? '/admin/products/' . $id . '/' : '/admin/products/new/' ?>">
+<form method="post" enctype="multipart/form-data" id="product-form" class="ac-form ed-form" data-lang="ru" action="<?= $id ? '/admin/products/' . $id . '/' : '/admin/products/new/' ?>">
 <?= BaseController::tokenField() ?>
+<?= $view->partial('admin/partials/lang-bar', ['what' => 'товара']) ?>
 <div class="grid3">
   <div class="ac-col">
     <section class="card" aria-labelledby="h-main">
-      <div class="ac-cardhd"><h2 id="h-main">Основное</h2><?= AdminCatalog::langTabs() ?></div>
+      <h2 id="h-main">Основное</h2>
       <?= $i18n('text', 'name', 'Название *', $p, ['required' => true, 'max' => 255, 'id' => 'p-name', 'error' => $err('name')]) ?>
       <div class="fld">
         <label for="p-url"><span>Адрес на сайте</span></label>
@@ -73,21 +74,22 @@ $paths = AdminCatalog::paths($cats);
     </section>
 
     <section class="card" aria-labelledby="h-text">
-      <div class="ac-cardhd"><h2 id="h-text">Описание</h2><?= AdminCatalog::langTabs() ?></div>
+      <h2 id="h-text">Описание</h2>
       <?= $i18n('area', 'summary', 'Краткое описание', $p, ['rows' => 3, 'max' => 60000]) ?>
-      <?= $i18n('html', 'description', 'Описание (HTML)', $p, ['rows' => 12]) ?>
+      <?= $i18n('html', 'description', 'Описание', $p, ['rows' => 12]) ?>
     </section>
 
     <section class="card" aria-labelledby="h-seo">
-      <div class="ac-cardhd"><h2 id="h-seo">SEO</h2><?= AdminCatalog::langTabs() ?></div>
-      <p class="hint ac-small muted">Заполняйте только если нужно своё значение. Пустое поле — на сайте используется шаблон из настроек SEO (показан серым).</p>
-      <div data-l="ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'product', 'row' => $p]]) ?></div>
-      <div data-l="uk" hidden><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($p['url'] !== '' ? '/ua/product/' . $p['url'] . '/' : '', $p, $seoUk)]) ?></div>
-      <?= $i18n('text', 'seo_name', 'SEO-название ({$product.seo_name} в шаблонах)', $p, ['max' => 500, 'placeholder' => $p['name'], 'hint' => 'Пусто — используется название товара.', 'tpl_uk' => $seoUk['seo_name']]) ?>
-      <?= $i18n('text', 'h1', 'Заголовок H1', $p, ['max' => 500, 'tpl' => $seoTpl['h1'] ?: $p['name'], 'tpl_uk' => $seoUk['h1']]) ?>
-      <?= $i18n('text', 'meta_title', 'Title', $p, ['max' => 500, 'tpl' => $seoTpl['meta_title'] ?: $p['name'], 'tpl_uk' => $seoUk['meta_title']]) ?>
-      <?= $i18n('area', 'meta_description', 'Description', $p, ['max' => 5000, 'tpl' => $seoTpl['meta_description'], 'tpl_uk' => $seoUk['meta_description']]) ?>
-      <?= $i18n('area', 'meta_keywords', 'Keywords', $p, ['max' => 5000, 'tpl' => $seoTpl['meta_keywords'], 'tpl_uk' => $seoUk['meta_keywords']]) ?>
+      <h2 id="h-seo">SEO</h2>
+      <p class="hint"><?= e(AdminCatalog::SEO_INTRO) ?> Шаблоны — в <a href="/admin/settings/seo/">SEO-шаблонах</a>.</p>
+      <div class="l-ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'product', 'row' => $p]]) ?></div>
+      <div class="l-uk"><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($p['url'] !== '' ? '/ua/product/' . $p['url'] . '/' : '', $p, $seoUk)]) ?></div>
+      <?= AdminCatalog::seoField('seo_name', 'seo_name', $p, ['placeholder' => $p['name'], 'empty' => 'Пусто — название товара.', 'tpl_uk' => $seoUk['seo_name'],
+        'hint' => 'Подставляется в SEO-шаблоны вместо названия ({$product.seo_name}).']) ?>
+      <?= AdminCatalog::seoField('meta_title', 'meta_title', $p, ['tpl' => $seoTpl['meta_title'] ?: $p['name'], 'tpl_uk' => $seoUk['meta_title']]) ?>
+      <?= AdminCatalog::seoField('meta_description', 'meta_description', $p, ['tpl' => $seoTpl['meta_description'], 'tpl_uk' => $seoUk['meta_description']]) ?>
+      <?= AdminCatalog::seoField('meta_keywords', 'meta_keywords', $p, ['tpl' => $seoTpl['meta_keywords'], 'tpl_uk' => $seoUk['meta_keywords']]) ?>
+      <?= AdminCatalog::seoField('h1', 'h1', $p, ['tpl' => $seoTpl['h1'] ?: $p['name'], 'tpl_uk' => $seoUk['h1']]) ?>
     </section>
   </div>
 
@@ -151,6 +153,8 @@ $paths = AdminCatalog::paths($cats);
           <span><b>Загрузить фото</b> — выберите файлы или перетащите сюда</span>
           <small class="muted">jpg, png, webp, gif · до 15 МБ (сервер принимает до <?= e($maxUpload) ?>). Порядок меняется перетаскиванием, первое фото — главное.</small>
         </label>
+        <p class="ac-photo-lib"><button type="button" class="btn btn-sm" id="photo-media">Выбрать из медиатеки</button>
+          <small class="muted">Картинка скопируется в фото товара, файл в медиатеке останется.</small></p>
         <p class="ac-small" id="photo-status" role="status" aria-live="polite"></p>
       <?php else: ?>
         <label class="fld"><span>Фото товара</span><input type="file" name="images[]" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
@@ -163,6 +167,7 @@ $paths = AdminCatalog::paths($cats);
 <div class="form-actions">
   <button type="submit" class="btn btn-p"><?= $id ? 'Сохранить' : 'Создать товар' ?></button>
   <a class="btn" href="/admin/products/">К списку</a>
+  <span class="hint hide-sm">Ctrl+S — сохранить</span>
   <span class="sp"></span>
   <?php if ($id): ?><button type="submit" class="btn btn-d" form="del-form">Удалить товар</button><?php endif; ?>
 </div>
@@ -170,3 +175,4 @@ $paths = AdminCatalog::paths($cats);
 <?php if ($id): ?>
 <form id="del-form" method="post" action="/admin/products/<?= $id ?>/delete/" data-confirm="Удалить товар «<?= e($p['name']) ?>» безвозвратно? Фото тоже будут удалены."><?= BaseController::tokenField() ?></form>
 <?php endif; ?>
+<?= $view->partial('admin/partials/editor') ?>

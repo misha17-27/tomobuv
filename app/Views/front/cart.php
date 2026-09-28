@@ -6,6 +6,8 @@
  * @var array $items @var array $sum @var int $removed @var int $free @var array $shipping @var array $payment
  * @var array $form @var array $errors @var ?array $user @var array $phones @var bool $couponOn @var View $view
  */
+use App\Services\Cart;
+
 $ship = $shipping[$form['shipping']] ?? null;
 $pickup = $ship && $ship['pickup'];
 $left = max(0, $free - $sum['count']);
@@ -53,14 +55,15 @@ $lines = count($items);
                   <div class="co-attr"><?php if ($i['size'] !== ''): ?><span><?= e(t('Размеры:')) ?> <b><?= e($i['size']) ?></b></span><?php endif; ?><?php if ($i['brand'] !== ''): ?><span><?= e($i['brand']) ?></span><?php endif; ?></div>
                   <div class="co-meta"><span><?= e(t('{n} {pairs} в ящике', ['n' => (int) $i['box_qty'], 'pairs' => $pl((int) $i['box_qty'], 'пара', 'пары', 'пар')])) ?></span> · <span><?= price_html($i['price']) ?> / <?= e(t('пара')) ?></span> · <span><?= price_html($i['box_price']) ?> / <?= e(t('ящик')) ?></span></div>
                   <?php if (!$i['available']): ?><div class="co-warn"><?= e(t('Нет в наличии — не войдёт в заказ')) ?></div>
-                  <?php elseif ($over): ?><div class="co-warn"><?= e(t('В наличии только {n} {boxes}', ['n' => (int) $i['max_boxes'], 'boxes' => $pl((int) $i['max_boxes'], 'ящик', 'ящика', 'ящиков')])) ?></div><?php endif; ?>
+                  <?php elseif ($over): ?><div class="co-warn"><?= e(t('В наличии только {n} {boxes}', ['n' => (int) $i['max_boxes'], 'boxes' => $pl((int) $i['max_boxes'], 'ящик', 'ящика', 'ящиков')])) ?></div>
+                  <?php elseif ($i['max_boxes'] < Cart::MAX_BOXES): ?><div class="co-lim" id="lim-<?= (int) $i['id'] ?>"><?= e(t(plural((int) $i['max_boxes'], 'Доступно не больше {n} ящика', 'Доступно не больше {n} ящиков', 'Доступно не больше {n} ящиков'), ['n' => (int) $i['max_boxes']])) ?></div><?php endif; ?>
                 </td>
                 <td class="num c-hide"><?= (int) $i['box_qty'] ?></td>
                 <td class="num c-hide"><?= price_html($i['price']) ?></td>
                 <td class="num c-hide"><?= price_html($i['box_price']) ?></td>
                 <td class="c-qty">
                   <?php if ($i['available']): ?>
-                  <div class="qty co-qty"><button type="button" data-step="-1" aria-label="<?= e(t('Меньше ящиков')) ?>">−</button><input value="<?= (int) $i['boxes'] ?>" inputmode="numeric" pattern="[0-9]*" aria-label="<?= e(t('Количество ящиков: {name}', ['name' => $i['name']])) ?>" data-boxes data-max="<?= (int) $i['max_boxes'] ?>"><button type="button" data-step="1" aria-label="<?= e(t('Больше ящиков')) ?>">+</button></div>
+                  <div class="qty co-qty"><button type="button" data-step="-1" aria-label="<?= e(t('Меньше ящиков')) ?>">−</button><input value="<?= (int) $i['boxes'] ?>" inputmode="numeric" pattern="[0-9]*" aria-label="<?= e(t('Количество ящиков: {name}', ['name' => $i['name']])) ?>" data-boxes data-max="<?= (int) $i['max_boxes'] ?>"<?= !$over && $i['max_boxes'] < Cart::MAX_BOXES ? ' aria-describedby="lim-' . (int) $i['id'] . '"' : '' ?>><button type="button" data-step="1" aria-label="<?= e(t('Больше ящиков')) ?>"<?= $i['boxes'] >= $i['max_boxes'] ? ' aria-disabled="true"' : '' ?>>+</button></div>
                   <?php else: ?><span class="muted">—</span><?php endif; ?>
                 </td>
                 <td class="num c-sum"><b><?= price_html($i['sum']) ?></b><small data-pairs><?= (int) $i['pairs'] ?> <?= e($pl((int) $i['pairs'], 'пара', 'пары', 'пар')) ?></small></td>

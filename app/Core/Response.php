@@ -65,8 +65,10 @@ final class Response
     }
 
     /**
-     * Заголовки безопасности для любого ответа PHP (в т. ч. страниц из кэша). Apache ставит их и сам (public/.htaccess),
-     * но на php -S, nginx или без mod_headers их бы не было. Свой заголовок ответа (Referrer-Policy: no-referrer) их заменяет.
+     * Заголовки безопасности для любого ответа PHP (в т. ч. страниц из кэша) — и на Apache, и на php -S / nginx.
+     * public/.htaccess ставит те же заголовки только статике и ошибкам Apache (setifempty + resp(): если в ответе
+     * их ещё нет), поэтому под Apache они приходят один раз. Свой заголовок ответа (->header('Referrer-Policy',
+     * 'no-referrer') у сброса пароля) заменяет общий, и Apache его не перебивает.
      */
     public static function securityHeaders(): void
     {
@@ -99,8 +101,8 @@ final class Response
         self::securityHeaders();
         foreach ($this->headers as $k => $v) header($k . ': ' . $v);
         if ($this->status === 200 && $this->cacheTtl > 0) {
-            PageCache::store($this->body, $this->cacheTtl, $this->headers['Content-Type'] ?? 'text/html; charset=utf-8');
-            header('X-Cache: MISS');
+            $stored = PageCache::store($this->body, $this->cacheTtl, $this->headers['Content-Type'] ?? 'text/html; charset=utf-8');
+            header('X-Cache: ' . ($stored ? 'MISS' : 'BYPASS'));
         } elseif (!isset($this->headers['Cache-Control'])) {
             header('Cache-Control: no-store, private');
         }

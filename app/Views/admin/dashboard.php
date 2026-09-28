@@ -1,17 +1,23 @@
 <?php
 /** @var array $stats @var array $lastOrders @var array $byDay */
+use App\Controllers\Admin\OrdersController;
 $statusNames = ['new' => 'Новый', 'processing' => 'В обработке', 'paid' => 'Оплачен', 'shipped' => 'Отправлен', 'completed' => 'Выполнен', 'refunded' => 'Возврат', 'deleted' => 'Удалён'];
 $max = $byDay ? max($byDay) : 1;
 $fmt = static fn($n) => number_format((float) $n, 0, '', ' ');
 ?>
 <div class="stats">
-  <a class="stat hot" href="/admin/orders/?status=new"><span><?= $fmt($stats['orders_new']) ?></span>Новых заказов</a>
+  <a class="stat<?= $stats['orders_new'] ? ' hot' : '' ?>" href="<?= e(OrdersController::freshUrl()) ?>" title="Статус «Новый», оформлены за <?= OrdersController::FRESH_DAYS ?> дней"><span><?= $fmt($stats['orders_new']) ?></span>Новых заказов</a>
   <a class="stat" href="/admin/orders/"><span><?= $fmt($stats['orders_today']) ?></span>Заказов сегодня</a>
   <a class="stat" href="/admin/reports/"><span><?= $fmt($stats['sum_month']) ?></span>Сумма заказов за месяц, грн</a>
   <a class="stat<?= $stats['requests_new'] ? ' hot' : '' ?>" href="/admin/requests/"><span><?= $fmt($stats['requests_new']) ?></span>Новых заявок</a>
   <a class="stat" href="/admin/products/"><span><?= $fmt($stats['products']) ?></span>Товаров на сайте</a>
   <a class="stat" href="/admin/customers/"><span><?= $fmt($stats['customers']) ?></span>Клиентов</a>
 </div>
+<?php if ($stats['orders_stale']): ?>
+<p class="flash warn sl-newhint">Ещё <?= $fmt($stats['orders_stale']) ?> <?= plural($stats['orders_stale'], 'заказ', 'заказа', 'заказов') ?> в статусе «Новый» старше <?= OrdersController::FRESH_DAYS ?> дней —
+  в основном необработанные со старого сайта; в плитке и в меню они не считаются.
+  <a href="<?= e(OrdersController::staleUrl()) ?>">Открыть и закрыть массово</a></p>
+<?php endif; ?>
 
 <div class="grid2">
   <div class="card">

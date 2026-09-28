@@ -302,3 +302,94 @@ body.bare{display:grid;place-items:center;min-height:100vh;background:var(--ink)
   .subtabs a{white-space:nowrap;flex:none}
 }
 @media (max-width:640px){[data-serp-lens] .nowrap{white-space:normal}}
+
+/* ---------- редакторы: один вид во всех семи (товар, категория, бренд, характеристика, страница, статья, баннер) ----------
+   Переключатель «RU | UA» (партиал admin/partials/lang-bar), метки языка у подписей, HTML-редактор textarea[data-editor].
+   Логика — public/assets/admin/content.js. */
+[data-lang=ru] .l-uk,[data-lang=uk] .l-ru{display:none!important}
+.lang-bar{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);box-shadow:var(--sh);padding:10px 14px;margin-bottom:20px}
+.lang-bar .hint{margin:0;flex:1;min-width:220px}
+.lang-sw{display:inline-flex;background:var(--line-2);border-radius:10px;padding:3px;gap:2px;flex:none}
+.lang-sw button{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:0;border-radius:8px;background:none;
+  font:800 13.5px var(--font);color:var(--ink-2);cursor:pointer;letter-spacing:.02em;white-space:nowrap}
+.lang-sw button > span{font-weight:600;font-size:12px;color:var(--steel)}
+.lang-sw button:hover{background:#fff}
+.lang-sw button[aria-pressed=true]{background:var(--ink);color:#fff}
+.lang-sw button[aria-pressed=true] > span{color:#c7d0e0}
+.lang-sw [data-uk-count].full{color:var(--ok)}
+.lang-sw button[aria-pressed=true] [data-uk-count].full{color:#7ee2ae}
+i.lp{display:inline-block;font:800 10px var(--font);font-style:normal;letter-spacing:.06em;background:#ffd84d;color:#3d3000;
+  border-radius:5px;padding:2px 5px;vertical-align:1px;margin-left:4px;text-transform:none}
+i.lp.ru{background:var(--line-2);color:var(--steel)}
+.lbl-row{display:flex;align-items:center;justify-content:space-between;gap:6px 10px;flex-wrap:wrap}
+.fld > .lbl{margin:0}
+.fld .hint i{color:var(--ink-2)}
+/* HTML-редактор: одна панель, режимы «Визуально | HTML» */
+.ed{border:1.5px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;transition:border-color .15s;min-width:0}
+.ed:focus-within{border-color:var(--brand);box-shadow:0 0 0 3px rgba(255,90,31,.13)}
+.ed-bar{display:flex;flex-wrap:wrap;gap:2px;align-items:center;padding:6px;background:#fafbfd;border-bottom:1px solid var(--line)}
+.ed-bar button{height:30px;min-width:30px;padding:0 8px;border:1px solid transparent;border-radius:7px;background:none;font:600 13px var(--font);color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.ed-bar button:hover{background:#fff;border-color:var(--line)}
+.ed-bar .sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+.ed-bar .gap{flex:1}
+.ed-bar .ed-b{font-weight:800}.ed-bar .ed-i{font-style:italic;font-family:Georgia,serif}
+.ed-modes{display:inline-flex;background:var(--line-2);border-radius:8px;padding:2px;gap:2px}
+.ed-modes button{height:26px;border:0;border-radius:6px;font-weight:700;font-size:12.5px}
+.ed-modes button:hover{border:0;background:#fff}
+.ed-modes button[aria-pressed=true]{background:var(--ink);color:#fff}
+.ed textarea.ed-src{border:0!important;box-shadow:none!important;border-radius:0;font:13px/1.6 var(--mono);min-height:340px;display:block;tab-size:2}
+.ed-frame{display:block;width:100%;border:0;min-height:340px;background:#fff}
+.ed[data-mode=visual] textarea.ed-src,.ed:not([data-mode=visual]) .ed-frame{display:none}
+.ed-foot{display:flex;justify-content:space-between;gap:10px;padding:5px 10px;border-top:1px solid var(--line);background:#fafbfd;font-size:11.5px;color:var(--steel)}
+.ed.small-ed textarea.ed-src,.ed.small-ed .ed-frame{min-height:140px}
+.ed + .hint{margin-top:2px}
+/* превью Google (партиал admin/partials/serp) в SEO-карточке редактора: сразу под ним — строка длины Title/Description */
+.ed-form .serp{margin-bottom:8px}
+.ed-form [data-serp-lens]{margin:0 0 16px;font-size:12.5px}
+.ed-form [data-serp-lens] .nowrap{white-space:normal}
+.ed-toast{position:fixed;right:16px;bottom:16px;z-index:100;background:var(--ink);color:#fff;padding:11px 15px;border-radius:10px;font-weight:600;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:calc(100vw - 32px)}
+.ed-toast.err{background:var(--bad)}
+.ed-toast[hidden]{display:none}
+/* на широком экране переключатель языка всегда под рукой — и в SEO внизу длинной карточки товара */
+@media (min-width:1001px){
+  .lang-bar{position:sticky;top:10px;z-index:6}
+  [data-lang] .fld{scroll-margin-top:84px}   /* поле, к которому прокрутили (ошибка, фокус), не прячется под переключателем */
+}
+@media (max-width:640px){
+  .lang-bar{padding:10px 12px}
+  .lang-bar .hint{min-width:0;flex-basis:100%}
+  .lang-sw .lw{display:none}
+  .ed-bar button{padding:0 6px}
+  .ed textarea.ed-src,.ed-frame{min-height:260px}
+  .savebar,.form-actions{padding:10px 12px;gap:8px}
+  .hide-sm{display:none}
+}
+
+/* ---------- WhatsApp (admin/whatsapp/index): вместо инлайн-стилей ---------- */
+.wa-to{margin-top:12px}
+.wa-lead{font-size:14px}
+.wa-err{display:block;color:var(--bad);font-size:12.5px;font-weight:600}
+.wa-prov{gap:4px 22px}
+.wa-steps{font-size:13.5px;line-height:1.7;margin:0 0 14px 18px}
+.wa-bubble{background:#e7fcd8;border-radius:10px;padding:12px 14px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.5;max-height:520px;overflow:auto}
+.hint.wa-ok{color:var(--ok)}
+.hint.wa-bad{color:var(--bad)}
+
+/* ---------- заказ на телефоне (admin/orders/show): колонки складываются в одну — «Статус заказа», клиент и доставка
+   идут сразу после состава заказа, а история — в самом конце ---------- */
+@media (max-width:1000px){
+  .ord-grid{display:flex;flex-direction:column;gap:0}
+  .ord-grid > .sl-col{display:contents}
+  .ord-grid .ord-history{order:1}
+}
+
+/* ---------- список заказов (admin/orders/index): галочки массовой смены статуса и подсказка о «новых» ---------- */
+.sl-bulk .bulk-bar{border:1px solid var(--line);border-bottom:0;border-radius:var(--r) var(--r) 0 0}
+.sl-bulk .bulk-bar[hidden]{display:none}
+.sl-pick{display:inline-flex;align-items:center;vertical-align:middle;margin-right:8px;cursor:pointer}
+.sl-pick input{width:16px;height:16px;margin:0}
+.sl-newhint{font-weight:500;font-size:14px;line-height:1.5}
+.sl-newhint a{font-weight:700}
+.sl-pick-m{display:none}
+@media (max-width:700px){.sl-bulk .sl-pick-m{display:flex;margin:0 0 8px}}   /* таблица складывается в карточки, шапки с галочкой нет */

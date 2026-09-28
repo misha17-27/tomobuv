@@ -6,6 +6,7 @@ namespace App\Services;
 use App\Core\App;
 use App\Core\Cache;
 use App\Core\Mailer;
+use App\Core\Request;
 use App\Core\Settings;
 use App\Controllers\Admin\BaseController;
 
@@ -88,15 +89,20 @@ final class SystemStatus
         $rows[] = self::row(version_compare(PHP_VERSION, '8.1', '>=') ? 'ok' : 'bad', 'Версия PHP', PHP_VERSION,
             'Нужна 8.1 или новее, рекомендуется 8.3');
 
+        // Расширения — только те, что реально вызывает код (bad — без него сайт не работает; warn — отключится одна функция
+        // или сработает запасной путь). fileinfo коду не нужен: тип загрузок проверяется getimagesize + пересохранение через GD.
         $ext = [
             'pdo_mysql' => ['bad', 'Подключение к базе данных'],
             'mbstring'  => ['bad', 'Русские и украинские тексты, поиск, обрезка строк'],
             'gd'        => ['bad', 'Миниатюры фото товаров и загрузка картинок'],
-            'zip'       => ['warn', 'Импорт и экспорт прайсов в XLSX'],
+            'curl'      => ['warn', 'Загрузка прайсов и фото по ссылке (без curl — по одной, медленнее), WhatsApp-уведомления'],
+            'openssl'   => ['warn', 'SMTP с SSL/TLS; HTTPS-запросы без curl (WhatsApp, прайсы по ссылке)'],
+            'zip'       => ['warn', 'Импорт прайсов XLSX (без него — только CSV/XML)'],
             'xmlreader' => ['warn', 'Импорт прайсов XML/YML и XLSX'],
-            'fileinfo'  => ['warn', 'Проверка типа загружаемых файлов'],
-            'openssl'   => ['bad', 'Отправка почты через SMTP с SSL/TLS, HTTPS-запросы'],
-            'intl'      => ['warn', 'Не обязательно; нужно для корректной сортировки и форматирования'],
+            'dom'       => ['warn', 'Импорт прайсов XML/YML и XLSX (разбор товара); очистка HTML от менеджеров (без него — строгая, почти без разметки)'],
+            'simplexml' => ['warn', 'Импорт XLSX (список листов книги)'],
+            'intl'      => ['warn', 'Сравнение названий при импорте без учёта диакритики (без него — упрощённое сравнение)'],
+            'exif'      => ['warn', 'Поворот фото с телефона по EXIF при загрузке в медиатеку'],
         ];
         foreach ($ext as $name => [$ifMissing, $why]) {
             $has = extension_loaded($name);
@@ -107,8 +113,16 @@ final class SystemStatus
                 if (!function_exists('imagewebp')) { $state = 'warn'; $value = 'Подключено, без WebP'; $why = 'Миниатюры в WebP не создаются — сайт отдаст JPEG/PNG'; }
                 else $value = 'Подключено, WebP есть';
             }
+            if ($name === 'curl' && $has && (!function_exists('curl_multi_init') || !function_exists('curl_multi_exec'))) {
+                // на хостинге часто отключают curl_multi_exec (disable_functions) — тогда работает запасной путь
+                $state = 'warn'; $value = 'Подключено, curl_multi отключён'; $why = 'Фото и прайсы по ссылке грузятся по одному (медленнее)';
+            }
             $rows[] = self::row($state, 'Расширение ' . $name, $value, $why);
         }
+        // Базовые расширения, которые обычно встроены в PHP, но в урезанных сборках бывают выключены
+        $core = array_values(array_filter(['ctype', 'session', 'filter', 'json', 'hash', 'pcre'], static fn($n) => !extension_loaded($n)));
+        $rows[] = self::row($core ? 'bad' : 'ok', 'Базовые расширения PHP', $core ? 'Нет: ' . implode(', ', $core) : 'ctype, session, filter, json, hash, pcre',
+            $core ? 'Без них сайт не работает — попросите хостинг включить' : 'Проверка форм, вход, сессии');
 
         $mem = (string) ini_get('memory_limit');
         $memB = self::iniBytes($mem);
@@ -378,6 +392,8 @@ final class SystemStatus
         $rows[] = self::row($httpsBase ? 'ok' : ($local ? 'warn' : 'bad'), 'Адрес сайта (base_url)', $base !== '' ? $base : 'не задан',
             $httpsBase ? 'По нему строятся canonical, sitemap и ссылки в письмах' : ($local ? 'Локальный адрес — на хостинге укажите https://tomobuv.com.ua' : 'Укажите адрес с https://'));
 
+        $rows[] = self::clientIpRow();
+
         $smtp = (string) Mailer::cfg('smtp_host');
         $rows[] = self::row($smtp !== '' ? 'ok' : 'warn', 'Отправка почты', $smtp !== '' ? 'SMTP через ' . $smtp : 'mail() хостинга',
             $smtp !== '' ? '' : 'Письма через mail() часто попадают в спам — настройте SMTP', ['href' => '/admin/mail/']);
@@ -402,6 +418,44 @@ final class SystemStatus
                 : self::row('warn', 'Закрыт адрес ' . $p, 'Проверяется…', 'Должен отдавать 403 или 404', ['probe' => $p]);
         }
         return $rows;
+    }
+
+    /**
+     * IP посетителей за Cloudflare/прокси (config trusted_proxies, Request::ip()): от него зависят лимиты попыток входа
+     * и форм, журнал админки и доступ к админке по IP. Если запрос пришёл через прокси, а он не указан в trusted_proxies,
+     * все посетители выглядят одним IP прокси — лимиты становятся общими на всех.
+     */
+    public static function clientIpRow(): array
+    {
+        $trusted = array_values(array_filter(array_map(static fn($v) => is_string($v) ? trim($v) : '', (array) App::config('trusted_proxies', []))));
+        $invalid = array_values(array_filter($trusted, static function (string $r): bool {
+            [$net, $bits] = array_pad(explode('/', $r, 2), 2, null);
+            $bin = @inet_pton(trim($net));
+            return $bin === false || ($bits !== null && (!ctype_digit(trim($bits)) || (int) $bits > strlen($bin) * 8));
+        }));
+        $remote = Request::remoteAddr();
+        $ip = Request::ip();
+        // заголовки прокси — только как признак «запрос пришёл через прокси», IP из них берёт Request::ip()
+        $cf = !empty($_SERVER['HTTP_CF_CONNECTING_IP']);
+        $proxied = $cf || !empty($_SERVER['HTTP_X_FORWARDED_FOR']);
+        $viaTrusted = $trusted && Request::ipMatches($remote, $trusted);
+        $label = 'IP посетителей (прокси, Cloudflare)';
+        if ($invalid) {
+            return self::row('warn', $label, 'Ошибки в trusted_proxies: ' . implode(', ', array_slice($invalid, 0, 3)),
+                'Укажите адреса или подсети вида 173.245.48.0/20 или 2400:cb00::/32 — неверные строки не учитываются');
+        }
+        if ($viaTrusted) {
+            return self::row('ok', $label, 'Через доверенный прокси ' . $remote . ' · ваш IP ' . $ip,
+                'IP посетителя берётся из X-Forwarded-For / CF-Connecting-IP (config trusted_proxies: ' . count($trusted) . ')');
+        }
+        if ($proxied) {
+            return self::row('warn', $label, 'Запрос пришёл через ' . ($cf ? 'Cloudflare' : 'прокси') . ' с адреса ' . $remote . ' · ваш IP ' . $ip,
+                ($trusted ? 'Этого адреса нет в trusted_proxies' : 'trusted_proxies не задан')
+                . ' — все посетители выглядят одним IP: общие лимиты попыток входа и форм. Добавьте адреса прокси в config/config.php'
+                . ' (docs/INSTALL.md). Если прокси перед сайтом нет, заголовок X-Forwarded-For добавил ваш провайдер — ничего делать не нужно');
+        }
+        return self::row('ok', $label, 'Напрямую · ваш IP ' . $ip,
+            $trusted ? 'trusted_proxies задан (' . count($trusted) . '), но этот запрос пришёл не через прокси' : 'Сайт не за прокси — IP посетителя = адрес соединения');
     }
 
     /**

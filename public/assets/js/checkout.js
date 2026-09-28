@@ -70,6 +70,12 @@
     if (pairs) pairs.textContent = np + ' ' + plural(np, 'пара', 'пары', 'пар');
     var w = $('.co-warn', row);
     if (w && item.max && item.boxes <= item.max) w.parentNode.removeChild(w);
+    plusState(row);
+  }
+  // остаток: «+» на максимуме (data-max = Cart::maxBoxes) — aria-disabled, нажатие покажет подсказку (UI.maxText)
+  function plusState(row) {
+    var inp = $('[data-boxes]', row), plus = $('[data-step="1"]', row); if (!inp || !plus) return;
+    if ((parseInt(inp.value, 10) || 1) >= (+inp.getAttribute('data-max') || 999)) plus.setAttribute('aria-disabled', 'true'); else plus.removeAttribute('aria-disabled');
   }
   function update(row, boxes) {
     var inp = $('[data-boxes]', row), q = $('.co-qty', row);
@@ -86,6 +92,7 @@
     if (v > max) { v = max; UI.toast(t('В наличии только {n} {boxes}', { n: max, boxes: boxesWord(max) }), true); }
     v = Math.max(1, v);
     inp.value = v;
+    plusState(row);
     clearTimeout(row._t);
     row._t = setTimeout(function () { if (String(v) !== inp.getAttribute('data-val')) update(row, v); }, now ? 0 : 450);
   }
@@ -348,8 +355,9 @@
     if (st) {
       var row = st.closest('tr[data-line]');
       if (!row) return;
-      var inp = $('[data-boxes]', row);
-      inp.value = Math.max(1, (parseInt(inp.value, 10) || 1) + (+st.getAttribute('data-step')));
+      var inp = $('[data-boxes]', row), mx = +inp.getAttribute('data-max') || 999, want = (parseInt(inp.value, 10) || 1) + (+st.getAttribute('data-step'));
+      if (want > mx && +st.getAttribute('data-step') > 0) { UI.toast(UI.maxText(mx), true); return; }   // больше остатка — не отправляем
+      inp.value = Math.max(1, want);
       schedule(row);
       return;
     }

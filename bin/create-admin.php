@@ -8,8 +8,8 @@ require __DIR__ . '/../app/bootstrap.php';
 use App\Core\App;
 
 [, $email, $pass, $role, $name] = $argv + [null, null, null, 'admin', 'Администратор'];
-if (!$email || !$pass || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($pass) < 8 || !in_array($role, ['admin', 'manager'], true)) {
-    exit("Использование: php bin/create-admin.php email пароль(от 8 символов) [admin|manager] [Имя]\n");
+if (!$email || !$pass || !filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($pass) < \App\Controllers\Admin\UsersController::MIN_PASSWORD || !in_array($role, ['admin', 'manager'], true)) {
+    exit('Использование: php bin/create-admin.php email пароль(от ' . \App\Controllers\Admin\UsersController::MIN_PASSWORD . " символов) [admin|manager] [Имя]\n");
 }
 $db = App::db();
 $email = mb_strtolower($email);

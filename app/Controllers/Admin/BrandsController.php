@@ -10,6 +10,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Services\AdminCatalog;
 use App\Services\Catalog;
+use App\Services\HtmlSanitizer;
 
 /**
  * Админка → Бренды. Бренд = значение характеристики «Бренд» (id совпадают, как в Webasyst):
@@ -100,19 +101,22 @@ final class BrandsController extends BaseController
         if (Request::isPost()) {
             $d = [
                 'name'             => trim((string) preg_replace('/\s+/u', ' ', mb_substr(Request::post('name'), 0, 255))),
+                // название на /ua/ — только для служебных («Не указано» → «Не вказано»); пусто = как в RU. Адрес (url) от него не зависит
+                'name_uk'          => trim((string) preg_replace('/\s+/u', ' ', mb_substr(Request::post('name_uk'), 0, 255))) ?: null,
                 'title'            => AdminCatalog::postStr('title'),
                 'h1'               => AdminCatalog::postStr('h1'),
                 'meta_keywords'    => AdminCatalog::postStr('meta_keywords', 5000),
                 'meta_description' => AdminCatalog::postStr('meta_description', 5000),
                 'summary'          => AdminCatalog::postStr('summary'),
-                'description'      => AdminCatalog::postHtml('description'),
-                'seo_description'  => AdminCatalog::postHtml('seo_description'),
+                // HTML: у менеджера — без скриптов и опасных атрибутов (HtmlSanitizer::staff); summary — простой текст (на сайте через e())
+                'description'      => HtmlSanitizer::staff(AdminCatalog::postHtml('description')),
+                'seo_description'  => HtmlSanitizer::staff(AdminCatalog::postHtml('seo_description')),
                 'hidden'           => Request::post('hidden') === '1' ? 1 : 0,
                 'sort'             => max(-100000, min(100000, Request::postInt('sort'))),
             ];
             foreach (self::UK_FIELDS as $k) {
                 $d[$k . '_uk'] = in_array($k, ['description', 'seo_description'], true)
-                    ? AdminCatalog::postHtml($k . '_uk')
+                    ? HtmlSanitizer::staff(AdminCatalog::postHtml($k . '_uk'))
                     : AdminCatalog::postStr($k . '_uk', in_array($k, ['meta_keywords', 'meta_description'], true) ? 5000 : 500);
             }
             if ($d['name'] === '') $errors['name'] = 'Укажите название бренда.';
@@ -164,10 +168,14 @@ final class BrandsController extends BaseController
                         AdminCatalog::addRedirect(rawurldecode($oldLink), Catalog::brandUrl($d), [$oldLink]);
                     }
                 }
+                // name_uk = значение характеристики «Бренд» на /ua/ (фильтр, характеристики товара)
+                if ($brandF && (string) ($old['name_uk'] ?? '') !== (string) $d['name_uk']) {
+                    $db->update('feature_values', ['value_uk' => $d['name_uk']], 'id = ? AND feature_id = ?', [$id, $brandF]);
+                }
                 if (!empty($old['image']) && $old['image'] !== $d['image']) AdminCatalog::deleteUpload($old['image']);
                 Cache::flush();
                 $this->log($old['id'] ? 'brand_update' : 'brand_create', 'brand', $id, ['name' => $d['name']]);
-                $this->flash($old['id'] ? 'Бренд сохранён.' : 'Бренд создан.');
+                $this->flash(($old['id'] ? 'Бренд сохранён.' : 'Бренд создан.') . HtmlSanitizer::notice());
                 return Response::redirect('/admin/brands/' . $id . '/');
             }
             $b = array_merge($b, $d, ['image' => $picked === false ? $b['image'] : $picked]);

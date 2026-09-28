@@ -86,12 +86,16 @@ final class Catalog
         return '/category/' . $c['url'] . '/';
     }
 
-    /** Бренды [id => ['id','name','url','image','hidden','product_count']] */
+    /**
+     * Бренды [id => ['id','name','name_uk','url','image','hidden','product_count']].
+     * На /ua/ name — украинское название (name_uk, если задано: «Не вказано»; кэш у каждого языка свой),
+     * адрес бренда — всегда из url (brandUrl), поэтому /ua/brand/… совпадает с /brand/… плюс префикс.
+     */
     public static function brands(): array
     {
         if (self::$brands === null) {
             self::$brands = Cache::remember('catalog.brands', 86400, static fn() =>
-                App::db()->keyed('SELECT id, name, url, image, hidden, product_count FROM brands ORDER BY name'));
+                App::db()->keyed('SELECT id, name, name_uk, url, image, hidden, product_count FROM brands ORDER BY name'));
         }
         return self::$brands;
     }

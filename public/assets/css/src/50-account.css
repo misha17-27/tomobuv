@@ -19,6 +19,9 @@
 .auth-row{display:flex;justify-content:flex-end;margin-top:-8px;font-size:14px}
 .auth-alt{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;color:var(--muted);text-align:center}
 .auth-links{display:flex;gap:16px;font-size:13px;margin-top:2px}
+/* сводка ошибок регистрации (role=alert): ссылки ведут к полям */
+.auth-errs ul{margin:6px 0 0;padding-left:18px;display:grid;gap:2px}
+.auth-errs a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .auth-done{text-align:center;display:grid;gap:12px;justify-items:center}
 .auth-done p{color:var(--ink);font-size:15px}
 .auth-done p.muted{color:var(--muted);font-size:14px}

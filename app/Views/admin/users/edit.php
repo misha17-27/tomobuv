@@ -18,7 +18,7 @@ $inv = static fn(string $k): string => isset($errors[$k]) ? ' aria-invalid="true
 $dt = static fn($d): string => e(date('d.m.Y H:i', strtotime((string) $d)));
 $phoneVal = (string) ($form['phone'] ?? '');
 if ($phoneVal !== '' && ctype_digit($phoneVal)) $phoneVal = Orders::formatPhone($phoneVal);
-$inviteLeft = $u['reset_expires'] && strtotime((string) $u['reset_expires']) > time();
+$inviteUntil = U::inviteUntil($u);          // только настоящее приглашение (не ссылка восстановления пароля)
 ?>
 <div class="sys-head">
   <span class="pill <?= $u['role'] === 'admin' ? 'confirmed' : '' ?>"><?= e(U::ROLES[$u['role']] ?? $u['role']) ?></span>
@@ -106,7 +106,7 @@ $inviteLeft = $u['reset_expires'] && strtotime((string) $u['reset_expires']) > t
         <div><dt>Последний вход</dt><dd><?= $u['last_login_at'] ? $dt($u['last_login_at']) . '<small class="muted"> · ' . e(SystemStatus::ago(time() - strtotime((string) $u['last_login_at']))) . '</small>' : '<span class="muted">ни разу</span>' ?></dd></div>
         <div><dt>Входов в админку</dt><dd><?= (int) $loginCount ?></dd></div>
         <div><dt>Пароль</dt><dd><?= (int) $u['nopass'] ? '<span class="sys-bad">не задан</span>' : ((int) $u['legacy'] ? '<span class="sys-warn-t">старого формата (md5 из Webasyst)</span> — задайте новый' : 'хранится как хеш') ?></dd></div>
-        <?php if ($inviteLeft): ?><div><dt>Приглашение</dt><dd>ссылка действует до <?= $dt($u['reset_expires']) ?></dd></div><?php endif; ?>
+        <?php if ($inviteUntil !== ''): ?><div><dt>Приглашение</dt><dd>ссылка действует до <?= $dt($inviteUntil) ?></dd></div><?php endif; ?>
         <?php if ((int) $u['orders_count']): ?><div><dt>Заказов как покупатель</dt><dd><a href="/admin/customers/<?= $uid ?>/"><?= (int) $u['orders_count'] ?></a></dd></div><?php endif; ?>
       </dl>
     </div>
@@ -134,7 +134,7 @@ $inviteLeft = $u['reset_expires'] && strtotime((string) $u['reset_expires']) > t
           <?= BaseController::tokenField() ?>
           <h2>Приглашение</h2>
           <p class="muted">Письмо на <?= e((string) $u['email']) ?> со ссылкой, чтобы сотрудник сам задал пароль (72 часа). Старая ссылка перестанет работать.</p>
-          <button class="btn"><?= $inviteLeft ? 'Отправить ещё раз' : 'Отправить приглашение' ?></button>
+          <button class="btn"><?= $inviteUntil !== '' ? 'Отправить ещё раз' : 'Отправить приглашение' ?></button>
         </form>
       <?php endif; ?>
 

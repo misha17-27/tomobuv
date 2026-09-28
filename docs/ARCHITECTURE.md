@@ -38,7 +38,8 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
    Порядок «по убыванию, при равных — id по возрастанию» (как на старом сайте) идёт через вычисляемую колонку
    `product_rid = 4294967295 − product_id` (`… DESC, product_rid DESC`): MySQL/MariaDB не читают по индексу смешанные
    направления сортировки (database/migrations/perf.sql). Новый ORDER BY для витрины — сначала EXPLAIN: без «Using filesort».
-   После изменения товаров: `CatalogIndexer::products([$id, …])`, после массового импорта — `CatalogIndexer::rebuildAll()`.
+   После изменения товаров: `$s = CatalogIndexer::snapshot($ids)` до изменения и `CatalogIndexer::products($ids, $s)` после
+   (1–10 товаров — ~20 мс; без снимка тоже верно, ~0,15 с), после массового импорта — `CatalogIndexer::rebuildAll()`.
 3. **Фильтры**: `product_features (feature_id, value_id, product_id)`, заранее посчитанные `category_facets`.
 4. **Файловый кэш данных** (`Core/Cache`) для справочников — категории, бренды, настройки, меню.
 5. **Сессия только при необходимости** (`Session::start()` вызывается входом, оформлением, админкой).
@@ -59,6 +60,8 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
   через проверку `information_schema` (как в `database/migrations/admin-import.sql`); `bin/install.php` повторяет
   миграцию, зависящую от более поздней по алфавиту.
 - **Любой вывод в шаблонах — через `e()`**. HTML из базы (описания, страницы) выводится как есть — его пишет админ.
+  HTML-поле формы админки сохраняется через `HtmlSanitizer::staff()` (или `PagesController::html()`): администратору — как есть,
+  менеджеру — без скриптов, on*-атрибутов, javascript:-ссылок и чужих iframe; описания из импорта — `HtmlSanitizer::supplier()`.
 - Формы витрины: CSRF «double submit» — `csrf_field()` в форме или заголовок `X-CSRF-Token` (JS: `UI.post()`),
   проверка `Csrf::check()`. Админка: `BaseController` сам проверяет токен сессии на каждом POST (`BaseController::tokenField()`, JS: `Adm.post()`).
 - Спам-защита публичных форм: скрытое поле `website` (honeypot) + `RateLimit::hit("key:ip", N, sec)`.
@@ -90,6 +93,12 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
   точки SEO — `.seo-dot ok|warn|auto|none`; медиа-сетка — `.media-grid > figure`; график — `.bars > .bar` или SVG `.chart`
 - сообщения: `$this->flash('Сохранено')` → зелёная плашка, `$this->flash('…', true)` → красная.
 - картинки для контента: `public/uploads/ГГГГ/ММ/` через `App\Services\Media::store($file)`; выбор картинки на любом экране — `<button type="button" class="btn" data-media-pick="#поле" data-media-preview="#превью">Выбрать из медиатеки</button>` + `'scripts' => ['admin/media.js']` (для textarea вставляет `<img>` в позицию курсора; из JS — `MediaPicker.open({onSelect(file){…}})`).
+- редакторы (товар, категория, бренд, характеристика, страница, статья, баннер) — один вид: над формой переключатель «RU | UA» со счётчиком
+  заполненных полей UA — `$view->partial('admin/partials/lang-bar', ['lang' => $lang, 'what' => 'страницы'])` внутри области `[data-lang="ru"]`,
+  поля языка — `.l-ru` / `.l-uk`, поля UA — с атрибутом `data-uk`; в каталоге поле в двух языках — `AdminCatalog::i18nField()`,
+  SEO-поля с одинаковыми подписями — `AdminCatalog::seoField('meta_title', 'meta_title', $row, […])`, метка языка — `AdminCatalog::langTag('uk')`.
+  HTML-поле — `<textarea data-editor>`: один редактор `admin/content.js` (режимы «Визуально | HTML», «Медиатека» вставляет `<img>`,
+  вставка из буфера чистится); экраны без content.js подключают его партиалом `admin/partials/editor`. Стили — в конце admin.css.
 
 ## SEO — адреса и мета-теги как на старом сайте (Webasyst)
 

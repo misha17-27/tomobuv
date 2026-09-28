@@ -309,6 +309,7 @@ final class FeaturesController extends BaseController
                 $uk = is_scalar($uk) ? mb_substr(trim((string) preg_replace('/\s+/u', ' ', (string) $uk)), 0, 255) : '';
                 if (!isset($curUk[$vid]) || $uk === $curUk[$vid]) continue;
                 $db->update('feature_values', ['value_uk' => $uk === '' ? null : $uk], 'id = ? AND feature_id = ?', [$vid, $fid]);
+                if ($isBrand) $db->update('brands', ['name_uk' => $uk === '' ? null : $uk], 'id = ?', [$vid]);   // название бренда на /ua/ (адрес не меняется)
                 $changed++;
             }
             foreach ($names as $vid => $name) {

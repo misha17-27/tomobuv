@@ -16,7 +16,7 @@ $fmtNames = ['csv' => 'CSV', 'xlsx' => 'Excel XLSX', 'xml' => 'XML', 'yml' => 'Y
 
 // группы полей в выпадающем списке
 $groups = [
-    'Поиск и основное' => ['id', 'sku', 'supplier_code', 'name', 'url', 'supplier'],
+    'Поиск и основное' => ['id', 'sku', 'supplier_code', 'name', 'url', 'supplier', 'updated_at'],
     'Цены и опт'       => ['price', 'price_box', 'compare_price', 'purchase_price', 'box_qty', 'min_qty', 'stock', 'in_stock', 'status'],
     'Карточка товара'  => ['size', 'brand', 'category', 'images', 'description', 'summary'],
     'SEO и украинская версия' => ['meta_title', 'meta_description', 'meta_keywords', 'name_uk', 'description_uk', 'summary_uk', 'meta_title_uk', 'meta_description_uk', 'meta_keywords_uk'],
@@ -47,8 +47,9 @@ foreach ($cols as $c) {
     }
     $examples[$c] = $ex;
 }
-$actNames = ['create' => 'Создать', 'update' => 'Обновить', 'same' => 'Без изменений', 'skip' => 'Пропустить', 'error' => 'Ошибка'];
-$actClass = ['create' => 'st-completed', 'update' => 'st-processing', 'same' => 'st-deleted', 'skip' => 'st-refunded', 'error' => 'st-refunded im-err'];
+$actNames = ['create' => 'Создать', 'update' => 'Обновить', 'same' => 'Без изменений', 'conflict' => 'Изменён на сайте', 'skip' => 'Пропустить', 'error' => 'Ошибка'];
+$actClass = ['create' => 'st-completed', 'update' => 'st-processing', 'same' => 'st-deleted', 'conflict' => 'st-paid', 'skip' => 'st-refunded', 'error' => 'st-refunded im-err'];
+$stampMapped = in_array('updated_at', $map, true);   // файл нашего экспорта: есть время изменения товаров
 $yes = static fn(bool $b) => $b ? ' checked' : '';
 $parsedInfo = [];
 if ($job['format'] === 'csv') {
@@ -118,8 +119,10 @@ if ($isXml) $parsedInfo[] = 'товар — элемент «' . $o['item_path']
         <label class="chk"><input type="checkbox" name="opt[hide_missing]" value="1" id="im-hide"<?= $yes(!empty($o['hide_missing'])) ?>> Скрыть товары этого поставщика, которых нет в файле</label>
         <label class="chk"><input type="checkbox" name="opt[unhide]" value="1"<?= $yes(!empty($o['unhide'])) ?>> Показывать на сайте скрытые товары, если они снова есть в файле</label>
         <label class="chk"><input type="checkbox" name="opt[images]" value="1"<?= $yes(!empty($o['images'])) ?>> Загружать фото по ссылкам (новым товарам и товарам без фото)</label>
+        <label class="chk"><input type="checkbox" name="opt[overwrite]" value="1"<?= $yes(!empty($o['overwrite'])) ?>> Перезаписать всё равно товары, изменённые на сайте после выгрузки</label>
       </div>
       <p class="hint" id="im-hide-hint">Скрытие сработает, только если в файле найден хотя бы один товар поставщика и скрыть нужно не больше половины его товаров — защита от неполного файла.</p>
+      <p class="hint">Файл нашего экспорта с колонкой <code>updated_at</code> (поле «<?= e(Importer::FIELDS['updated_at']) ?>»<?= $stampMapped ? '' : ', сейчас не сопоставлено' ?>): товар, который изменили на сайте позже, чем выгружен файл, не перезаписывается — он попадёт в итог импорта со ссылкой. Галочка «Перезаписать всё равно» записывает данные файла поверх. Прайсы поставщиков без этой колонки обрабатываются как обычно.</p>
     </div>
   </div>
 
@@ -219,6 +222,10 @@ if ($isXml) $parsedInfo[] = 'товар — элемент «' . $o['item_path']
     </div>
   </div>
   <?php if (!empty($preview['error'])): ?><div class="pad"><div class="flash bad"><?= e($preview['error']) ?></div></div><?php endif; ?>
+  <?php if (!empty($preview['summary']['conflict'])): $nc = (int) $preview['summary']['conflict']; ?>
+    <div class="pad"><div class="flash warn"><?= $nc ?> <?= plural($nc, 'товар', 'товара', 'товаров') ?> в этих строках <?= $nc === 1 ? 'изменён' : 'изменены' ?> на сайте после выгрузки файла — <?= $nc === 1 ? 'он не будет перезаписан' : 'они не будут перезаписаны' ?>.
+      Список по всему файлу будет в итоге импорта. Чтобы записать данные файла поверх, отметьте «Перезаписать всё равно» и сохраните настройки.</div></div>
+  <?php endif; ?>
   <?php if ($preview['rows']): ?>
   <div class="table-scroll"><table class="grid im-preview">
     <thead><tr><th class="right">№</th><th>Действие</th><th>Товар</th><th class="right">Цена/пара</th><th>Категория</th><th>Бренд, размеры</th><th>Наличие</th><th>Что изменится</th></tr></thead>

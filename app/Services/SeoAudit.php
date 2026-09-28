@@ -330,8 +330,9 @@ final class SeoAudit
                 'tpl' => $catTpl ? ['seo.category_meta_title', 'seo.category_meta_description'] : ['', '']]);
         }
 
-        // ---- бренды: title = brands.title, иначе имя бренда; description = brands.meta_description (как на старом сайте)
-        foreach ($db->all('SELECT id, name, url, title, title_uk, meta_description, meta_description_uk, hidden, product_count FROM brands ORDER BY name, id') as $b) {
+        // ---- бренды: title = brands.title, иначе имя бренда; description = brands.meta_description (как на старом сайте);
+        //      имя на /ua/ — name_uk, если задано («Не вказано»), как Catalog::brands() на витрине (DB::$localize)
+        foreach ($db->all('SELECT id, name, name_uk, url, title, title_uk, meta_description, meta_description_uk, hidden, product_count FROM brands ORDER BY name, id') as $b) {
             $path = '/brand/' . urlencode((string) $b['url']) . '/';
             $live = !(int) $b['hidden'] && (int) $b['product_count'] > 0;
             $closed = (int) $b['hidden'] ? 'скрыт' : ((int) $b['product_count'] === 0 ? 'нет товаров — не в sitemap' : $closedBy($path));
@@ -404,14 +405,16 @@ final class SeoAudit
     /**
      * Агрегаты по товарам — один проход по таблице сразу для обеих версий сайта. Длина считается один раз на строку
      * и раскладывается по корзинам INTERVAL (0 — пусто, 1 — короче минимума, 2 — норма, 3 — длиннее максимума),
-     * дальше GROUP BY на несколько десятков групп (быстрее, чем SUM(CASE …) с повтором выражений; ~0,19 с на 107 тыс.).
+     * дальше GROUP BY на несколько десятков групп (быстрее, чем SUM(CASE …) с повтором выражений; ~0,24 с на 107 тыс., из них ~0,05 с — TRIM).
      * Украинская версия видит meta_*_uk, если заполнено, иначе русское — корзина «uk» = корзина *_uk, а при 0 — русская.
+     * Длина — по TRIM(), как в условиях списка (sql()) и как на витрине: иначе значение с пробелами по краям попадало
+     * в итогах в одну корзину, а в списке — в другую, и дальние страницы отфильтрованного списка съезжали.
      * Возвращает ['ru' => итоги, 'uk' => итоги, 'cover' => покрытие переводов (только товары на сайте)].
      */
     private static function productStats(?string $extraWhere = null, array $params = []): array
     {
-        // без TRIM/COALESCE (на треть быстрее): NULL даёт -1, пустая строка — 0, обе — «пусто»
-        $b = static fn(string $c, int $min, int $max): string => "INTERVAL(CHAR_LENGTH($c), 1, $min, " . ($max + 1) . ')';
+        // без COALESCE: NULL даёт -1, пустая (после TRIM) строка — 0, обе — «пусто»
+        $b = static fn(string $c, int $min, int $max): string => "INTERVAL(CHAR_LENGTH(TRIM($c)), 1, $min, " . ($max + 1) . ')';
         $rows = App::db()->all('SELECT status = 1 AS live, '
             . $b('meta_title', self::TITLE_MIN, self::TITLE_MAX) . ' AS t, '
             . $b('meta_description', self::DESC_MIN, self::DESC_MAX) . ' AS d, '
@@ -479,8 +482,9 @@ final class SeoAudit
     }
 
     /**
-     * Товары для таблицы: [rows, total, counts, page, found, limited]. Без поиска количество берётся из агрегатов (кэш),
-     * с поиском — один проход агрегатов по найденным id (found — сколько нашлось, limited — упёрлись в SEARCH_LIMIT).
+     * Товары для таблицы: [rows, total, counts, page, found, found_hidden, limited]. Без поиска количество берётся из агрегатов (кэш),
+     * с поиском — один проход агрегатов по найденным id: found — сколько нашлось товаров на сайте (та же база, что у «Всё»),
+     * found_hidden — скрытых (они под «Закрыто от индексации»), limited — упёрлись в SEARCH_LIMIT.
      */
     public static function products(string $filter, string $q, int $page, array $stats, int $perPage = self::PER_PAGE): array
     {
@@ -491,7 +495,8 @@ final class SeoAudit
         if ($q !== '') {
             $ids = self::searchIds($q);
             $found = count($ids);
-            if (!$ids) return ['rows' => [], 'total' => 0, 'counts' => array_fill_keys(array_keys(self::FILTERS), 0), 'page' => 1, 'found' => 0, 'limited' => false];
+            if (!$ids) return ['rows' => [], 'total' => 0, 'counts' => array_fill_keys(array_keys(self::FILTERS), 0), 'page' => 1, 'found' => 0,
+                'found_hidden' => 0, 'limited' => false];
             [$ph, $idsParams] = $db->in($ids);
             $idsWhere = "id IN ($ph)";
             $counts = self::productCounts(self::productStats($idsWhere, $idsParams)[Lang::current()]);
@@ -502,7 +507,8 @@ final class SeoAudit
         $pages = max(1, (int) ceil($total / $perPage));
         $page = max(1, min($page, $pages));
         $where = self::productWhere($filter);
-        $extra = ['found' => $found, 'limited' => $found !== null && $found >= self::SEARCH_LIMIT];
+        $extra = ['found' => $found === null ? null : $counts[''], 'found_hidden' => $found === null ? 0 : $counts['closed'],
+            'limited' => $found !== null && $found >= self::SEARCH_LIMIT];
         if ($where === null || $total === 0) return ['rows' => [], 'total' => 0, 'counts' => $counts, 'page' => 1] + $extra;
         if ($idsWhere !== '') $where .= ' AND ' . $idsWhere;
         // Дальние страницы (вторая половина списка) читаются с конца: ORDER BY id ASC и разворот — строк вдвое меньше

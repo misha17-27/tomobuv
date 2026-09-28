@@ -2,8 +2,10 @@
 /**
  * Список заказов.
  * @var array $f @var array $counts @var int $all @var int $total @var array $orders @var App\Core\Paginator $pg
- * @var array $shipping @var array $payment
+ * @var array $shipping @var array $payment @var string $qs фильтры списка (для формы массовой смены статуса)
+ * @var ?array $newCounts OrdersController::newCounts() — на вкладке «Новые» @var int $bulkMax
  */
+use App\Controllers\Admin\BaseController;
 use App\Controllers\Admin\OrdersController as O;
 
 $tabUrl = static function (string $status) use ($f): string {
@@ -44,22 +46,54 @@ $filtered = $f['q'] !== '' || $f['from'] !== '' || $f['to'] !== '' || $f['source
   <?php if ($filtered): ?><a class="btn" href="<?= e('/admin/orders/' . ($f['status'] !== '' ? '?status=' . $f['status'] : '')) ?>">Сбросить</a><?php endif; ?>
 </form>
 
+<?php if ($newCounts && ($newCounts['fresh'] || $newCounts['stale'])):
+  // «Новые»: за FRESH_DAYS дней — как в плитке на главной и в меню; старше — отдельно, их можно закрыть массово
+  $freshFrom = O::freshFrom();
+  $isFresh = $f['from'] === $freshFrom && $f['to'] === '';
+  $isStale = $f['from'] === '' && $f['to'] === date('Y-m-d', strtotime($freshFrom . ' -1 day')); ?>
+  <div class="flash warn sl-newhint">
+    <?php if ($isStale): ?>
+      Это «новые» заказы старше <?= O::FRESH_DAYS ?> дней — в основном необработанные заказы со старого сайта. Чтобы закрыть их разом,
+      отметьте все заказы на странице (галочка в шапке таблицы), затем «все найденные» и выберите статус (например, «Выполнен» или «Удалён»).
+      <a href="<?= e(O::freshUrl()) ?>">Новые за <?= O::FRESH_DAYS ?> дней: <?= number_format($newCounts['fresh'], 0, '', ' ') ?></a>
+    <?php else: ?>
+      <?php if (!$isFresh): ?><a href="<?= e(O::freshUrl()) ?>">Новые за <?= O::FRESH_DAYS ?> дней (с <?= e(date('d.m.Y', strtotime($freshFrom))) ?>): <?= number_format($newCounts['fresh'], 0, '', ' ') ?></a> — их показывают плитка на главной и счётчик в меню.<?php else: ?>Новые заказы за <?= O::FRESH_DAYS ?> дней — те же, что в плитке на главной и в счётчике меню.<?php endif; ?>
+      <?php if ($newCounts['stale']): ?>Ещё <?= number_format($newCounts['stale'], 0, '', ' ') ?> «<?= plural($newCounts['stale'], 'новый', 'новых', 'новых') ?>» старше — в основном необработанные со старого сайта:
+        <a href="<?= e(O::staleUrl()) ?>">открыть и закрыть массово</a>.<?php endif; ?>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
+
 <p class="sl-found muted">Найдено: <b><?= number_format($total, 0, '', ' ') ?></b> <?= plural($total, 'заказ', 'заказа', 'заказов') ?><?= $pg->pages > 1 ? ' · страница ' . $pg->page . ' из ' . $pg->pages : '' ?></p>
 
 <?php if (!$orders): ?>
   <div class="card empty-card"><h2>Заказов не найдено</h2><p>Измените условия поиска или период.</p><?php if ($filtered): ?><a class="btn" href="/admin/orders/">Показать все заказы</a><?php endif; ?></div>
 <?php else: ?>
+<form class="sl-bulk" method="post" action="/admin/orders/bulk/<?= $qs !== '' ? '?' . e($qs) : '' ?>" data-sl-bulk data-total="<?= (int) $total ?>">
+<?= BaseController::tokenField() ?>
+<div class="bulk-bar" data-sl-bulk-bar hidden>
+  <span>Выбрано: <b data-sl-bulk-n>0</b></span>
+  <?php if ($total > count($orders)): ?><label class="chk"><input type="checkbox" name="all" value="1" data-sl-bulk-all<?= $total > $bulkMax ? ' disabled' : '' ?>>
+    все найденные (<?= number_format($total, 0, '', ' ') ?>)<?= $total > $bulkMax ? ' — больше ' . number_format($bulkMax, 0, '', ' ') . ', сузьте фильтр' : '' ?></label><?php endif; ?>
+  <select name="to_status" aria-label="Новый статус для отмеченных заказов">
+    <option value="">Новый статус…</option>
+    <?php foreach (O::STATUSES as $st => $label): ?><option value="<?= e($st) ?>"><?= e($label) ?></option><?php endforeach; ?>
+  </select>
+  <button class="btn btn-p btn-sm" type="submit">Применить</button>
+  <span class="muted">письма клиентам не отправляются</span>
+</div>
+<label class="chk sl-pick-m"><input type="checkbox" data-sl-check-all> Отметить все заказы на странице</label>
 <div class="tblwrap">
 <table class="tbl sl-orders sl-stack">
   <thead><tr>
-    <th>Номер</th><th>Дата</th><th>Клиент</th><th>Телефон</th><th class="num">Ящ. / пар</th><th class="num">Сумма</th>
+    <th><label class="sl-pick"><input type="checkbox" data-sl-check-all aria-label="Отметить все заказы на странице"></label>Номер</th><th>Дата</th><th>Клиент</th><th>Телефон</th><th class="num">Ящ. / пар</th><th class="num">Сумма</th>
     <th>Доставка</th><th>Оплата</th><th>Статус</th><th>Источник</th>
   </tr></thead>
   <tbody>
   <?php foreach ($orders as $o):
     $oid = (int) $o['id']; $num = O::number($oid); $ts = strtotime((string) $o['created_at']); ?>
     <tr class="<?= $o['status'] === 'new' ? 'unread' : '' ?>">
-      <td data-l="Номер"><a class="sl-num" href="/admin/orders/<?= $oid ?>/"><?= e($num) ?></a></td>
+      <td data-l="Номер"><label class="sl-pick"><input type="checkbox" name="ids[]" value="<?= $oid ?>" aria-label="Отметить заказ <?= e($num) ?>"></label><a class="sl-num" href="/admin/orders/<?= $oid ?>/"><?= e($num) ?></a></td>
       <td data-l="Дата" class="nowrap"><?= e(date('d.m.Y', $ts)) ?><br><span class="muted"><?= e(date('H:i', $ts)) ?></span></td>
       <td data-l="Клиент">
         <?php if ($o['customer_id']): ?><a href="/admin/customers/<?= (int) $o['customer_id'] ?>/"><?= e($o['name'] !== '' ? $o['name'] : 'Клиент #' . $o['customer_id']) ?></a>
@@ -83,5 +117,6 @@ $filtered = $f['q'] !== '' || $f['from'] !== '' || $f['to'] !== '' || $f['source
   </tbody>
 </table>
 </div>
+</form>
 <?= $pg->html() ?>
 <?php endif; ?>

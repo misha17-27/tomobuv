@@ -23,7 +23,7 @@ $hasEmail = (bool) filter_var((string) $order['email'], FILTER_VALIDATE_EMAIL);
   <span class="sl-ohead-sum"><?= (int) $order['boxes'] ?> ящ. / <?= (int) $order['pairs'] ?> пар · <b><?= e(price_format($order['total'])) ?></b></span>
 </div>
 
-<div class="grid3">
+<div class="grid3 ord-grid"><?php /* на телефоне карточки справа («Статус заказа», клиент, доставка) идут до истории — admin.css */ ?>
   <div class="sl-col">
     <form class="card" method="post" action="/admin/orders/<?= $oid ?>/items/" data-oi-form>
       <h2>Состав заказа</h2>
@@ -42,7 +42,7 @@ $hasEmail = (bool) filter_var((string) $order['email'], FILTER_VALIDATE_EMAIL);
       </div>
     </form>
 
-    <div class="card">
+    <div class="card ord-history">
       <h2>История заказа</h2>
       <?php if (!$log): ?><p class="muted">Записей нет.</p><?php else: ?>
       <ol class="events">

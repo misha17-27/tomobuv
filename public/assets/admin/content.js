@@ -1,33 +1,32 @@
-/* Админка: контент и настройки + простой HTML-редактор.
+/* Админка: общие компоненты редакторов + контент и настройки.
  *
- * Редактор подключается к любому <textarea data-editor> (страницы, блог, товары, категории…):
- *   'scripts' => ['admin/content.js'] в render() раздела (стили admin/content.css и медиатеку admin/media.js
- *   скрипт подгрузит сам, если их нет на странице).
- *   Панель: H2, H3, абзац, жирный, курсив, списки, ссылка, картинка (загрузка на /admin/upload/),
- *   таблица, «Предпросмотр» ↔ «HTML-код». В предпросмотре текст можно править прямо «как на сайте»
- *   (стили витрины, скрипты из содержимого не выполняются — iframe в песочнице).
- *   Необязательно: data-media-base="https://…" — откуда брать картинки /wa-data/… в предпросмотре;
- *   class="… small" у textarea → невысокий редактор.
- *   API: window.AdmEditor.init(textarea), window.AdmEditor.upload(file) → Promise<{ok,url}>.
+ * Один вид во всех редакторах (товар, категория, бренд, характеристика, страница, статья, баннер). Стили — admin.css.
  *
- * Переключатель «RU | UA» (form.ed-form[data-lang], кнопки [data-lang-to], поля .l-ru/.l-uk, [data-uk] — счётчик
- * заполненных, [data-copy-from][data-copy-to] — «Скопировать русский текст»). Кнопки «Медиатека» — если подключён media.js.
+ * 1) HTML-редактор — к любому <textarea data-editor> (подключить 'admin/content.js'; экраны каталога подключают его
+ *    партиалом admin/partials/editor, медиатеку admin/media.js скрипт при необходимости подгрузит сам).
+ *    Одна панель: H2, H3, абзац, жирный, курсив, списки, ссылка, «Медиатека» (выбор или загрузка картинки,
+ *    вставляет <img>), таблица и режимы «Визуально» (правка «как на сайте»: стили витрины, скрипты из содержимого
+ *    не выполняются — iframe в песочнице) / «HTML» (код). Выбранный режим запоминается.
+ *    Содержимое не искажается: пока текст в визуальном режиме не правили, в textarea остаётся исходный HTML байт в байт
+ *    (сравнение со снимком); картинки /wa-data/… в визуальном режиме берутся с data-media-base (разработка) через
+ *    атрибут data-ed-src, который при переносе обратно убирается — ссылки в коде не меняются.
+ *    Необязательно: data-media-base="https://…"; rows < 8 → невысокий редактор.
+ *    Вставка из буфера: чужой HTML разбирается в инертном документе и чистится (cleanHtml) — onerror и т.п. не выполняются.
+ *    API: window.AdmEditor.init(textarea), .upload(file) → Promise<{ok,url}>, .toast(msg, isErr), .withMedia(fn), .clean(html).
+ *
+ * 2) Переключатель «RU | UA» (партиал admin/partials/lang-bar): область [data-lang="ru|uk"] (форма или обёртка),
+ *    поля .l-ru / .l-uk, поля UA [data-uk] — счётчик «заполнено N из M»; язык запоминается на вкладку браузера,
+ *    уходит с формой (_lang), ошибка или обязательное поле другого языка открывает его; событие 'langchange' на области.
+ *    [data-copy-from][data-copy-to] — «Скопировать русский текст».
  *
  * Прочее: загрузка картинок сразу при выборе файла ([data-upload-now]), предпросмотр баннера,
  * сортировка баннеров перетаскиванием/стрелками, списки строк (телефоны, способы доставки),
- * предпросмотр SEO-шаблонов, счётчики символов, Ctrl+S — сохранить, предупреждение о несохранённых правках.
+ * предпросмотр SEO-шаблонов, счётчики символов, Ctrl+S — сохранить, предупреждение о несохранённых правках (form.ed-form).
  */
 (function () {
   'use strict';
 
-  // Подключили только скрипт (другой раздел админки с textarea[data-editor]) — стили редактора подгружаем сами
   var SELF = document.currentScript && document.currentScript.src;
-  if (SELF && !document.querySelector('link[href*="admin/content.css"]')) {
-    var css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = SELF.replace(/content\.js(\?[^#]*)?$/, 'content.css$1');
-    document.head.appendChild(css);
-  }
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -36,6 +35,15 @@
     get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* приватный режим */ } }
   };
+  var session = {
+    get: function (k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { sessionStorage.setItem(k, v); } catch (e) { /* без хранилища — просто не запоминаем */ } }
+  };
+  function fire(node, type) {
+    var ev;
+    try { ev = new Event(type, { bubbles: true }); } catch (e) { ev = document.createEvent('Event'); ev.initEvent(type, true, true); }
+    node.dispatchEvent(ev);
+  }
 
   // ------------------------------------------------------------------ сообщение внизу экрана
   var toastTimer;
@@ -52,6 +60,27 @@
   function post(url, fd) {
     if (window.Adm && Adm.post) return Adm.post(url, fd);
     return Promise.reject(new Error('Adm.post недоступен'));
+  }
+
+  // ------------------------------------------------------------------ медиатека (media.js): подгрузить, если экран её не подключил
+  var mediaWaiters = [];
+  function withMedia(fn) {
+    if (window.MediaPicker) return fn();
+    mediaWaiters.push(fn);
+    var sc = $('script[src*="admin/media.js"]');
+    if (!sc) {
+      if (!SELF) return toast('Медиатека недоступна на этой странице', true);
+      sc = document.createElement('script');
+      sc.src = SELF.replace(/content\.js(\?[^#]*)?$/, 'media.js$1');
+      document.head.appendChild(sc);
+    }
+    if (!sc.__edWait) {
+      sc.__edWait = true;
+      sc.addEventListener('load', function () {
+        var list = mediaWaiters.splice(0);
+        if (window.MediaPicker) list.forEach(function (f) { f(); }); else toast('Медиатека недоступна на этой странице', true);
+      });
+    }
   }
 
   // ------------------------------------------------------------------ загрузка картинок
@@ -85,12 +114,51 @@
     }).catch(function () { return { ok: false, error: 'Не удалось загрузить файл (слишком большой или нет связи)' }; });
   }
 
-  function pickFile(cb) {
-    var inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/jpeg,image/png,image/gif,image/webp';
-    inp.addEventListener('change', function () { if (inp.files && inp.files[0]) cb(inp.files[0]); });
-    inp.click();
+  function imgTag(url, name, w, h) {
+    var alt = (name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+    return '<img src="' + esc(url) + '" alt="' + esc(alt) + '"' + (w ? ' width="' + (+w) + '" height="' + (+h) + '"' : '') + '>';
+  }
+
+  // ------------------------------------------------------------------ очистка чужого HTML (вставка из буфера)
+  // Разбор — только в «инертном» документе (createHTMLDocument): там не срабатывают обработчики вроде <img onerror>
+  // и не грузятся картинки (innerHTML обычного div в админке выполнил бы onerror). Из разобранного остаются
+  // теги оформления без классов и стилей, ссылки и картинки — только http(s), относительные, mailto:, tel:.
+  var PASTE_DROP = 'script,style,meta,link,title,base,head,xml,template,noscript,iframe,frame,frameset,object,embed,applet,param,'
+    + 'form,input,button,select,option,textarea,svg,math,canvas,video,audio,source,track,o\\:p';
+  var PASTE_TAGS = /^(P|BR|B|STRONG|I|EM|U|S|SUB|SUP|H2|H3|H4|UL|OL|LI|A|IMG|TABLE|THEAD|TBODY|TFOOT|TR|TD|TH|CAPTION|BLOCKQUOTE|HR|DIV)$/;
+  function safeUrl(v, img) {
+    var u = String(v || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '');   // «java\tscript:» браузер читает как javascript:
+    var m = u.match(/^([a-z][a-z0-9+.\-]*):/i);
+    return u !== '' && (!m || (img ? /^https?$/i : /^(https?|mailto|tel)$/i).test(m[1]));
+  }
+  function cleanHtml(html) {
+    var doc = document.implementation.createHTMLDocument('');
+    var body = doc.body;
+    body.innerHTML = String(html || '').replace(/<!--[\s\S]*?-->/g, '');
+    $$(PASTE_DROP, body).forEach(function (n) { n.remove(); });
+    // снизу вверх: потомки обработаны раньше родителя (родителя можно спокойно переименовать или развернуть)
+    $$('*', body).reverse().forEach(function (n) {
+      var tag = n.tagName;
+      var to = tag === 'H1' ? 'h2' : (tag === 'H5' || tag === 'H6') ? 'h4' : '';     // H1 на странице один — заголовок сайта
+      if (to) {
+        var r = doc.createElement(to);
+        while (n.firstChild) r.appendChild(n.firstChild);
+        n.parentNode.replaceChild(r, n);
+        n = r; tag = r.tagName;
+      }
+      if (!PASTE_TAGS.test(tag)) {                       // span, font, section… — оставить только содержимое
+        while (n.firstChild) n.parentNode.insertBefore(n.firstChild, n);
+        n.remove();
+        return;
+      }
+      Array.prototype.slice.call(n.attributes).forEach(function (a) {
+        var keep = (tag === 'A' && a.name === 'href' && safeUrl(a.value)) || (tag === 'IMG' && /^(alt|width|height)$/.test(a.name))
+          || (tag === 'IMG' && a.name === 'src' && safeUrl(a.value, true)) || (/^T[DH]$/.test(tag) && /^(colspan|rowspan)$/.test(a.name));
+        if (!keep) n.removeAttribute(a.name);
+      });
+      if (tag === 'IMG' && !n.hasAttribute('src')) n.remove();   // картинка из Word (file:, data:) — всё равно не откроется на сайте
+    });
+    return body.innerHTML;
   }
 
   // ------------------------------------------------------------------ HTML-редактор
@@ -98,15 +166,15 @@
     ['h2', 'H2', 'Заголовок раздела (H2)'], ['h3', 'H3', 'Подзаголовок (H3)'], ['p', '¶', 'Обычный абзац'], ['|'],
     ['b', 'Ж', 'Жирный (Ctrl+B)', 'ed-b'], ['i', 'К', 'Курсив (Ctrl+I)', 'ed-i'], ['|'],
     ['ul', '• Список', 'Маркированный список'], ['ol', '1. Список', 'Нумерованный список'], ['|'],
-    ['link', 'Ссылка', 'Вставить ссылку'], ['img', 'Картинка', 'Загрузить и вставить картинку'],
-    ['lib', 'Медиатека', 'Вставить картинку из медиатеки', 'ed-lib'], ['table', 'Таблица', 'Вставить таблицу'],
-    ['gap'], ['mode', 'Предпросмотр', 'Переключить: предпросмотр / HTML-код', 'ed-mode']
+    ['link', 'Ссылка', 'Вставить ссылку'],
+    ['lib', 'Медиатека', 'Вставить картинку из медиатеки (там же — загрузка новой с компьютера)'], ['table', 'Таблица', 'Вставить таблицу']
   ];
+  var MODES = [['visual', 'Визуально', 'Правка текста как на сайте'], ['code', 'HTML', 'HTML-код']];
   var FRONT_CSS = '/assets/css/app.css';
 
   function Editor(ta) {
     this.ta = ta;
-    this.base = ta.getAttribute('data-media-base') || (window.AdmEditorConfig && AdmEditorConfig.mediaBase) || '';
+    this.base = (ta.getAttribute('data-media-base') || (window.AdmEditorConfig && AdmEditorConfig.mediaBase) || '').replace(/\/$/, '');
     var box = this.box = document.createElement('div');
     box.className = 'ed' + (ta.classList.contains('small') || (ta.rows && ta.rows < 8) ? ' small-ed' : '');
     var bar = this.bar = document.createElement('div');
@@ -115,7 +183,6 @@
     bar.setAttribute('aria-label', 'Оформление текста');
     BTNS.forEach(function (b) {
       if (b[0] === '|') { var s = document.createElement('span'); s.className = 'sep'; bar.appendChild(s); return; }
-      if (b[0] === 'gap') { var g = document.createElement('span'); g.className = 'gap'; bar.appendChild(g); return; }
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('data-cmd', b[0]);
@@ -123,10 +190,25 @@
       btn.setAttribute('aria-label', b[2]);
       btn.textContent = b[1];
       if (b[3]) btn.className = b[3];
-      if (b[0] === 'mode') btn.setAttribute('aria-pressed', 'false');
-      if (b[0] === 'lib') btn.hidden = !window.MediaPicker;   // покажем, когда подключится media.js
       bar.appendChild(btn);
     });
+    var gap = document.createElement('span');
+    gap.className = 'gap';
+    bar.appendChild(gap);
+    var modes = this.modes = document.createElement('span');
+    modes.className = 'ed-modes';
+    modes.setAttribute('role', 'group');
+    modes.setAttribute('aria-label', 'Режим редактора');
+    MODES.forEach(function (m) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-mode', m[0]);
+      btn.title = m[2];
+      btn.textContent = m[1];
+      btn.setAttribute('aria-pressed', m[0] === 'code' ? 'true' : 'false');
+      modes.appendChild(btn);
+    });
+    bar.appendChild(modes);
     box.setAttribute('data-mode', 'code');
     ta.parentNode.insertBefore(box, ta);
     box.appendChild(bar);
@@ -137,12 +219,16 @@
     foot.innerHTML = '<span class="ed-hint"></span><span class="ed-len"></span>';
     box.appendChild(foot);
     this.frame = null;
-    this.snapshot = null;
+    this.ready = false;       // документ iframe загружен и заполнен
+    this.snapshot = null;     // содержимое визуального режима сразу после заполнения — пока равно ему, textarea не трогаем
     this.mode = 'code';
+    this.range = null;
 
     var self = this;
     bar.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); }); // не терять выделение
     bar.addEventListener('click', function (e) {
+      var m = e.target.closest('button[data-mode]');
+      if (m) { self.setMode(m.getAttribute('data-mode'), true); return; }
       var b = e.target.closest('button[data-cmd]');
       if (b) self.exec(b.getAttribute('data-cmd'));
     });
@@ -162,79 +248,103 @@
   Editor.prototype.updateLen = function () {
     var n = this.ta.value.length;
     $('.ed-len', this.foot).textContent = n ? n.toLocaleString('ru-RU') + ' симв. HTML' : 'пусто';
-    $('.ed-hint', this.foot).textContent = this.mode === 'visual' ? 'Предпросмотр: правьте текст прямо здесь' : 'HTML-код';
+    $('.ed-hint', this.foot).textContent = this.mode === 'visual' ? 'Визуальный режим: правьте текст прямо здесь, как на сайте' : 'HTML-код';
   };
 
-  /** HTML для предпросмотра: картинки /wa-data/… — с основного сайта (локальная разработка) */
-  Editor.prototype.toPreview = function (html) {
-    if (!this.base) return html;
-    return html.replace(/(src|href)=(["'])\/wa-data\//gi, '$1=$2' + this.base.replace(/\/$/, '') + '/wa-data/');
-  };
-  Editor.prototype.fromPreview = function (html) {
-    if (!this.base) return html;
-    var b = this.base.replace(/\/$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return html.replace(new RegExp('(src|href)=(["\'])' + b + '/wa-data/', 'gi'), '$1=$2/wa-data/');
+  Editor.prototype.doc = function () {
+    return this.ready && this.frame && this.frame.contentDocument && this.frame.contentDocument.body ? this.frame.contentDocument : null;
   };
 
-  Editor.prototype.setMode = function (mode) {
+  /** HTML из textarea → документ визуального режима (картинки /wa-data/… — с основного сайта, исходная ссылка в data-ed-src) */
+  Editor.prototype.fill = function () {
+    var d = this.frame && this.frame.contentDocument;
+    if (!d || !d.body) return;
+    var html = this.ta.value;
+    if (this.base && /\/wa-data\//.test(html)) {
+      // разбор в «инертном» документе: картинки не начинают грузиться с неверного адреса
+      var tmp = document.implementation.createHTMLDocument('');
+      tmp.body.innerHTML = html;
+      var base = this.base;
+      $$('img[src^="/wa-data/"]', tmp.body).forEach(function (im) { im.setAttribute('data-ed-src', im.getAttribute('src')); im.setAttribute('src', base + im.getAttribute('src')); });
+      html = tmp.body.innerHTML;
+    }
+    d.body.innerHTML = html;
+    this.snapshot = this.serialize();
+    var self = this;
+    $$('img', d).forEach(function (im) { im.addEventListener('load', function () { self.fitFrame(); }); });
+    this.fitFrame();
+  };
+
+  /** Содержимое визуального режима как HTML (с исходными ссылками на картинки) */
+  Editor.prototype.serialize = function () {
+    var d = this.doc() || (this.frame && this.frame.contentDocument);
+    if (!d || !d.body) return '';
+    if (!d.body.querySelector('[data-ed-src]')) return d.body.innerHTML;
+    // копия — в «инертном» документе: вернув исходный src, не запускаем загрузку картинки по нему
+    var c = document.implementation.createHTMLDocument('').importNode(d.body, true);
+    $$('[data-ed-src]', c).forEach(function (im) { im.setAttribute('src', im.getAttribute('data-ed-src')); im.removeAttribute('data-ed-src'); });
+    return c.innerHTML;
+  };
+
+  Editor.prototype.setMode = function (mode, byUser) {
     var self = this;
     if (mode === this.mode) return;
     if (mode === 'visual') {
       if (!this.frame) {
         this.frame = document.createElement('iframe');
         this.frame.className = 'ed-frame';
-        this.frame.title = 'Предпросмотр содержимого';
+        this.frame.title = 'Визуальный режим редактора';
         // песочница: скрипты из содержимого не выполняются, но редактор может менять документ
         this.frame.setAttribute('sandbox', 'allow-same-origin');
+        this.frame.onload = function () {
+          var d = self.frame.contentDocument;
+          if (!d || !d.body) return;
+          try { d.execCommand('defaultParagraphSeparator', false, 'p'); d.execCommand('styleWithCSS', false, false); } catch (e) { /* старые браузеры */ }
+          var later = null;
+          d.addEventListener('input', function () {
+            self.fitFrame();
+            markDirty();
+            clearTimeout(later);                       // счётчики (длина, «заполнено N из M») — после паузы в наборе
+            later = setTimeout(function () { if (self.sync()) fire(self.ta, 'input'); }, 400);
+          });
+          d.addEventListener('paste', function (e) { self.onPaste(e); });
+          d.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveForm(self.ta.form); }
+          });
+          self.ready = true;
+          if (self.mode === 'visual') self.fill();
+        };
+        this.frame.srcdoc = '<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank">'
+          + '<link rel="stylesheet" href="' + FRONT_CSS + '">'
+          + '<style>html,body{background:#fff}body{padding:14px 18px;max-width:none;min-height:120px;outline:none}body:empty:before{content:"Начните писать…";color:#9aa8b3}'
+          + 'img{max-width:100%;height:auto}table{border-collapse:collapse}td,th{border:1px solid #e3e8ec;padding:6px 8px}</style>'
+          + '</head><body class="prose" contenteditable="true" spellcheck="true"></body></html>';
         this.box.insertBefore(this.frame, this.foot);
+      } else if (this.ready) {
+        this.fill();                                   // текст могли поменять в режиме HTML
       }
-      var doc = '<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank">'
-        + '<link rel="stylesheet" href="' + FRONT_CSS + '">'
-        + '<style>html,body{background:#fff}body{padding:14px 18px;max-width:none;min-height:280px;outline:none}body:empty:before{content:"Начните писать…";color:#9aa8b3}'
-        + 'img{max-width:100%;height:auto}table{border-collapse:collapse}td,th{border:1px solid #e3e8ec;padding:6px 8px}</style>'
-        + '</head><body class="prose" contenteditable="true" spellcheck="true">' + this.toPreview(this.ta.value) + '</body></html>';
-      this.frame.onload = function () {
-        var d = self.frame.contentDocument;
-        if (!d || !d.body) return;
-        self.snapshot = d.body.innerHTML;
-        try { d.execCommand('defaultParagraphSeparator', false, 'p'); d.execCommand('styleWithCSS', false, false); } catch (e) { /* старые браузеры */ }
-        self.fitFrame();
-        d.addEventListener('input', function () { self.fitFrame(); markDirty(); });
-        d.addEventListener('paste', function (e) { self.onPaste(e); });
-        d.addEventListener('keydown', function (e) {
-          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveForm(self.ta.form); }
-        });
-        $$('img', d).forEach(function (im) { im.addEventListener('load', function () { self.fitFrame(); }); });
-      };
-      this.frame.srcdoc = doc;
     } else {
       this.sync();
     }
     this.mode = mode;
     this.box.setAttribute('data-mode', mode);
-    var mb = $('[data-cmd=mode]', this.bar);
-    mb.setAttribute('aria-pressed', mode === 'visual' ? 'true' : 'false');
-    mb.textContent = mode === 'visual' ? 'HTML-код' : 'Предпросмотр';
-    store.set('adm-editor-mode', mode);
+    $$('button[data-mode]', this.modes).forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-mode') === mode ? 'true' : 'false'); });
+    if (byUser) store.set('adm-editor-mode', mode);
     this.updateLen();
   };
 
   Editor.prototype.fitFrame = function () {
-    var d = this.frame && this.frame.contentDocument;
+    var d = this.doc();
     if (!d || !d.documentElement || !this.box.offsetParent) return;   // скрытый редактор (другой язык) — подгоним при показе
-    this.frame.style.height = Math.min(1400, Math.max(this.ta.offsetHeight || 320, d.documentElement.scrollHeight + 4)) + 'px';
+    this.frame.style.height = Math.min(1400, Math.max(this.ta.offsetHeight || (this.box.classList.contains('small-ed') ? 140 : 320), d.documentElement.scrollHeight + 4)) + 'px';
   };
 
   /** Заменить всё содержимое (кнопка «Скопировать русский текст») */
   Editor.prototype.setValue = function (html) {
     this.ta.value = html;
-    if (this.mode === 'visual' && this.frame && this.frame.contentDocument && this.frame.contentDocument.body) {
-      this.frame.contentDocument.body.innerHTML = this.toPreview(html);
-      this.snapshot = this.frame.contentDocument.body.innerHTML;
-      this.fitFrame();
-    }
+    if (this.mode === 'visual' && this.doc()) this.fill();
     this.updateLen();
-    this.ta.dispatchEvent(new Event('input', { bubbles: true }));
+    fire(this.ta, 'input');
   };
 
   Editor.prototype.getValue = function () {
@@ -242,19 +352,18 @@
     return this.ta.value;
   };
 
-  /** Перенести правки из предпросмотра в textarea (только если что-то изменили) */
+  /** Перенести правки из визуального режима в textarea — только если текст действительно меняли. true — перенесли */
   Editor.prototype.sync = function () {
-    if (this.mode !== 'visual' || !this.frame) return;
-    var d = this.frame.contentDocument;
-    if (!d || !d.body) return;
-    var html = d.body.innerHTML;
-    if (html === this.snapshot) return;
+    if (this.mode !== 'visual' || !this.doc() || this.snapshot === null) return false;
+    var html = this.serialize();
+    if (html === this.snapshot) return false;
     this.snapshot = html;
-    this.ta.value = this.fromPreview(html.replace(/ contenteditable="(true|false)"/g, ''));
+    this.ta.value = html;
     this.updateLen();
+    return true;
   };
 
-  /** Вставка из Word/браузера: убираем стили, классы, span/font и прочий мусор */
+  /** Вставка из Word/браузера: чужой HTML — только через cleanHtml (инертный документ, белый список тегов и атрибутов) */
   Editor.prototype.onPaste = function (e) {
     var cd = e.clipboardData;
     if (!cd) return;
@@ -263,18 +372,7 @@
     e.preventDefault();
     var out;
     if (html) {
-      var tmp = document.createElement('div');
-      tmp.innerHTML = html.replace(/<!--[\s\S]*?-->/g, '');
-      $$('script,style,meta,link,title,xml,o\\:p', tmp).forEach(function (n) { n.remove(); });
-      $$('*', tmp).forEach(function (n) {
-        Array.prototype.slice.call(n.attributes).forEach(function (a) {
-          var keep = (n.tagName === 'A' && a.name === 'href') || (n.tagName === 'IMG' && /^(src|alt|width|height)$/.test(a.name))
-            || (/^T[DH]$/.test(n.tagName) && /^(colspan|rowspan)$/.test(a.name));
-          if (!keep || /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name);
-        });
-      });
-      $$('span,font', tmp).forEach(function (n) { n.replaceWith.apply(n, Array.prototype.slice.call(n.childNodes)); });
-      out = tmp.innerHTML;
+      out = cleanHtml(html);
     } else {
       out = esc(text).replace(/\r?\n\r?\n/g, '</p><p>').replace(/\r?\n/g, '<br>');
       if (/<\/p><p>/.test(out)) out = '<p>' + out + '</p>';
@@ -282,31 +380,40 @@
     this.frame.contentDocument.execCommand('insertHTML', false, out);
   };
 
+  /** Запомнить / вернуть курсор визуального режима (окно медиатеки или prompt уводит фокус) */
+  Editor.prototype.saveRange = function () {
+    var d = this.doc(), s = d && d.getSelection();
+    this.range = s && s.rangeCount && d.body.contains(s.getRangeAt(0).startContainer) ? s.getRangeAt(0).cloneRange() : null;
+  };
+  Editor.prototype.restoreRange = function () {
+    var d = this.doc();
+    if (!d) return;
+    this.frame.contentWindow.focus();
+    var s = d.getSelection(), r = this.range;
+    if (!r || !d.body.contains(r.startContainer)) {        // курсора не было — в конец текста
+      r = d.createRange();
+      r.selectNodeContents(d.body);
+      r.collapse(false);
+    }
+    s.removeAllRanges();
+    s.addRange(r);
+  };
+
   // --- команды
   Editor.prototype.exec = function (cmd) {
     var self = this;
-    if (cmd === 'mode') return this.setMode(this.mode === 'visual' ? 'code' : 'visual');
-    if (cmd === 'img') {
-      return pickFile(function (file) {
-        self.box.classList.add('is-loading');
-        toast('Загрузка картинки…');
-        upload(file).then(function (r) {
-          self.box.classList.remove('is-loading');
-          if (!r || !r.ok) return toast((r && r.error) || 'Ошибка загрузки', true);
-          var alt = (file.name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
-          self.insert('<img src="' + esc(r.url) + '" alt="' + esc(alt) + '"' + (r.width ? ' width="' + r.width + '" height="' + r.height + '"' : '') + '>');
-          toast('Картинка загружена');
-        });
-      });
-    }
+    var visual = this.mode === 'visual' && this.doc();
+    if (visual) this.saveRange();
     if (cmd === 'lib') {
-      if (!window.MediaPicker) return toast('Медиатека недоступна на этой странице', true);
-      return window.MediaPicker.open({
-        onSelect: function (f) {
-          if (!f || !f.url) return;
-          var alt = (f.name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
-          self.insert('<img src="' + esc(f.url) + '" alt="' + esc(alt) + '"' + (f.width ? ' width="' + (+f.width) + '" height="' + (+f.height) + '"' : '') + '>');
-        }
+      var s0 = this.ta.selectionStart, e0 = this.ta.selectionEnd;   // позиция курсора в коде до открытия окна
+      return withMedia(function () {
+        window.MediaPicker.open({
+          onSelect: function (f) {
+            if (!f || !f.url) return;
+            if (self.mode !== 'visual') self.ta.setSelectionRange(s0, e0);
+            self.insert(imgTag(f.url, f.name, f.width, f.height));
+          }
+        });
       });
     }
     if (cmd === 'link') {
@@ -315,9 +422,9 @@
       if (!url || url === '/') return;
       if (/^\s*javascript:/i.test(url)) return toast('Недопустимый адрес', true);
       var ext = /^https?:\/\//i.test(url) && url.indexOf(location.host) < 0;
-      if (this.mode === 'visual' && sel) {
-        var d = this.frame.contentDocument;
-        d.execCommand('createLink', false, url);
+      if (visual && sel) {
+        this.restoreRange();
+        this.frame.contentDocument.execCommand('createLink', false, url);
         return this.afterVisual();
       }
       return this.insert('<a href="' + esc(url) + '"' + (ext ? ' target="_blank" rel="noopener"' : '') + '>' + (sel ? esc(sel) : esc(url)) + '</a>', sel !== '');
@@ -331,34 +438,35 @@
       for (var r = 1; r < rows; r++) h += '<tr>' + new Array(cols + 1).join('<td>&nbsp;</td>') + '</tr>\n';
       return this.insert(h + '</tbody>\n</table>\n');
     }
-    if (this.mode === 'visual') return this.execVisual(cmd);
+    if (visual) return this.execVisual(cmd);
     this.execCode(cmd);
   };
 
   Editor.prototype.execVisual = function (cmd) {
-    var d = this.frame && this.frame.contentDocument;
+    var d = this.doc();
     if (!d) return;
-    this.frame.contentWindow.focus();
+    this.restoreRange();
     var map = { b: ['bold'], i: ['italic'], ul: ['insertUnorderedList'], ol: ['insertOrderedList'], h2: ['formatBlock', '<h2>'], h3: ['formatBlock', '<h3>'], p: ['formatBlock', '<p>'] };
     var c = map[cmd];
     if (c) d.execCommand(c[0], false, c[1] || null);
     this.afterVisual();
   };
 
-  Editor.prototype.afterVisual = function () { this.sync(); this.fitFrame(); markDirty(); };
+  Editor.prototype.afterVisual = function () {
+    if (this.sync()) fire(this.ta, 'input');
+    this.fitFrame();
+    markDirty();
+  };
 
   Editor.prototype.selectedText = function () {
-    if (this.mode === 'visual') {
-      var w = this.frame && this.frame.contentWindow;
-      return w ? String(w.getSelection()) : '';
-    }
+    if (this.mode === 'visual' && this.doc()) return this.range ? String(this.range) : '';
     return this.ta.value.substring(this.ta.selectionStart, this.ta.selectionEnd);
   };
 
   /** Вставить HTML в место курсора (replaceSel — заменить выделенное) */
   Editor.prototype.insert = function (html, replaceSel) {
-    if (this.mode === 'visual') {
-      this.frame.contentWindow.focus();
+    if (this.mode === 'visual' && this.doc()) {
+      this.restoreRange();
       this.frame.contentDocument.execCommand('insertHTML', false, html);
       return this.afterVisual();
     }
@@ -373,7 +481,7 @@
     // execCommand сохраняет историю отмены (Ctrl+Z); если не сработал — меняем значение напрямую
     var ok = false;
     try { ok = document.execCommand('insertText', false, text); } catch (err) { ok = false; }
-    if (!ok || ta.value.substring(s, s + text.length) !== text) ta.value = ta.value.substring(0, s) + text + ta.value.substring(e);
+    if (!ok || ta.value.substring(s, s + text.length) !== text) { ta.value = ta.value.substring(0, s) + text + ta.value.substring(e); fire(ta, 'input'); }
     ta.setSelectionRange(selS, selE);
     this.updateLen();
     markDirty();
@@ -403,7 +511,7 @@
     editors.push(ta.__ed);
     return ta.__ed;
   }
-  window.AdmEditor = { init: initEditor, upload: upload, toast: toast };
+  window.AdmEditor = { init: initEditor, upload: upload, toast: toast, withMedia: withMedia, clean: cleanHtml };
 
   // ------------------------------------------------------------------ несохранённые изменения, Ctrl+S
   var dirty = false;
@@ -539,33 +647,47 @@
     });
   }
 
-  // ------------------------------------------------------------------ переключатель «RU | UA» в формах страниц, статей, баннеров
+
+  // ------------------------------------------------------------------ переключатель «RU | UA» — один во всех редакторах
+  // Область — ближайший к .lang-bar элемент [data-lang] (форма или обёртка над несколькими формами, как у характеристик).
   function initLang() {
-    $$('form.ed-form[data-lang]').forEach(function (form) {
-      var btns = $$('[data-lang-to]', form), hidden = form.elements._lang, counter = $('[data-uk-count]', form);
-      var ukFields = $$('[data-uk]', form);
+    $$('.lang-bar').forEach(function (bar) {
+      var scope = bar.closest('[data-lang]');
+      if (!scope || scope.__langInit) return;
+      scope.__langInit = true;
+      var btns = $$('[data-lang-to]', bar), hidden = $('input[name=_lang]', bar), counter = $('[data-uk-count]', bar);
+      var ukFields = $$('[data-uk]', scope);
       var count = function () {
-        if (!counter || !ukFields.length) return;
-        var n = ukFields.filter(function (el) { return el.value.trim() !== ''; }).length;
-        counter.textContent = n ? 'заполнено ' + n + ' из ' + ukFields.length : 'не заполнено';
-        counter.classList.toggle('full', n === ukFields.length);
+        if (!counter) return;
+        var n = ukFields.filter(function (el) { return el.value.trim() !== ''; }).length, all = ukFields.length;
+        counter.innerHTML = n ? '<span class="lw">заполнено </span>' + n + ' из ' + all : 'не заполнено';
+        counter.parentNode.title = 'Украинская версия: заполнено полей ' + n + ' из ' + all;
+        counter.classList.toggle('full', all > 0 && n === all);
       };
       var set = function (lang, focus) {
-        form.setAttribute('data-lang', lang);
+        scope.setAttribute('data-lang', lang);
         if (hidden) hidden.value = lang;
         btns.forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-lang-to') === lang ? 'true' : 'false'); });
-        editors.forEach(function (ed) { if (form.contains(ed.ta)) ed.fitFrame(); });
-        try { form.dispatchEvent(new Event('langchange')); } catch (e) { /* старые браузеры */ }
+        editors.forEach(function (ed) { if (scope.contains(ed.ta)) ed.fitFrame(); });
+        try { scope.dispatchEvent(new Event('langchange')); } catch (e) { /* старые браузеры */ }
         if (focus) {
-          var first = $('.l-' + lang + ' input[type=text], .l-' + lang + ' textarea', form);
-          if (first && first.offsetParent) first.focus();
+          session.set('adm-lang', lang);
+          var first = $('.l-' + lang + ' input[type=text], .l-' + lang + ' textarea', scope);
+          if (first && first.offsetParent) first.focus({ preventScroll: true });
         }
       };
       btns.forEach(function (b) { b.addEventListener('click', function () { set(b.getAttribute('data-lang-to'), true); }); });
-      ukFields.forEach(function (el) { el.addEventListener('input', count); });
-      // ошибка в поле другого языка — открыть его
-      var bad = $('[aria-invalid=true]', form);
-      if (bad && bad.closest('.l-uk')) set('uk'); else if (bad && bad.closest('.l-ru')) set('ru');
+      scope.addEventListener('input', function (e) { if (e.target.hasAttribute && e.target.hasAttribute('data-uk')) count(); });
+      // обязательное поле на скрытом языке — показать его, иначе браузер не сможет подсветить ошибку
+      scope.addEventListener('invalid', function (e) {
+        var box = e.target.closest && e.target.closest('.l-ru, .l-uk');
+        if (box && !box.offsetParent) set(box.classList.contains('l-uk') ? 'uk' : 'ru');
+      }, true);
+      // какой язык открыть: с ошибкой → явно заданный сервером UA (?lang=uk, _lang) → выбранный раньше на этой вкладке
+      var bad = $('[aria-invalid=true], .fld-err, .ac-err', scope), badBox = bad && bad.closest('.l-ru, .l-uk');
+      var lang = badBox ? (badBox.classList.contains('l-uk') ? 'uk' : 'ru')
+        : (scope.getAttribute('data-lang') === 'uk' ? 'uk' : (session.get('adm-lang') === 'uk' ? 'uk' : 'ru'));
+      set(lang);
       count();
     });
 
@@ -579,46 +701,10 @@
       if (!src.trim()) return toast('Русский вариант пуст — копировать нечего', true);
       var cur = to.__ed ? to.__ed.getValue() : to.value;
       if (cur.trim() && cur !== src && !confirm('Заменить украинский текст русским? Текущий украинский вариант пропадёт.')) return;
-      if (to.__ed) to.__ed.setValue(src); else { to.value = src; to.dispatchEvent(new Event('input', { bubbles: true })); }
+      if (to.__ed) to.__ed.setValue(src); else { to.value = src; fire(to, 'input'); }
       markDirty();
       toast('Русский текст скопирован — переведите его');
     });
-  }
-
-  // ------------------------------------------------------------------ превью в поиске Google (страницы)
-  function initSerp() {
-    $$('[data-serp-src]').forEach(function (el) {
-      var box = $('.serp[data-serp="' + el.getAttribute('data-serp-for') + '"]');
-      if (!box) return;
-      var out = $(el.getAttribute('data-serp-src') === 'title' ? '[data-serp-title]' : '[data-serp-desc]', box);
-      var upd = function () { out.textContent = el.value.trim() || el.placeholder || ''; };
-      el.addEventListener('input', upd);
-    });
-    var url = $('input[name=url][data-slug-from]');
-    if (url && $('.serp')) {
-      url.addEventListener('input', function () {
-        var p = url.value.replace(/^\/+|\/+$/g, '') || url.placeholder.replace(/^\/+|\/+$/g, '');
-        $$('.serp').forEach(function (s) {
-          var o = $('[data-serp-url]', s);
-          if (o) o.textContent = ((s.getAttribute('data-serp') === 'uk' ? 'ua/' : '') + p).split('/').join(' › ');
-        });
-      });
-    }
-  }
-
-  // ------------------------------------------------------------------ медиатека (media.js): кнопки появляются, если скрипт подключён
-  function initMediaButtons() {
-    if (!window.MediaPicker) return;
-    $$('[data-media-pick][hidden], .ed-bar [data-cmd=lib][hidden]').forEach(function (b) { b.hidden = false; });
-  }
-  /** Есть редактор или кнопки медиатеки, а media.js на экран не подключён — подгружаем его (после defer-скриптов) */
-  function loadMedia() {
-    if (window.MediaPicker || !SELF || document.querySelector('script[src*="admin/media.js"]')) return;
-    if (!$('textarea[data-editor], [data-media-pick]')) return;
-    var sc = document.createElement('script');
-    sc.src = SELF.replace(/content\.js(\?[^#]*)?$/, 'media.js$1');
-    sc.onload = initMediaButtons;
-    document.head.appendChild(sc);
   }
 
   // ------------------------------------------------------------------ сортировка строк (баннеры)
@@ -817,16 +903,13 @@
     initImageFields();
     initBannerPreview();
     initLang();
-    initSerp();
     initSortable();
     initLists();
     initSeo();
     initRates();
     initRedirects();
-    initMediaButtons();
+    // кнопки «Выбрать из медиатеки» есть, а media.js экран не подключил — подгружаем
+    if ($('[data-media-pick]') && !window.MediaPicker && !$('script[src*="admin/media.js"]')) withMedia(function () {});
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  // media.js подключается после этого файла — кнопки «Медиатека» включаем, когда он выполнится
-  document.addEventListener('DOMContentLoaded', function () { initMediaButtons(); loadMedia(); });
-  window.addEventListener('load', initMediaButtons);
 })();

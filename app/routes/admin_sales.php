@@ -18,6 +18,7 @@ $router->get('/admin/orders/export.csv', [OrdersController::class, 'export']);
 $router->get('/admin/orders/export.csv/', [OrdersController::class, 'export']);
 $router->get('/admin/orders/products.json', [OrdersController::class, 'productSearch']);
 $router->any('/admin/orders/new/', [OrdersController::class, 'create']);
+$router->post('/admin/orders/bulk/', [OrdersController::class, 'bulk']);          // массовая смена статуса в списке
 $router->any('/admin/orders/{id}/', [OrdersController::class, 'show']);
 $router->post('/admin/orders/{id}/status/', [OrdersController::class, 'status']);
 $router->post('/admin/orders/{id}/items/', [OrdersController::class, 'items']);

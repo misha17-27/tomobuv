@@ -44,25 +44,27 @@ final class SeoController extends BaseController
             // товары: на вкладке «Товары» — страница N (с поиском), во «Всём» — первые 50 под фильтр, на прочих — только счётчики
             $prod = ($group === '' || $group === 'products')
                 ? SeoAudit::products($filter, $q, $group === 'products' ? Request::page() : 1, $st)
-                : ['rows' => [], 'total' => 0, 'counts' => SeoAudit::productCounts($st), 'page' => 1, 'found' => null, 'limited' => false];
+                : ['rows' => [], 'total' => 0, 'counts' => SeoAudit::productCounts($st), 'page' => 1, 'found' => null, 'found_hidden' => 0, 'limited' => false];
             return ['rows' => $o['rows'], 'prod' => $prod];
         });
         $rows = $view['rows'];
         $prod = $view['prod'];
         $pager = $group === 'products' ? new Paginator($prod['total'], SeoAudit::PER_PAGE, $prod['page']) : null;
 
-        // счётчики: вкладки групп — под текущий чип, чипы — под текущую группу
+        // счётчики: вкладки групп — под текущий чип, чипы — под текущую группу.
+        // groupAll — база «из M» в заголовке списка: для «Всё» и чипов состояния — адреса «Всё»; для «Закрыто от индексации» —
+        // все адреса вместе со скрытыми (скрытые товары и бренды без товаров во «Всё» не входят, а в «Закрыто» — входят)
         $groupCount = array_fill_keys(array_keys(SeoAudit::GROUPS), 0);
         $groupAll = $groupCount;
         $chipCount = array_fill_keys(array_keys(SeoAudit::FILTERS), 0);
         foreach ($rows as $r) {
             if (SeoAudit::matches($r, $filter)) $groupCount[$r['group']]++;
-            if (SeoAudit::matches($r, '')) $groupAll[$r['group']]++;
+            if ($filter === 'closed' || SeoAudit::matches($r, '')) $groupAll[$r['group']]++;
             if ($group !== '' && $group !== $r['group']) continue;
             foreach ($chipCount as $f => $_) if (SeoAudit::matches($r, $f)) $chipCount[$f]++;
         }
         $groupCount['products'] = $prod['counts'][$filter] ?? 0;
-        $groupAll['products'] = $prod['counts'][''] ?? 0;
+        $groupAll['products'] = ($prod['counts'][''] ?? 0) + ($filter === 'closed' ? $prod['counts']['closed'] ?? 0 : 0);
         if ($group === '' || $group === 'products') {
             foreach ($chipCount as $f => $_) $chipCount[$f] += $prod['counts'][$f] ?? 0;
         }
@@ -85,6 +87,7 @@ final class SeoController extends BaseController
             'group'      => $group,
             'lang'       => $lang,
             'q'          => $q,
+            'withHidden' => $filter === 'closed',
             'rows'       => $listed,
             'prod'       => $prod,
             'pager'      => $pager,

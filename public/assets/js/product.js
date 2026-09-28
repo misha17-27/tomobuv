@@ -16,15 +16,17 @@
   // «3 ящика», «24 пары» — ключи словаря целыми фразами (у украинского свои окончания)
   function boxesTxt(n) { return UI.t(plural(n, '{n} ящик', '{n} ящика', '{n} ящиков'), { n: n }); }
   function pairsTxt(n) { return UI.t(plural(n, '{n} пара', '{n} пары', '{n} пар'), { n: n }); }
-  function clamp(v) { v = parseInt(v, 10); return Math.max(1, Math.min(999, isNaN(v) ? 1 : v)); }
+  function clamp(v, max) { v = parseInt(v, 10); return Math.max(1, Math.min(max || 999, isNaN(v) ? 1 : v)); }
 
   /* ---------- покупка: ящики → пары → сумма ---------- */
   function initBuy() {
     var buy = $('#pp-buy'); if (!buy) return;
     var id = buy.getAttribute('data-id'), box = +buy.getAttribute('data-box') || 1, pair = +buy.getAttribute('data-pair') || 0;
     var qty = $('#pp-qty', buy), bar = $('#pp-bar');
+    // остаток: не больше data-max ящиков (Cart::maxBoxes); UI.syncQty ставит границы, «+» и подсказку «Доступно не больше N ящиков»
+    var max = UI.qtyMax(buy), limit = function () { UI.syncQty(buy); };
 
-    function boxes() { return clamp(qty.value); }
+    function boxes() { return clamp(qty.value, max); }
     function recalc() {
       var n = boxes(), pairs = n * box, sum = pairs * pair;
       $$('[data-pp-boxes]').forEach(function (el) { el.textContent = boxesTxt(n); });
@@ -38,11 +40,11 @@
       }
     }
     buy.addEventListener('qtychange', recalc);
-    qty.addEventListener('input', function () { qty.value = qty.value.replace(/\D/g, '').slice(0, 3); if (qty.value !== '') recalc(); });
-    qty.addEventListener('change', function () { qty.value = boxes(); recalc(); });
+    qty.addEventListener('input', function () { qty.value = qty.value.replace(/\D/g, '').slice(0, 3); if (qty.value !== '') { limit(); recalc(); } });
+    qty.addEventListener('change', function () { limit(); recalc(); });
     qty.addEventListener('keydown', function (e) {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); qty.value = clamp(boxes() + (e.key === 'ArrowUp' ? 1 : -1)); recalc(); }
-      if (e.key === 'Enter') { e.preventDefault(); qty.value = boxes(); recalc(); }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); qty.value = boxes() + (e.key === 'ArrowUp' ? 1 : -1); limit(); recalc(); }
+      if (e.key === 'Enter') { e.preventDefault(); limit(); recalc(); }
     });
     recalc();
 
@@ -165,18 +167,18 @@
   /* ---------- галерея ---------- */
   function initGallery() {
     var gal = $('#pp-gal'); if (!gal) return;
-    var imgs = []; try { imgs = JSON.parse(gal.getAttribute('data-images') || '[]'); } catch (e) { }
+    var imgs = [], sets = []; try { imgs = JSON.parse(gal.getAttribute('data-images') || '[]'); sets = JSON.parse(gal.getAttribute('data-srcset') || '[]'); } catch (e) { }
     var main = $('#gal-img', gal), lb = $('#gal-lb'), lbImg = lb ? $('#gal-lb-img', lb) : null, cur = 0, lastFocus = null;
     if (!main || !imgs.length) return;
 
     function go(i) {
       var n = imgs.length; cur = (i + n) % n;
-      main.src = imgs[cur];
+      main.srcset = sets[cur] || ''; main.src = imgs[cur];   // srcset (400/750/970) — браузер берёт размер по экрану; лайтбокс — 970
       if (lbImg) { lbImg.src = imgs[cur]; lbImg.classList.remove('zoom'); }
       $$('.gal-th', gal).forEach(function (t, k) { t.classList.toggle('on', k === cur); if (k === cur) t.setAttribute('aria-current', 'true'); else t.removeAttribute('aria-current'); });
       $$('[data-gal-cur]').forEach(function (el) { el.textContent = cur + 1; });
       var th = $$('.gal-th', gal)[cur]; if (th && th.scrollIntoView && th.parentNode.scrollWidth > th.parentNode.clientWidth) th.parentNode.scrollLeft = th.offsetLeft - 8;
-      if (n > 1) { var pre = new Image(); pre.src = imgs[(cur + 1) % n]; }
+      if (n > 1) { var pre = new Image(), k = (cur + 1) % n; pre.sizes = main.sizes; pre.srcset = sets[k] || ''; pre.src = imgs[k]; }   // следующее — тот же размер, что покажет галерея
     }
     function openLb() {
       if (!lb) return;

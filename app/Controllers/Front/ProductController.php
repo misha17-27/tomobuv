@@ -16,6 +16,7 @@ use App\Core\Response;
 use App\Core\Seo;
 use App\Core\Settings;
 use App\Core\View;
+use App\Services\Cart;
 use App\Services\Catalog;
 use App\Services\Products;
 
@@ -181,6 +182,8 @@ final class ProductController
         if (!$p || !in_array((int) $p['status'], [0, 1], true)) return null;
         $p['hidden'] = (int) $p['status'] === 0;
         if ($p['hidden']) $p['in_stock'] = 0;
+        // остаток задан и меньше одного ящика — купить нельзя (корзина откажет), показываем «Нет в наличии»
+        if ($p['in_stock'] && Cart::maxBoxes($p) === 0) $p['in_stock'] = 0;
         return $p;
     }
 

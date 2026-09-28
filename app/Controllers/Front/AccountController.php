@@ -140,6 +140,7 @@ final class AccountController
 
         return self::page('front/account-profile', t('Профиль'), [
             'd' => $d, 'errors' => $errors, 'pwErrors' => $pwErrors, 'active' => 'profile', 'hasPassword' => (string) $u['password'] !== '',
+            'minPassword' => AuthController::minPassword((string) $u['role']),
         ], ($errors || $pwErrors) ? 422 : 200);
     }
 
@@ -179,9 +180,10 @@ final class AccountController
 
     private static function changePassword(array $u): array
     {
-        $cur = (string) ($_POST['current'] ?? '');
-        $new = (string) ($_POST['password'] ?? '');
-        $new2 = (string) ($_POST['password2'] ?? '');
+        $raw = static fn(string $k): string => is_string($_POST[$k] ?? null) ? $_POST[$k] : '';
+        $cur = $raw('current');
+        $new = $raw('password');
+        $new2 = $raw('password2');
         $e = [];
         if ((string) $u['password'] !== '' && !RateLimit::hit('pwchange:' . $u['id'], 10, 900)) {
             return ['current' => t('Слишком много попыток. Попробуйте через 15 минут.')];
@@ -189,13 +191,14 @@ final class AccountController
         if ((string) $u['password'] !== '' && ($cur === '' || !Auth::verify($cur, (string) $u['password']))) {
             $e['current'] = $cur === '' ? t('Введите текущий пароль') : t('Текущий пароль указан неверно');
         }
-        if (mb_strlen($new) < AuthController::MIN_PASSWORD) $e['password'] = t('Новый пароль — не меньше {n} символов', ['n' => AuthController::MIN_PASSWORD]);
-        elseif (mb_strlen($new) > 200) $e['password'] = t('Слишком длинный пароль');
+        // сотрудник, зашедший в кабинет витрины, — пароль по правилам админки (не короче 10)
+        if (($pe = AuthController::passwordError($new, (string) $u['role'], true)) !== '') $e['password'] = $pe;
         elseif ($new !== $new2) $e['password2'] = t('Пароли не совпадают');
         if ($e) return $e;
         App::db()->update('customers', ['password' => password_hash($new, PASSWORD_DEFAULT), 'reset_token' => null, 'reset_expires' => null],
             'id = ?', [$u['id']]);
-        Session::regenerate();
+        // новый идентификатор сессии и отпечаток нового пароля: этот сеанс остаётся, остальные (другие устройства) завершатся
+        Auth::passwordChanged((int) $u['id']);
         return [];
     }
 

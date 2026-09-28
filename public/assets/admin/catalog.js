@@ -1,7 +1,8 @@
 /* Админка → Каталог: товары, категории, бренды, характеристики.
    - список товаров: выбор строк и массовые действия;
-   - карточка товара: адрес из названия, цена за ящик, характеристики (выбор с поиском + новое значение), фото;
-   - HTML-редактор с панелью (жирный, список, ссылка…) и предпросмотром — для описаний товаров, категорий, брендов. */
+   - карточка товара: адрес из названия, цена за ящик, характеристики (выбор с поиском + новое значение),
+     фото (загрузка, перетаскивание, «Выбрать из медиатеки» — файл копируется в фото товара).
+   HTML-редактор и переключатель «RU | UA» — общие для всех редакторов: content.js (партиал admin/partials/editor). */
 (function () {
   'use strict';
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -9,35 +10,6 @@
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var debounce = function (fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; };
   var money = function (n) { return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' грн.'; };
-
-  // ------------------------------------------------------------------ RU | UA: переключение текстовых полей
-  // Поля обоих языков есть в форме всегда (отправляются вместе), видна только выбранная версия.
-  if ($('.ac-langtabs')) {
-    var setLang = function (l) {
-      $$('.ac-langtabs a').forEach(function (a) {
-        var on = a.getAttribute('data-lang') === l;
-        a.classList.toggle('on', on); a.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-      $$('[data-l]').forEach(function (el) { el.hidden = el.getAttribute('data-l') !== l; });
-      try { sessionStorage.setItem('ac-lang', l); } catch (err) { /* без хранилища — просто не запоминаем */ }
-    };
-    document.addEventListener('click', function (e) {
-      var a = e.target.closest('.ac-langtabs a'); if (!a) return;
-      e.preventDefault(); setLang(a.getAttribute('data-lang'));
-    });
-    // точка на вкладке UA — перевод уже заполнен
-    var markUk = function () {
-      var filled = $$('[data-l="uk"] input:not([type=hidden]), [data-l="uk"] textarea').some(function (i) { return i.value.trim() !== ''; });
-      $$('.ac-langtabs a[data-lang="uk"]').forEach(function (a) { a.classList.toggle('has', filled); });
-    };
-    document.addEventListener('input', function (e) { if (e.target.closest && e.target.closest('[data-l="uk"]')) markUk(); });
-    markUk();
-    // обязательное поле на скрытой вкладке — показать её, иначе браузер не сможет подсветить ошибку
-    document.addEventListener('invalid', function (e) { var box = e.target.closest('[data-l]'); if (box && box.hidden) setLang(box.getAttribute('data-l')); }, true);
-    var saved = null;
-    try { saved = sessionStorage.getItem('ac-lang'); } catch (err) { saved = null; }
-    if (saved === 'uk') setLang('uk');
-  }
 
   // ------------------------------------------------------------------ список товаров: массовые действия
   var bulk = $('#bulk-form');
@@ -77,10 +49,11 @@
     refresh();
   }
 
-  // ------------------------------------------------------------------ HTML-редактор с предпросмотром
-  // Медиатека (media.js) подгружается по первому нажатию «Медиатека», если экран её не подключил сам
+  // ------------------------------------------------------------------ медиатека (media.js): подключает партиал admin/partials/editor;
+  // если её нет на экране — подгружаем через content.js (AdmEditor.withMedia) или сами
   var withMedia = function (fn) {
     if (window.MediaPicker) return fn();
+    if (window.AdmEditor && AdmEditor.withMedia) return AdmEditor.withMedia(fn);
     var self = $('script[src*="admin/catalog.js"]');
     if (!self) return alert('Медиатека недоступна на этой странице');
     var sc = document.createElement('script');
@@ -88,60 +61,6 @@
     sc.onload = function () { if (window.MediaPicker) fn(); };
     document.head.appendChild(sc);
   };
-  $$('.ac-editor').forEach(function (ed) {
-    var ta = $('textarea', ed), frame = $('iframe', ed), remote = ed.getAttribute('data-remote') || '';
-    var tools = $('.ac-etools', ed), lib = document.createElement('button');
-    lib.type = 'button'; lib.className = 'btn btn-sm'; lib.setAttribute('data-cmd', 'lib');
-    lib.title = 'Вставить картинку из медиатеки'; lib.textContent = 'Медиатека';
-    tools.insertBefore(lib, $('.sp', tools));
-    var wrap = function (before, after, def) {
-      var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e) || def || '';
-      ta.setRangeText(before + sel + after, s, e, 'end');
-      ta.focus();
-      if (!ta.value.slice(s, e)) ta.setSelectionRange(s + before.length, s + before.length + sel.length);
-    };
-    var list = function (tag) {
-      var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e) || 'Пункт списка';
-      var items = sel.split(/\r?\n/).filter(function (l) { return l.trim() !== ''; }).map(function (l) { return '  <li>' + l.trim() + '</li>'; });
-      ta.setRangeText('<' + tag + '>\n' + items.join('\n') + '\n</' + tag + '>', s, e, 'end');
-      ta.focus();
-    };
-    var preview = function () {
-      var html = ta.value;
-      if (remote) html = html.replace(/(src|href)=(["'])\/wa-data\//gi, '$1=$2' + remote + '/wa-data/');
-      frame.srcdoc = '<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font:15px/1.6 Manrope,system-ui,sans-serif;color:#14212b;margin:14px}img{max-width:100%;height:auto}a{color:#0b7fc1}h2,h3{line-height:1.25}</style></head><body>' + html + '</body></html>';
-    };
-    $('.ac-etools', ed).addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-cmd]'); if (!b) return;
-      var c = b.getAttribute('data-cmd');
-      if (c === 'b') wrap('<b>', '</b>', 'текст');
-      else if (c === 'i') wrap('<i>', '</i>', 'текст');
-      else if (c === 'h3') wrap('<h3>', '</h3>', 'Подзаголовок');
-      else if (c === 'p') wrap('<p>', '</p>', 'Текст абзаца');
-      else if (c === 'ul' || c === 'ol') list(c);
-      else if (c === 'a') {
-        var u = prompt('Адрес ссылки (например, /category/aktsiya/ или https://…)', '/');
-        if (u && !/^\s*javascript:/i.test(u)) wrap('<a href="' + esc(u.trim()) + '">', '</a>', 'текст ссылки');
-      } else if (c === 'lib') {
-        var s = ta.selectionStart, en = ta.selectionEnd;         // позиция курсора до открытия окна
-        withMedia(function () {
-          window.MediaPicker.open({ onSelect: function (f) {
-            if (!f || !f.url) return;
-            var alt = (f.name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
-            ta.setRangeText('<img src="' + esc(f.url) + '" alt="' + esc(alt) + '"' + (f.width ? ' width="' + (+f.width) + '" height="' + (+f.height) + '"' : '') + '>', s, en, 'end');
-            ta.focus();
-            ta.dispatchEvent(new Event('input', { bubbles: true }));
-          } });
-        });
-      } else if (c === 'preview') {
-        var on = frame.hidden;
-        frame.hidden = !on; ta.hidden = on;
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-        b.classList.toggle('btn-p', on);
-        if (on) preview();
-      }
-    });
-  });
 
   // ------------------------------------------------------------------ карточка товара
   var pform = $('#product-form');
@@ -328,6 +247,20 @@
       next();
     };
     input.addEventListener('change', function () { upload(input.files); });
+    // «Выбрать из медиатеки»: сервер копирует файл public/uploads/… в фото товара (как обычная загрузка)
+    var lib = $('#photo-media');
+    if (lib) lib.addEventListener('click', function () {
+      withMedia(function () {
+        window.MediaPicker.open({ onSelect: function (f) {
+          if (!f || !(f.path || f.url)) return;
+          say('Добавляю «' + (f.name || f.path) + '»…');
+          lib.disabled = true;
+          Adm.post(base, { media: f.path || f.url }).then(handle).then(function (d) { if (d.ok) say('Фото добавлено из медиатеки.'); })
+            .catch(function () { say('Ошибка сети — фото не добавлено', true); })
+            .then(function () { lib.disabled = false; });
+        } });
+      });
+    });
     ['dragenter', 'dragover'].forEach(function (ev) { drop.addEventListener(ev, function (e) { if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') >= 0) { e.preventDefault(); drop.classList.add('on'); } }); });
     ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function () { drop.classList.remove('on'); }); });
     drop.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); upload(e.dataTransfer.files); } });

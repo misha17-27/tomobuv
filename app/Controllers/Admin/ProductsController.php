@@ -12,6 +12,7 @@ use App\Core\Str;
 use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\CatalogIndexer;
+use App\Services\HtmlSanitizer;
 
 /** Админка → Товары: список с фильтрами и массовыми действиями, карточка товара, фото. */
 final class ProductsController extends BaseController
@@ -154,8 +155,19 @@ final class ProductsController extends BaseController
         }
         if ($f['brand'] > 0) { $w[] = 'p.brand_id = ?'; $p[] = $f['brand']; }
         elseif ($f['brand'] === -1) { $w[] = 'p.brand_id IS NULL'; }
-        if ($f['status'] !== '') { $w[] = 'p.status = ?'; $p[] = (int) $f['status']; }
-        if ($f['stock'] !== '') { $w[] = 'p.in_stock = ?'; $p[] = (int) $f['stock']; }
+        // «На сайте» / «В наличии» — почти все 107 тыс. товаров: такое условие ничего не сужает, а при сортировке по названию,
+        // цене или дате индекс сортировки приходится дочитывать строками таблицы (середина списка «на сайте» по названию — 0,35 с).
+        // Поэтому редкое обратное (скрытые / нет в наличии — сотни) берётся по индексу, и условие становится «id не из них» —
+        // проверка по списку в памяти, сортировка идёт по индексу без чтения строк. Обратных много (от 1000) — обычное условие.
+        foreach (['status' => 'status', 'stock' => 'in_stock'] as $k => $col) {
+            if ($f[$k] === '') continue;
+            $rest = $f[$k] === '1' ? self::notOne($col) : null;
+            if ($rest === null) { $w[] = "p.$col = ?"; $p[] = (int) $f[$k]; continue; }
+            if (!$rest) continue;                                // обратных нет — подходят все
+            [$ph, $vals] = $db->in($rest);
+            $w[] = "p.id NOT IN ($ph)";
+            $p = array_merge($p, $vals);
+        }
         if ($f['sale']) $w[] = 'p.compare_price > 0 AND p.compare_price > p.price';   // первое условие — по индексу compare_price
         if ($f['nophoto']) $w[] = 'p.image_id IS NULL';
         if ($f['nouk']) $w[] = "(p.name_uk IS NULL OR p.name_uk = '')";
@@ -164,6 +176,17 @@ final class ProductsController extends BaseController
             array_push($p, $f['ff'], $f['fv']);
         }
         return [$w ? implode(' AND ', $w) : '1', $p];
+    }
+
+    /**
+     * id товаров, у которых флаг $col (status | in_stock, NOT NULL) не равен 1 — по индексу status_created / in_stock;
+     * null — таких 1000 и больше (список «не из них» был бы длинным, MariaDB превращает его во временную таблицу).
+     */
+    private static function notOne(string $col): ?array
+    {
+        $col = $col === 'in_stock' ? 'in_stock' : 'status';     // белый список
+        $ids = array_map('intval', App::db()->col("SELECT id FROM products WHERE `$col` <> 1 LIMIT 1000"));
+        return count($ids) < 1000 ? $ids : null;
     }
 
     /**
@@ -377,7 +400,7 @@ final class ProductsController extends BaseController
                 AdminCatalog::reindex([$newId], $this->snap);
                 Cache::forget('admin.category_direct_counts');
                 $this->log($id ? 'product_update' : 'product_create', 'product', $newId, ['name' => $data['name']]);
-                $this->flash($id ? 'Товар сохранён.' : 'Товар создан.');
+                $this->flash(($id ? 'Товар сохранён.' : 'Товар создан.') . HtmlSanitizer::notice());
                 return Response::redirect('/admin/products/' . $newId . '/');
             }
             $p = array_merge($p, $data);
@@ -462,7 +485,8 @@ final class ProductsController extends BaseController
             'meta_description' => $str('meta_description', 5000),
             'meta_keywords'  => $str('meta_keywords', 5000),
             'summary'        => mb_substr(Request::post('summary'), 0, 60000),
-            'description'    => mb_substr(is_scalar($_POST['description'] ?? null) ? (string) $_POST['description'] : '', 0, 1000000),
+            // описания — HTML: у менеджера без скриптов (HtmlSanitizer::staff); краткое описание — простой текст (на сайте через e())
+            'description'    => HtmlSanitizer::staff(mb_substr(is_scalar($_POST['description'] ?? null) ? (string) $_POST['description'] : '', 0, 1000000)) ?? '',
             // украинская версия: пусто = на сайте русский текст
             'name_uk'        => AdminCatalog::postStr('name_uk', 255),
             'seo_name_uk'    => AdminCatalog::postStr('seo_name_uk'),
@@ -471,7 +495,7 @@ final class ProductsController extends BaseController
             'meta_description_uk' => AdminCatalog::postStr('meta_description_uk', 5000),
             'meta_keywords_uk' => AdminCatalog::postStr('meta_keywords_uk', 5000),
             'summary_uk'     => AdminCatalog::postStr('summary_uk', 60000),
-            'description_uk' => AdminCatalog::postHtml('description_uk'),
+            'description_uk' => HtmlSanitizer::staff(AdminCatalog::postHtml('description_uk')),
         ];
         $d['min_qty'] = Request::post('min_qty') === '' ? $d['box_qty'] : max(1, min(65535, Request::postInt('min_qty', 1)));
         if ($d['stock'] === 0) $d['in_stock'] = 0;                  // остаток 0 — нет в наличии
@@ -638,6 +662,15 @@ final class ProductsController extends BaseController
     {
         $pid = $this->productOr404($id);
         if (!$pid) return Response::json(['ok' => false, 'error' => 'Товар не найден'], 404);
+        // «Выбрать из медиатеки» (catalog.js): файл public/uploads/… копируется в фото товара — как обычная загрузка
+        $media = Request::post('media');
+        if ($media !== '') {
+            $r = AdminCatalog::addProductImageFromMedia($pid, $media);
+            if (is_string($r)) return Response::json(['ok' => false, 'error' => $r, 'images' => self::imagesJson($pid)], 422);
+            Cache::flush();
+            $this->log('product_images_upload', 'product', $pid, ['count' => 1, 'media' => mb_substr($media, 0, 255)]);
+            return Response::json(['ok' => true, 'added' => 1, 'images' => self::imagesJson($pid)]);
+        }
         $files = array_merge(self::files('images'), self::files('image'));
         if (!$files) return Response::json(['ok' => false, 'error' => 'Файл не получен (возможно, больше ' . ini_get('post_max_size') . ')'], 422);
         $errors = []; $n = 0;

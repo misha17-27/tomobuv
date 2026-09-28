@@ -5,7 +5,7 @@
 [data-md-lib] [hidden],.md-queue[hidden],.md-picker [hidden]{display:none!important}
 /* колонки .two-col не растягиваются шире экрана из-за таблиц (min-content) */
 .md-two > *{min-width:0}
-.md-break{word-break:break-all}
+.md-break{overflow-wrap:break-word;min-width:0}   /* длинное имя файла переносится по дефисам, внутри слова — только если не помещается */
 html.md-lock{overflow:hidden}
 /* в admin.css правило «button.btn» (0,1,1) сильнее «.btn-p»/«.btn-d» (0,1,0) — кнопки-<button> медиатеки иначе белые/чёрные */
 .md-picker button.btn-p{background:var(--brand);border-color:var(--brand);color:#fff}

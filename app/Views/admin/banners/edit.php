@@ -1,10 +1,11 @@
 <?php
 /**
- * Форма баннера с живым предпросмотром; тексты RU и UA (переключатель «RU | UA»).
+ * Форма баннера с живым предпросмотром; тексты RU и UA (общий переключатель «RU | UA», admin/partials/lang-bar).
  * @var array $b @var bool $isNew @var array $errors @var string $uploadLimit @var string $lang
  */
 use App\Controllers\Admin\BaseController;
 use App\Controllers\Admin\BannersController;
+use App\Services\AdminCatalog;
 
 $err = static fn(string $k) => isset($errors[$k]) ? '<span class="fld-err" role="alert">' . e($errors[$k]) . '</span>' : '';
 $inv = static fn(string $k) => isset($errors[$k]) ? ' aria-invalid="true"' : '';
@@ -12,7 +13,8 @@ $action = $isNew ? '/admin/banners/new/' : '/admin/banners/' . (int) $b['id'] . 
 $places = BannersController::PLACES;
 if (!isset($places[$b['place']])) $places[$b['place']] = [$b['place'], 'Место из старой версии сайта'];
 $v = static fn(string $k) => (string) ($b[$k] ?? '');
-$ua = '<i class="lp" title="Украинская версия">UA</i>';
+$ru = AdminCatalog::langTag('ru');
+$ua = AdminCatalog::langTag('uk');
 // что показать в предпросмотре для открытого языка (UA пусто → русский текст)
 $pv = static fn(string $k) => $lang === 'uk' && $v($k . '_uk') !== '' ? $v($k . '_uk') : $v($k);
 ?>
@@ -20,7 +22,7 @@ $pv = static fn(string $k) => $lang === 'uk' && $v($k . '_uk') !== '' ? $v($k . 
 
 <form method="post" action="<?= e($action) ?>" class="ed-form" data-lang="<?= e($lang) ?>" enctype="multipart/form-data" novalidate data-banner-form>
   <?= BaseController::tokenField() ?>
-  <?= $view->partial('admin/pages/_lang', ['lang' => $lang, 'what' => 'главной']) ?>
+  <?= $view->partial('admin/partials/lang-bar', ['lang' => $lang, 'what' => 'главной']) ?>
   <div class="grid3">
     <div>
       <div class="card">
@@ -33,13 +35,13 @@ $pv = static fn(string $k) => $lang === 'uk' && $v($k . '_uk') !== '' ? $v($k . 
           <?= $err('place') ?>
         </fieldset>
 
-        <label class="fld l-ru"><span>Заголовок *</span>
+        <label class="fld l-ru"><span>Заголовок * <?= $ru ?></span>
           <input type="text" name="title" value="<?= e($v('title')) ?>" maxlength="255" required data-prev="title"<?= $inv('title') ?>><?= $err('title') ?>
         </label>
         <label class="fld l-uk"><span>Заголовок <?= $ua ?></span>
           <input type="text" name="title_uk" value="<?= e($v('title_uk')) ?>" maxlength="255" placeholder="<?= e($v('title')) ?>" data-prev="title" data-uk>
         </label>
-        <label class="fld l-ru"><span>Текст</span>
+        <label class="fld l-ru"><span>Текст <?= $ru ?></span>
           <textarea name="text" rows="3" maxlength="500" class="plain" data-prev="text"><?= e($v('text')) ?></textarea>
           <small class="hint">Для слайдера — 1–2 предложения. У широких баннеров текст не выводится.</small>
         </label>
@@ -47,7 +49,7 @@ $pv = static fn(string $k) => $lang === 'uk' && $v($k . '_uk') !== '' ? $v($k . 
           <textarea name="text_uk" rows="3" maxlength="500" class="plain" placeholder="<?= e($v('text')) ?>" data-prev="text" data-uk><?= e($v('text_uk')) ?></textarea>
         </label>
         <div class="row2">
-          <label class="fld l-ru"><span>Надпись на кнопке</span>
+          <label class="fld l-ru"><span>Надпись на кнопке <?= $ru ?></span>
             <input type="text" name="button" value="<?= e($v('button')) ?>" maxlength="64" placeholder="Смотреть" data-prev="button">
           </label>
           <label class="fld l-uk"><span>Надпись на кнопке <?= $ua ?></span>

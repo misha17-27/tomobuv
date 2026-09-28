@@ -14,12 +14,12 @@ $isOn = static function (string $prefix, string $not = '') use ($here): bool {
     if ($prefix === '/admin/') return $here === '/admin/';
     return str_starts_with($here, $prefix) && ($not === '' || !str_starts_with($here, $not));
 };
-// счётчики в меню (индексы status; кэш на минуту)
+// счётчики в меню (индексы status; кэш на минуту). Новые заказы — без кэша и по той же логике, что плитка на главной
+// и список по её ссылке (OrdersController::newCounts: один запрос по индексу status)
 $tally = Cache::remember('admin.tally', 60, static function () {
     $db = App::db();
-    $t = ['orders' => 0, 'requests' => 0, 'reviews' => 0];
+    $t = ['requests' => 0, 'reviews' => 0];
     try {
-        $t['orders'] = (int) $db->value("SELECT COUNT(*) FROM orders WHERE status = 'new' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
         $t['requests'] = (int) $db->value("SELECT COUNT(*) FROM requests WHERE status = 'new'");
         $t['reviews'] = (int) $db->value("SELECT COUNT(*) FROM product_reviews WHERE status = 'moderation'")
             + (int) $db->value('SELECT COUNT(*) FROM store_reviews WHERE status = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)');
@@ -27,6 +27,11 @@ $tally = Cache::remember('admin.tally', 60, static function () {
     }
     return $t;
 });
+try {
+    $tally['orders'] = \App\Controllers\Admin\OrdersController::newCounts()['fresh'];
+} catch (\Throwable $e) {
+    $tally['orders'] = 0;
+}
 $ic = [
     'dashboard'  => '<path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/>',
     'orders'     => '<path d="M4 5h2l2.2 10.4a2 2 0 0 0 2 1.6h6.9a2 2 0 0 0 2-1.55L21 8H6.5"/><circle cx="10" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/>',
@@ -127,7 +132,7 @@ if (!Auth::isAdmin()) {
     <div class="side-foot">
       <a href="/" target="_blank" rel="noopener">Открыть сайт ↗</a>
       <a href="/admin/account/"><?= e($user['name'] ?? $user['email'] ?? '') ?><?= Auth::isAdmin() ? '' : ' · менеджер' ?></a>
-      <a href="/admin/logout/" class="out">Выйти</a>
+      <a href="/admin/logout/?t=<?= e(Auth::logoutToken(true)) ?>" class="out">Выйти</a><?php /* выход — только с токеном (Admin\AuthController::logout) */ ?>
     </div>
   </aside>
 
@@ -139,7 +144,7 @@ if (!Auth::isAdmin()) {
         <?= $actions ?? '' ?>
         <div class="top-acts">
           <a class="top-btn" href="/" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Открыть сайт</span></a>
-          <a class="top-btn out" href="/admin/logout/"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 20H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4"/><path d="M16 16l4-4-4-4"/><path d="M20 12H9"/></svg><span>Выйти</span></a>
+          <a class="top-btn out" href="/admin/logout/?t=<?= e(Auth::logoutToken(true)) ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 20H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4"/><path d="M16 16l4-4-4-4"/><path d="M20 12H9"/></svg><span>Выйти</span></a>
         </div>
       </div>
     </header>

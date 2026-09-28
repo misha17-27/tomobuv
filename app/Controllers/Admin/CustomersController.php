@@ -161,7 +161,8 @@ final class CustomersController extends BaseController
                     $data['role'] = $role;
                     $this->log('customer_role', 'customer', $cid, ['from' => $c['role'], 'to' => $role]);
                 }
-                $db->update('customers', $data, 'id = ?', [$cid]);
+                // запись атомарно с проверкой «не последний администратор» (параллельные понижения — UsersController::updateGuarded)
+                if (($err = UsersController::updateGuarded($cid, $data)) !== '') { $this->flash($err, true); return $back; }
                 $this->log('customer_edit', 'customer', $cid);
                 $this->flash('Данные клиента сохранены.');
                 return $back;
@@ -169,12 +170,15 @@ final class CustomersController extends BaseController
             case 'block':
             case 'unblock':
                 if ($self) { $this->flash('Нельзя заблокировать свою учётную запись.', true); return $back; }
-                $db->update('customers', ['status' => $action === 'block' ? 0 : 1], 'id = ?', [$cid]);
+                if (($err = UsersController::updateGuarded($cid, ['status' => $action === 'block' ? 0 : 1])) !== '') { $this->flash($err, true); return $back; }
                 $this->log('customer_' . $action, 'customer', $cid);
                 $this->flash($action === 'block' ? 'Клиент заблокирован: вход на сайт и в кабинет закрыт.' : 'Клиент разблокирован.');
                 return $back;
 
             case 'password':
+                // свой пароль — только в «Мой аккаунт»: новый хеш завершил бы этот сеанс (Core\Auth), и временный пароль
+                // (одноразовое сообщение) так и не показался бы — вход в админку был бы потерян
+                if ($self) { $this->flash('Свой пароль меняйте в разделе «Мой аккаунт» — там нужен текущий пароль.', true); return Response::redirect('/admin/account/#password'); }
                 $pass = self::tempPassword();
                 $db->update('customers', ['password' => password_hash($pass, PASSWORD_DEFAULT), 'reset_token' => null, 'reset_expires' => null], 'id = ?', [$cid]);
                 $this->log('customer_password', 'customer', $cid);

@@ -9,6 +9,7 @@ use App\Core\Image;
 use App\Core\Log;
 use App\Core\Str;
 use App\Services\CatalogIndexer;
+use App\Services\HtmlSanitizer;
 
 /**
  * Импорт товаров от поставщиков.
@@ -57,6 +58,7 @@ final class Importer
         'meta_title_uk'       => 'SEO укр.: заголовок (title)',
         'meta_description_uk' => 'SEO укр.: описание (description)',
         'meta_keywords_uk'    => 'SEO укр.: ключевые слова',
+        'updated_at'          => 'Изменён на сайте (из выгрузки)',
     ];
 
     /** Текстовые колонки products (SEO и украинская версия): поле => максимальная длина */
@@ -96,7 +98,7 @@ final class Importer
         'name_uk', 'meta_title', 'meta_description', 'meta_keywords', 'meta_title_uk', 'meta_description_uk', 'meta_keywords_uk'];
 
     private const EX_COLS = 'id, url, name, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, purchase_price,
-        box_qty, min_qty, size, stock, in_stock, status, image_id,
+        box_qty, min_qty, size, stock, in_stock, status, image_id, updated_at,
         name_uk, meta_title, meta_description, meta_keywords, meta_title_uk, meta_description_uk, meta_keywords_uk';
 
     /** Подписи изменённых колонок в предпросмотре («Что изменится») */
@@ -152,6 +154,9 @@ final class Importer
         'meta_title_uk'       => ['metatitleuk', 'metatitleua', 'seotitleuk'],
         'meta_description_uk' => ['metadescriptionuk', 'metadescriptionua', 'seodescriptionuk'],
         'meta_keywords_uk'    => ['metakeywordsuk', 'metakeywordsua', 'keywordsuk'],
+        // только заголовок нашей выгрузки: «Дата изменения» / modified в файле поставщика — его собственная дата,
+        // по ней свежий прайс ложно считался бы «изменён на сайте после выгрузки» и не записывался
+        'updated_at'          => ['updatedat', 'изменённасайтеизвыгрузки', 'измененнасайтеизвыгрузки'],
     ];
 
     private static bool $schemaOk = false;
@@ -167,24 +172,30 @@ final class Importer
         return $d;
     }
 
-    /** Проверить, что миграция раздела применена (иначе выполнить database/migrations/admin-import.sql) */
+    /**
+     * Проверить, что миграции раздела применены (иначе выполнить database/migrations/admin-import.sql
+     * и import-conflicts.sql — колонка import_seen.conflict)
+     */
     public static function ensureSchema(): void
     {
         if (self::$schemaOk) return;
-        Cache::remember('import.schema.2', 86400, static function (): int {
+        Cache::remember('import.schema.3', 86400, static function (): int {
             $db = App::db();
             $ok = (int) $db->value("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
                     AND TABLE_NAME = 'import_jobs' AND COLUMN_NAME = 'last_n'")
                 && (int) $db->value("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'import_errors'")
                 && (int) $db->value("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()
                     AND TABLE_NAME = 'products' AND COLUMN_NAME = 'supplier_code' AND SEQ_IN_INDEX = 1");
-            if (!$ok) {
-                $sql = (string) @file_get_contents(ROOT . '/database/migrations/admin-import.sql');
+            $run = static function (string $file) use ($db): void {
+                $sql = (string) @file_get_contents(ROOT . '/database/migrations/' . $file);
                 $sql = (string) preg_replace('/^\s*--.*$/m', '', $sql);
                 foreach (preg_split('/;\s*\n/', $sql) ?: [] as $stmt) {
                     if (trim($stmt) !== '') $db->pdo()->exec($stmt);
                 }
-            }
+            };
+            if (!$ok) $run('admin-import.sql');
+            if (!(int) $db->value("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'import_seen' AND COLUMN_NAME = 'conflict'")) $run('import-conflicts.sql');
             return 1;
         });
         self::$schemaOk = true;
@@ -197,7 +208,18 @@ final class Importer
             'price_only' => 0, 'hide_missing' => 0, 'unhide' => 0, 'purchase_from_price' => 0, 'images' => 1,
             'default_category' => 0, 'category_map' => '', 'default_box_qty' => 0, 'new_status' => 1, 'batch' => 400,
             'delimiter' => '', 'header' => 1, 'item_path' => '', 'yml' => 0, 'source_url' => '',
+            'overwrite' => 0,   // перезаписывать товары, изменённые на сайте после выгрузки (колонка updated_at)
         ];
+    }
+
+    /**
+     * Поставщик из формы: обычные символы названий («Forsage (Одесса)», «Obuv & Co», «ТМ "Лидер"») — как есть,
+     * убираются только управляющие символы и лишние пробелы. В SQL — только через плейсхолдеры, в HTML — через e().
+     */
+    public static function cleanSupplier(string $v): string
+    {
+        $v = (string) preg_replace('/[\x00-\x1F\x7F]+/u', ' ', mb_scrub($v, 'UTF-8'));
+        return trim(mb_substr(trim((string) preg_replace('/\s+/u', ' ', $v)), 0, 64));
     }
 
     /** Ссылка на файл поставщика: только http(s), без пробелов, до 1000 символов ('' — неверная) */
@@ -237,6 +259,7 @@ final class Importer
     {
         $db = App::db();
         $opt = array_intersect_key($job['options'], self::defaults());
+        unset($opt['overwrite']);                   // перезапись — решение для одного запуска, не для профиля
         $data = [
             'name' => mb_substr(trim($name), 0, 190), 'format' => (string) $job['format'],
             'mapping' => self::json(array_filter($job['mapping'], static fn($v) => $v !== '')), 'options' => self::json($opt),
@@ -418,17 +441,45 @@ final class Importer
         }
     }
 
-    /** Уборка: служебные данные заданий старше 30 дней, сами задания — старше 180 дней */
+    /** Задание в работе: не завершено и менялось за последние 7 дней (шаг, разбор, настройки) — уборка его не трогает */
+    private const ACTIVE_SQL = "status IN ('parsing', 'new', 'running', 'finishing', 'images') AND COALESCE(updated_at, created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+
+    /**
+     * Уборка (bin/cron.php, bin/import.php, изредка — страница импорта). Задания в работе не трогаются,
+     * даже если начаты давно (импорт на 100 тыс. строк с паузами, задание ждёт запуска):
+     *   - разобранные строки (import_rows) — через 7 дней, встреченные товары и очередь фото — через 30 дней,
+     *     сами задания с журналом — через 180 дней;
+     *   - файлы заданий в storage/import — через 7 дней, кроме файлов заданий в работе; занятый файл
+     *     блокировки bin/import.php (cli-*.lock) не удаляется;
+     *   - import/tmp (загрузка по частям, скачивание по ссылке) — через час без изменений: пока загрузка
+     *     идёт, файл дописывается и его время обновляется.
+     */
     public static function cleanup(): void
     {
         $db = App::db();
-        $old = array_map('intval', $db->col('SELECT id FROM import_jobs WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)'));
-        if ($old) {
-            [$ph, $vals] = $db->in($old);
-            foreach (['import_rows', 'import_seen', 'import_images'] as $t) $db->query("DELETE FROM `$t` WHERE job_id IN ($ph)", $vals);
+        $idle = static fn(int $days): array => array_map('intval', $db->col('SELECT id FROM import_jobs
+            WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) AND NOT (' . self::ACTIVE_SQL . ')', [$days]));
+        foreach ([7 => ['import_rows'], 30 => ['import_seen', 'import_images']] as $days => $tables) {
+            foreach (array_chunk($idle($days), 500) as $part) {
+                [$ph, $vals] = $db->in($part);
+                foreach ($tables as $t) $db->query("DELETE FROM `$t` WHERE job_id IN ($ph)", $vals);
+            }
         }
-        foreach ($db->col('SELECT id FROM import_jobs WHERE created_at < DATE_SUB(NOW(), INTERVAL 180 DAY)') as $id) self::deleteJob((int) $id);
-        foreach (glob(self::dir() . '/tmp/*') ?: [] as $f) if (is_file($f) && filemtime($f) < time() - 3600) @unlink($f);
+        foreach ($idle(180) as $id) self::deleteJob($id);
+
+        $dir = self::dir();
+        $keep = array_flip(array_map('basename', $db->col('SELECT file FROM import_jobs WHERE ' . self::ACTIVE_SQL)));
+        foreach (glob($dir . '/*') ?: [] as $f) {
+            if (!is_file($f) || filemtime($f) >= time() - 86400 * 7 || isset($keep[basename($f)])) continue;
+            if (str_ends_with($f, '.lock')) {                                 // идёт импорт из cron — файл заблокирован
+                $h = @fopen($f, 'r');
+                $free = $h && flock($h, LOCK_EX | LOCK_NB);
+                if ($h) { if ($free) flock($h, LOCK_UN); fclose($h); }
+                if (!$free) continue;
+            }
+            @unlink($f);
+        }
+        foreach (glob($dir . '/tmp/*') ?: [] as $f) if (is_file($f) && filemtime($f) < time() - 3600) @unlink($f);
     }
 
     private static function fail(int $jobId, string $msg): void
@@ -602,10 +653,10 @@ final class Importer
         $old = $opt;
         $opt['key'] = isset(self::KEYS[$s('key')]) ? $s('key') : 'sku';
         $opt['mode'] = isset(self::MODES[$s('mode')]) ? $s('mode') : 'both';
-        $opt['supplier'] = mb_substr((string) preg_replace('/[^\p{L}\p{N}_\-. ]+/u', '', $s('supplier')), 0, 64);
+        $opt['supplier'] = self::cleanSupplier($s('supplier'));
         $opt['markup'] = max(-90.0, min(1000.0, round((float) str_replace(',', '.', $s('markup')), 2)));
         $opt['round'] = isset(self::ROUNDS[(int) $s('round')]) ? (int) $s('round') : 0;
-        foreach (['price_only', 'hide_missing', 'unhide', 'purchase_from_price', 'images'] as $b) $opt[$b] = !empty($o[$b]) ? 1 : 0;
+        foreach (['price_only', 'hide_missing', 'unhide', 'purchase_from_price', 'images', 'overwrite'] as $b) $opt[$b] = !empty($o[$b]) ? 1 : 0;
         if ($opt['supplier'] === '') $opt['hide_missing'] = 0;
         $cat = (int) $s('default_category');
         $opt['default_category'] = $cat && App::db()->value('SELECT id FROM categories WHERE id = ? AND type = 0', [$cat]) ? $cat : 0;
@@ -760,6 +811,41 @@ final class Importer
     }
 
     /**
+     * Время изменения товара из нашей выгрузки (колонка updated_at): «2026-09-28 10:15:42»; после сохранения
+     * в Excel — «28.09.2026 10:15» или «9/28/2026 10:15 AM» (секунды теряются), в XLSX — число (дни с 30.12.1899).
+     * @return ?array{0:int, 1:int} [unix-время, точность в секундах: 1 | 60 — без секунд | 86400 — только дата]
+     */
+    public static function stamp(string $v): ?array
+    {
+        $v = trim($v);
+        if (preg_match('/^\d{5}(?:[.,]\d+)?$/', $v)) {                  // дата Excel
+            $x = (float) str_replace(',', '.', $v);
+            if ($x < 20000 || $x > 80000) return null;
+            $ts = strtotime(gmdate('Y-m-d H:i:s', (int) round(($x - 25569) * 86400)));
+            return $ts === false ? null : [$ts, 1];
+        }
+        if (!preg_match('~^(\d{1,4})([./-])(\d{1,2})\2(\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*([AaPp]\.?[Mm]\.?)?)?$~', $v, $m)) return null;
+        if (strlen($m[1]) === 4) {
+            [$y, $mo, $d] = [(int) $m[1], (int) $m[3], (int) $m[4]];        // 2026-09-28
+        } elseif ($m[2] === '/' && (int) $m[1] <= 12) {
+            [$mo, $d, $y] = [(int) $m[1], (int) $m[3], (int) $m[4]];        // 9/28/2026 (Excel с английскими настройками)
+        } else {
+            [$d, $mo, $y] = [(int) $m[1], (int) $m[3], (int) $m[4]];        // 28.09.2026, 28/09/2026
+        }
+        if ($y < 100) $y += 2000;
+        $h = isset($m[5]) && $m[5] !== '' ? (int) $m[5] : 0;
+        $i = isset($m[6]) && $m[6] !== '' ? (int) $m[6] : 0;
+        $sec = isset($m[7]) && $m[7] !== '' ? (int) $m[7] : 0;
+        if (!empty($m[8])) {
+            if ($h < 1 || $h > 12) return null;
+            $h = strtolower($m[8][0]) === 'p' ? ($h % 12) + 12 : $h % 12;
+        }
+        if (!checkdate($mo, $d, $y) || $h > 23 || $i > 59 || $sec > 59) return null;
+        $prec = isset($m[7]) && $m[7] !== '' ? 1 : (isset($m[5]) && $m[5] !== '' ? 60 : 86400);
+        return [(int) mktime($h, $i, $sec, $mo, $d, $y), $prec];
+    }
+
+    /**
      * Ссылки на фото из ячейки: через запятую, «|», «;» или перевод строки.
      * @return array{0: string[], 1: int} [ссылки, сколько частей отброшено]
      */
@@ -787,16 +873,10 @@ final class Importer
         return $v === '' ? '' : Str::slug($v);
     }
 
-    /** Описание от поставщика: только безопасные теги без атрибутов (защита от XSS на витрине) */
+    /** Описание от поставщика: только безопасные теги без атрибутов (защита от XSS на витрине) — HtmlSanitizer::supplier */
     private static function cleanHtml(string $html): string
     {
-        if ($html === strip_tags($html)) return nl2br(htmlspecialchars($html, ENT_QUOTES, 'UTF-8'), false);
-        $html = (string) preg_replace('#<(script|style|iframe|object|embed|form|svg|math)\b[^>]*>.*?</\1\s*>#is', '', $html);
-        $html = strip_tags($html, '<p><br><ul><ol><li><b><strong><i><em><u><table><thead><tbody><tr><td><th><h2><h3><h4><span><div>');
-        $html = trim((string) preg_replace('#<([a-z][a-z0-9]*)\b[^>]*?(/?)>#i', '<$1$2>', $html));
-        // только строчные теги (<b>, <i>…) — переводы строк из файла сохраняем как <br>
-        if (!preg_match('#<(p|br|li|div|tr|h[2-4])\b#i', $html)) $html = nl2br($html, false);
-        return $html;
+        return HtmlSanitizer::supplier($html);
     }
 
     // ============================================================ строка файла → запись
@@ -875,6 +955,11 @@ final class Importer
                     break;
                 case 'size':
                     $f[$k] = mb_substr($v, 0, 64);
+                    break;
+                case 'updated_at':
+                    $st = self::stamp($v);
+                    if ($st === null) $warn[] = self::FIELDS[$k] . ': непонятная дата «' . self::cut($v, 25) . '» — проверка изменений на сайте не выполнена';
+                    else $f['updated_at'] = $st;
                     break;
             }
         }
@@ -1280,9 +1365,26 @@ final class Importer
         $it['feat'] = $sysFeat;
         $it['changes'] = $changes;
         if (!$upd && !$sysFeat && !$it['texts'] && !$it['img']) $it['action'] = 'same';
-        $it['show'] = ['name' => $f['name'] ?? $ex['name'], 'price' => $upd['price'] ?? (float) $ex['price'], 'box_qty' => $upd['box_qty'] ?? (int) $ex['box_qty'],
-            'category' => $showCat, 'brand' => $f['brand'] ?? '', 'brand_new' => isset($upd['brand_id']) && is_string($upd['brand_id']),
-            'size' => $upd['size'] ?? $ex['size'], 'in_stock' => $upd['in_stock'] ?? (int) $ex['in_stock'], 'images' => count($it['img']), 'url' => $upd['url'] ?? $ex['url']];
+        // товар изменён на сайте позже, чем выгружен файл (колонка updated_at нашего экспорта), — не затираем чужие правки
+        if ($it['action'] === 'update' && isset($f['updated_at'])) {
+            [$fileTs, $prec] = $f['updated_at'];
+            $siteTs = $ex['updated_at'] !== null ? strtotime((string) $ex['updated_at']) : false;
+            if ($siteTs !== false && $siteTs >= $fileTs + $prec) {
+                $when = 'на сайте ' . date('d.m.Y H:i:s', $siteTs) . ', в файле ' . date($prec === 1 ? 'd.m.Y H:i:s' : ($prec === 60 ? 'd.m.Y H:i' : 'd.m.Y'), $fileTs);
+                if (empty($opt['overwrite'])) {
+                    $it['action'] = 'conflict';
+                    $it['msg'] = 'изменён на сайте после выгрузки (' . $when . ') — не перезаписан';
+                    $it['upd'] = []; $it['feat'] = []; $it['texts'] = []; $it['img'] = []; $it['cat'] = null; $it['oldcat'] = null;
+                } else {
+                    $it['warn'][] = 'изменён на сайте после выгрузки (' . $when . ') — перезаписан данными файла';
+                }
+            }
+        }
+        $u = $it['upd'];
+        $it['show'] = ['name' => $f['name'] ?? $ex['name'], 'price' => $u['price'] ?? (float) $ex['price'], 'box_qty' => $u['box_qty'] ?? (int) $ex['box_qty'],
+            'category' => $it['action'] === 'conflict' ? ($ctx['ci']['path'][(int) $ex['category_id']] ?? '') : $showCat,
+            'brand' => $f['brand'] ?? '', 'brand_new' => isset($u['brand_id']) && is_string($u['brand_id']),
+            'size' => $u['size'] ?? $ex['size'], 'in_stock' => $u['in_stock'] ?? (int) $ex['in_stock'], 'images' => count($it['img']), 'url' => $u['url'] ?? $ex['url']];
     }
 
     /** [fid => [nk => значение]] → [fid => [id значения | "fid|nk" для новых]] */
@@ -1300,7 +1402,8 @@ final class Importer
 
     // ============================================================ запись пачки
 
-    private static function apply(array $plan, array $job, int $lastN, bool $isLast): void
+    /** Записать пачку. @return int[] id созданных и изменённых товаров (для переиндексации) */
+    private static function apply(array $plan, array $job, int $lastN, bool $isLast): array
     {
         $db = App::db();
         $jobId = (int) $job['id'];
@@ -1407,36 +1510,41 @@ final class Importer
         }
         $db->insertMany('import_images', $img, false, 500);
 
-        // 9. встреченные товары (для «скрыть отсутствующие» и точечной переиндексации)
-        $seen = [];
+        // 9. встреченные товары (для «скрыть отсутствующие», переиндексации и списка «изменены на сайте»)
+        $seen = []; $changed = [];
         foreach ($items as $it) {
-            if (!$it['id'] || !in_array($it['action'], ['create', 'update', 'same', 'skip'], true)) continue;
+            if (!$it['id'] || !in_array($it['action'], ['create', 'update', 'same', 'skip', 'conflict'], true)) continue;
             if ($it['action'] === 'skip' && !$it['ex']) continue;
-            $seen[] = [(int) $it['id'], $it['action'] === 'create' ? 1 : 0, in_array($it['action'], ['create', 'update'], true) ? 1 : 0];
+            $ch = in_array($it['action'], ['create', 'update'], true);
+            if ($ch) $changed[] = (int) $it['id'];
+            $seen[] = [(int) $it['id'], $it['action'] === 'create' ? 1 : 0, $ch ? 1 : 0, $it['action'] === 'conflict' ? 1 : 0];
         }
         foreach (array_chunk($seen, 500) as $part) {
             $params = [];
-            foreach ($part as [$pid, $c, $ch]) array_push($params, $jobId, $pid, $c, $ch);
-            $db->query('INSERT INTO import_seen (job_id, product_id, created, changed) VALUES ' . implode(',', array_fill(0, count($part), '(?,?,?,?)'))
-                . ' ON DUPLICATE KEY UPDATE changed = GREATEST(changed, VALUES(changed)), created = GREATEST(created, VALUES(created))', $params);
+            foreach ($part as [$pid, $c, $ch, $cf]) array_push($params, $jobId, $pid, $c, $ch, $cf);
+            $db->query('INSERT INTO import_seen (job_id, product_id, created, changed, conflict) VALUES ' . implode(',', array_fill(0, count($part), '(?,?,?,?,?)'))
+                . ' ON DUPLICATE KEY UPDATE changed = GREATEST(changed, VALUES(changed)), created = GREATEST(created, VALUES(created)),
+                    conflict = GREATEST(conflict, VALUES(conflict))', $params);
         }
 
-        // 10. ошибки, пропуски и предупреждения
-        $err = []; $cnt = ['create' => 0, 'update' => 0, 'same' => 0, 'skip' => 0, 'error' => 0];
+        // 10. ошибки, пропуски, изменённые на сайте и предупреждения
+        $err = []; $cnt = ['create' => 0, 'update' => 0, 'same' => 0, 'skip' => 0, 'error' => 0, 'conflict' => 0];
         foreach ($items as $it) {
             $cnt[$it['action']] = ($cnt[$it['action']] ?? 0) + 1;
             $label = $it['rec']['label'] !== '' ? $it['rec']['label'] . ': ' : '';
-            if ($it['action'] === 'error' || $it['action'] === 'skip') {
-                $err[] = ['job_id' => $jobId, 'n' => $it['n'], 'level' => $it['action'] === 'error' ? 'error' : 'skip', 'message' => mb_substr($label . $it['msg'], 0, 500)];
+            if (in_array($it['action'], ['error', 'skip', 'conflict'], true)) {
+                $msg = $it['action'] === 'conflict' ? $label . 'ID ' . (int) $it['id'] . ' ' . $it['msg'] : $label . $it['msg'];
+                $err[] = ['job_id' => $jobId, 'n' => $it['n'], 'level' => $it['action'], 'message' => mb_substr($msg, 0, 500)];
             }
             foreach ($it['warn'] as $w) $err[] = ['job_id' => $jobId, 'n' => $it['n'], 'level' => 'warn', 'message' => mb_substr($label . $w, 0, 500)];
         }
         $db->insertMany('import_errors', $err, false, 500);
 
-        // 11. счётчики задания
+        // 11. счётчики задания (изменённые на сайте — среди пропущенных)
         $db->query('UPDATE import_jobs SET processed = processed + ?, last_n = ?, created = created + ?, updated = updated + ?, unchanged = unchanged + ?,
             skipped = skipped + ?, error_count = error_count + ?, status = ?, updated_at = ? WHERE id = ?',
-            [count($items), $lastN, $cnt['create'], $cnt['update'], $cnt['same'], $cnt['skip'], $cnt['error'], $isLast ? 'finishing' : 'running', $now, $jobId]);
+            [count($items), $lastN, $cnt['create'], $cnt['update'], $cnt['same'], $cnt['skip'] + $cnt['conflict'], $cnt['error'], $isLast ? 'finishing' : 'running', $now, $jobId]);
+        return $changed;
     }
 
     /** UPDATE products SET col = CASE id WHEN … END — пачкой, колонки только из белого списка */
@@ -1600,16 +1708,21 @@ final class Importer
         }
     }
 
-    /** Обработать очередную пачку строк (одна транзакция) */
+    /**
+     * Обработать очередную пачку строк (одна транзакция). Индекс каталога обновляется сразу для товаров
+     * пачки — точечно, в той же транзакции (снимок характеристик — до записи): после импорта 3 товаров
+     * «Завершение» больше не перестраивает категории на 50 тыс. товаров. Когда изменённых за задание
+     * набирается больше FULL_REINDEX_FROM, дальше — как раньше: в конце перестраиваются все категории.
+     */
     private static function processRows(array $job): void
     {
         $db = App::db();
         $batch = max(50, min(1000, (int) $job['options']['batch']));
         $rows = $db->pairs('SELECT n, data FROM import_rows WHERE job_id = ? AND n > ? ORDER BY n LIMIT ' . $batch, [$job['id'], $job['last_n']]);
         if (!$rows) {
-            if ($job['processed'] < $job['total']) {       // разобранные строки удалены уборкой (задание старше 7 дней)
+            if ($job['processed'] < $job['total']) {       // разобранные строки удалены уборкой (задание не двигалось 7 дней)
                 $db->insert('import_errors', ['job_id' => $job['id'], 'n' => 0, 'level' => 'error',
-                    'message' => 'Не обработано строк: ' . ($job['total'] - $job['processed']) . ' — разобранные строки удалены (задание старше 7 дней). Загрузите файл заново.']);
+                    'message' => 'Не обработано строк: ' . ($job['total'] - $job['processed']) . ' — разобранные строки удалены (задание не продолжалось больше 7 дней). Загрузите файл заново.']);
                 $db->query('UPDATE import_jobs SET error_count = error_count + 1 WHERE id = ?', [$job['id']]);
             }
             $db->update('import_jobs', ['status' => 'finishing', 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$job['id']]);
@@ -1620,13 +1733,40 @@ final class Importer
         $plan = self::plan($data, $job['mapping'], $job['options']);
         $lastN = (int) max(array_keys($data));
         $isLast = count($data) < $batch || !$db->value('SELECT 1 FROM import_rows WHERE job_id = ? AND n > ? LIMIT 1', [$job['id'], $lastN]);
-        $db->transaction(static fn() => self::apply($plan, $job, $lastN, $isLast));
+
+        $st = $job['state'];
+        if ((int) $job['processed'] === 0) $st['perbatch'] = 1;              // задания, начатые до этой версии, — по-старому (в конце)
+        $upd = []; $expect = 0;
+        foreach ($plan['items'] as $it) {
+            if ($it['action'] === 'update') $upd[] = (int) $it['id'];
+            if ($it['action'] === 'update' || $it['action'] === 'create') $expect++;
+        }
+        $inc = !empty($st['perbatch']) && ($st['reindex'] ?? '') !== 'full';
+        if ($inc && $expect && (int) ($st['indexed'] ?? 0) + $expect > self::FULL_REINDEX_FROM) {
+            $inc = false;
+            $st['reindex'] = 'full';                                          // много изменений — в конце перестроить все категории
+        }
+        $db->transaction(static function () use ($db, $plan, $job, $lastN, $isLast, $upd, $inc, $st): void {
+            $snap = $inc ? CatalogIndexer::snapshot($upd) : null;
+            $changed = self::apply($plan, $job, $lastN, $isLast);
+            if ($inc && $changed) {
+                // созданные товары — в снимок «пустыми»: до пачки их не было (ни фильтров, ни бренда),
+                // иначе индексатор пересчитал бы счётчики всех брендов
+                $snap['ids'] = array_values(array_unique(array_merge($snap['ids'], $changed)));
+                $t = microtime(true);
+                CatalogIndexer::products($changed, $snap, false);           // кэш сайта сбросит finish()
+                $st['indexed'] = (int) ($st['indexed'] ?? 0) + count($changed);
+                $st['reindex'] = 'partial';
+                $st['reindex_ms'] = (int) ($st['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
+            }
+            if ($st !== $job['state']) $db->update('import_jobs', ['state' => self::json($st)], 'id = ?', [(int) $job['id']]);
+        });
     }
 
     /**
-     * Завершение (может занять несколько шагов): скрыть отсутствующие товары поставщика,
-     * перестроить индекс затронутых категорий (порциями, чтобы шаг укладывался в бюджет времени),
-     * пересчитать счётчики и сбросить кэш.
+     * Завершение (может занять несколько шагов): скрыть отсутствующие товары поставщика и обновить
+     * их в индексе (точечно), при большом числе изменений — перестроить все категории (порциями, чтобы
+     * шаг укладывался в бюджет времени), пересчитать счётчики и сбросить кэш.
      */
     private static function finish(array $job, float $budget): void
     {
@@ -1634,18 +1774,33 @@ final class Importer
         $jobId = (int) $job['id'];
         $opt = $job['options'];
         $state = $job['state'];
-        if (!isset($state['reindex_queue'])) {
+        // скрытие, его индексация и план перестройки — одной транзакцией: после обрыва шаг повторится целиком
+        // (иначе скрытые товары уже не «отсутствующие» и остались бы в индексе)
+        if (!isset($state['reindex_queue'])) $db->transaction(static function () use ($db, $job, $jobId, &$state): void {
             $state = self::hideMissing($job);
-            $changed = array_map('intval', $db->col('SELECT product_id FROM import_seen WHERE job_id = ? AND changed = 1', [$jobId]));
-            $ids = array_values(array_unique(array_merge($changed, $state['hidden_ids'] ?? [])));
+            $hidden = $state['hidden_ids'] ?? [];
             unset($state['hidden_ids']);
-            $full = count($ids) > self::FULL_REINDEX_FROM;
-            $state['reindex'] = !$ids ? 'none' : ($full ? 'full' : 'partial');
-            $state['reindex_queue'] = $ids ? self::affectedCategories($ids, $full) : [];
+            if (!empty($state['perbatch'])) {                                 // изменённые товары уже в индексе (по пачкам)
+                $full = ($state['reindex'] ?? '') === 'full' || count($hidden) > self::FULL_REINDEX_FROM;
+                if (!$full && $hidden) {
+                    $t = microtime(true);
+                    CatalogIndexer::products($hidden, CatalogIndexer::snapshot($hidden), false);   // скрытие не меняет характеристик и бренда
+                    $state['reindex'] = 'partial';
+                    $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
+                }
+                $state['reindex'] = $full ? 'full' : ($state['reindex'] ?? 'none');
+                $state['reindex_queue'] = $full ? self::affectedCategories([], true) : [];
+            } else {                                                          // задание начато до индексации по пачкам
+                $changed = array_map('intval', $db->col('SELECT product_id FROM import_seen WHERE job_id = ? AND changed = 1', [$jobId]));
+                $ids = array_values(array_unique(array_merge($changed, $hidden)));
+                $full = count($ids) > self::FULL_REINDEX_FROM;
+                $state['reindex'] = !$ids ? 'none' : ($full ? 'full' : 'partial');
+                $state['reindex_queue'] = $ids ? self::affectedCategories($ids, $full) : [];
+                $state['reindex_ms'] = 0;
+            }
             $state['reindex_total'] = count($state['reindex_queue']);
-            $state['reindex_ms'] = 0;
             self::saveState($jobId, $state);
-        }
+        });
         // перестройка категорий порциями: одна категория на 50 тыс. товаров — 1–2 с
         $t = microtime(true);
         $queue = $state['reindex_queue'];
@@ -1657,13 +1812,18 @@ final class Importer
                 if (isset($byId[$cid])) CatalogIndexer::rebuildCategory($byId[$cid], $all);
             }
         }
-        $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
         $state['reindex_queue'] = $queue;
-        if ($queue) { self::saveState($jobId, $state); return; }
-        if (($state['reindex'] ?? 'none') !== 'none') {
-            CatalogIndexer::updateCounters();
-            Cache::flush();
+        if ($queue) {
+            $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
+            self::saveState($jobId, $state);
+            return;
         }
+        if (!empty($state['reindex_total'])) {                                // категории перестраивались целиком
+            if (($state['reindex'] ?? '') === 'full') CatalogIndexer::rebuildSignatures();   // все учтены по текущим характеристикам
+            CatalogIndexer::updateCounters();
+        }
+        $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
+        if (($state['reindex'] ?? 'none') !== 'none') Cache::flush();
         unset($state['reindex_queue']);
         $pending = (int) $db->value('SELECT COUNT(*) FROM import_images WHERE job_id = ? AND status = 0', [$jobId]);
         $next = $pending && !empty($opt['images']) ? 'images' : 'done';
@@ -1850,7 +2010,8 @@ final class Importer
     {
         $out = [];
         $dir = self::dir() . '/tmp';
-        if (!function_exists('curl_multi_init')) return self::fetchPlain($urls, $maxBytes, $timeout, $imagesOnly);
+        // хостинг может отключить только curl_multi_exec (disable_functions) — тогда тоже по одной ссылке
+        if (!function_exists('curl_multi_init') || !function_exists('curl_multi_exec')) return self::fetchPlain($urls, $maxBytes, $timeout, $imagesOnly);
         $mh = curl_multi_init();
         $dns = [];
         $jobs = [];

@@ -384,13 +384,35 @@ final class AdminCatalog
     {
         $chk = self::checkUpload($file);
         if (is_string($chk)) return $chk;
+        return self::storeProductImage($pid, $chk['tmp'], $chk['ext']);
+    }
+
+    /**
+     * Фото товара из медиатеки: файл public/uploads/… ($ref — путь «2026/09/a.jpg» или ссылка «/uploads/…»)
+     * копируется в фото товара так же, как обычная загрузка (сам файл медиатеки не меняется и не удаляется).
+     */
+    public static function addProductImageFromMedia(int $pid, string $ref): array|string
+    {
+        $rel = Media::clean($ref);
+        $src = $rel !== null ? Media::path($rel) : null;
+        if ($src === null) return 'файл не найден в медиатеке';
+        if ((int) @filesize($src) > self::MAX_UPLOAD) return 'файл больше 15 МБ';
+        $info = @getimagesize($src);
+        if (!$info || !isset(self::IMAGE_TYPES[$info['mime'] ?? ''])) return 'это не картинка jpg, png, webp или gif';
+        if ($info[0] < 10 || $info[1] < 10 || $info[0] * $info[1] > 60_000_000) return 'недопустимый размер картинки';
+        return self::storeProductImage($pid, $src, self::IMAGE_TYPES[$info['mime']]);
+    }
+
+    /** Общая часть загрузки: строка product_images + оригинал (до 1200 px) по схеме Webasyst; миниатюры создаст ImageController */
+    private static function storeProductImage(int $pid, string $src, string $ext): array|string
+    {
         @ini_set('memory_limit', '512M');
         $db = App::db();
         $sort = (int) $db->value('SELECT COALESCE(MAX(sort), -1) + 1 FROM product_images WHERE product_id = ?', [$pid]);
-        $iid = $db->insert('product_images', ['product_id' => $pid, 'sort' => $sort, 'ext' => $chk['ext'], 'width' => 0, 'height' => 0,
+        $iid = $db->insert('product_images', ['product_id' => $pid, 'sort' => $sort, 'ext' => $ext, 'width' => 0, 'height' => 0,
             'filename' => '', 'created_at' => date('Y-m-d H:i:s')]);
-        $dst = Image::originalPath($pid, $iid, $chk['ext']);
-        if (!Image::resize($chk['tmp'], $dst, '1200', 90) || !($info = @getimagesize($dst))) {
+        $dst = Image::originalPath($pid, $iid, $ext);
+        if (!Image::resize($src, $dst, '1200', 90) || !($info = @getimagesize($dst))) {
             @unlink($dst);
             $db->delete('product_images', 'id = ?', [$iid]);
             return 'не удалось обработать картинку';
@@ -398,7 +420,7 @@ final class AdminCatalog
         $db->update('product_images', ['width' => (int) $info[0], 'height' => (int) $info[1]], 'id = ?', [$iid]);
         self::protectOriginals();
         if (!$db->value('SELECT image_id FROM products WHERE id = ?', [$pid])) self::syncMainImage($pid);
-        return ['id' => $iid, 'ext' => $chk['ext'], 'width' => (int) $info[0], 'height' => (int) $info[1], 'sort' => $sort];
+        return ['id' => $iid, 'ext' => $ext, 'width' => (int) $info[0], 'height' => (int) $info[1], 'sort' => $sort];
     }
 
     /** Оригиналы (wa-data/protected) не отдаются напрямую — как в Webasyst; наружу только миниатюры */
@@ -755,19 +777,48 @@ final class AdminCatalog
     }
 
     // ======================================================================= формы: поля RU | UA, редактор
+    // Один вид во всех семи редакторах (товар, категория, бренд, характеристика, страница, статья, баннер):
+    // над формой — переключатель «RU | UA» со счётчиком переведённых полей (партиал admin/partials/lang-bar),
+    // поля языка — .l-ru / .l-uk (видны по data-lang области), поля UA отмечены data-uk (по ним считается «заполнено N из M»),
+    // HTML — textarea[data-editor] (редактор content.js: визуальный режим и HTML-код, «Медиатека»). Стили — admin.css.
 
-    /** Переключатель языка текстовых полей (.subtabs). Все переключатели страницы синхронны (catalog.js). */
-    public static function langTabs(): string
+    /** Подписи и пояснения SEO-полей — одинаковые во всех редакторах (ключ — роль поля; у страницы и бренда Title — колонка title) */
+    public const SEO_FIELDS = [
+        'seo_name'         => ['SEO-название', 'Подставляется в SEO-шаблоны вместо названия.'],
+        'meta_title'       => ['Title', 'Заголовок в выдаче поиска и на вкладке браузера.'],
+        'meta_description' => ['Description', 'Текст под заголовком в выдаче поиска.'],
+        'meta_keywords'    => ['Keywords', 'Ключевые слова через запятую (Google их не учитывает).'],
+        'h1'               => ['Заголовок H1', 'Главный заголовок на самой странице.'],
+    ];
+
+    /** Пояснение над SEO-полями — одно и то же во всех редакторах */
+    public const SEO_INTRO = 'Заполняйте, только если нужно своё значение. Пустое поле — на сайте будет значение по умолчанию (показано серым в поле).';
+
+    /** Метка языка у подписи поля: RU — серая, UA — жёлтая */
+    public static function langTag(string $lang): string
     {
-        return '<nav class="subtabs ac-langtabs" aria-label="Язык текстов">'
-            . '<a href="#" data-lang="ru" class="on" aria-pressed="true" title="Русская версия сайта">RU</a>'
-            . '<a href="#" data-lang="uk" aria-pressed="false" title="Украинская версия сайта (/ua/…)">UA</a></nav>';
+        return $lang === 'uk'
+            ? '<i class="lp" title="Украинская версия сайта (/ua/…)">UA</i>'
+            : '<i class="lp ru" title="Русская версия сайта">RU</i>';
+    }
+
+    /**
+     * SEO-поле в двух языках с общей подписью и пояснением (SEO_FIELDS).
+     * $role — ключ SEO_FIELDS, $name — колонка (title у страницы и бренда вместо meta_title); $o — как у i18nField.
+     */
+    public static function seoField(string $role, string $name, array $row, array $o = []): string
+    {
+        [$label, $hint] = self::SEO_FIELDS[$role];
+        $area = $role === 'meta_description' || $role === 'meta_keywords';
+        return self::i18nField($area ? 'area' : 'text', $name, $label, $row,
+            $o + ['hint' => $hint, 'max' => $area ? 5000 : 500, 'rows' => $role === 'meta_keywords' ? 2 : 3]);
     }
 
     /**
      * Текстовое поле в двух языках: $name (русский) и {$name}_uk (украинский) — видно одно, по переключателю RU | UA.
-     * $kind: text | area | html (textarea с панелью оформления и предпросмотром).
-     * $o: max, rows, required, placeholder, tpl (результат SEO-шаблона RU), tpl_uk, hint, error (HTML), id, attrs (доп. атрибуты RU-поля)
+     * $kind: text | area | html (HTML-редактор content.js).
+     * $o: max, rows, required, placeholder, hint (пояснение, HTML), tpl (RU: что будет при пустом поле — шаблон),
+     *     empty (RU: текст «Пусто — …» без шаблона), tpl_uk (UA: что будет при пустом поле), error (HTML), id, attrs (доп. атрибуты RU-поля)
      */
     public static function i18nField(string $kind, string $name, string $label, array $row, array $o = []): string
     {
@@ -778,65 +829,81 @@ final class AdminCatalog
             $id = ($o['id'] ?? 'f-' . preg_replace('/[^a-z0-9_]/', '', $name)) . ($uk ? '-uk' : '');
             $ph = $uk ? (string) ($o['tpl_uk'] ?? '') : (string) ($o['tpl'] ?? $o['placeholder'] ?? '');
             if ($uk && $ph === '') $ph = str_limit((string) ($row[$name] ?? ''), 180);
-            $tag = '<b class="ac-ltag' . ($uk ? ' uk' : '') . '">' . ($uk ? 'UA' : 'RU') . '</b>';
             $req = !$uk && !empty($o['required']) ? ' required' : '';
             $max = isset($o['max']) ? ' maxlength="' . (int) $o['max'] . '"' : '';
-            $attrs = !$uk ? (string) ($o['attrs'] ?? '') : '';
-            $hint = '';
+            $attrs = $uk ? ' data-uk' : (string) ($o['attrs'] ?? '');
+            // подсказка: пояснение + что будет на сайте, если поле пустое
             if ($uk) {
-                $hint = isset($o['tpl_uk']) && $o['tpl_uk'] !== ''
-                    ? '<small class="hint">Пусто — на украинской версии будет: <i>' . e(str_limit((string) $o['tpl_uk'], 220)) . '</i></small>'
-                    : '<small class="hint">Пусто — на украинской версии показывается русский текст.</small>';
-            } elseif (!empty($o['tpl'])) {
-                $hint = '<small class="hint">Если пусто — по шаблону: <i>' . e($o['tpl']) . '</i></small>';
-            } elseif (!empty($o['hint'])) {
-                $hint = '<small class="hint">' . $o['hint'] . '</small>';
+                $empty = isset($o['tpl_uk']) && $o['tpl_uk'] !== ''
+                    ? 'Пусто — на украинской версии будет: <i>' . e(str_limit((string) $o['tpl_uk'], 220)) . '</i>'
+                    : 'Пусто — на украинской версии показывается русский текст.';
+            } else {
+                $empty = !empty($o['tpl']) ? 'Пусто — по шаблону: <i>' . e((string) $o['tpl']) . '</i>' : e((string) ($o['empty'] ?? ''));
             }
-            $wrapAttrs = ' data-l="' . $lang . '"' . ($uk ? ' hidden' : '');
+            $hint = trim((string) ($o['hint'] ?? '') . ' ' . $empty);
+            $hint = $hint !== '' ? '<small class="hint">' . $hint . '</small>' : '';
+            $err = $uk ? '' : (string) ($o['error'] ?? '');
+            // «*» (обязательное) — только у русского поля: украинское можно не заполнять
+            $lbl = '<label class="lbl" for="' . e($id) . '">' . e($uk ? rtrim($label, ' *') : $label) . ' ' . self::langTag($lang) . '</label>';
             if ($kind === 'html') {
-                $h .= '<div class="fld ac-i18n"' . $wrapAttrs . '><label for="' . $id . '"><span>' . e($label) . ' ' . $tag . '</span></label>'
-                    . self::editorBox($field, $value, $id, (int) ($o['rows'] ?? 12), $ph) . $hint . ($uk ? '' : (string) ($o['error'] ?? '')) . '</div>';
+                $copy = $uk ? '<button type="button" class="btn btn-sm" data-copy-from="' . e($name) . '" data-copy-to="' . e($field) . '">Скопировать русский текст</button>' : '';
+                $h .= '<div class="fld l-' . $lang . '"><div class="lbl-row">' . $lbl . $copy . '</div>'
+                    . self::editorBox($field, $value, $id, (int) ($o['rows'] ?? 12), $ph, $uk) . $hint . HtmlSanitizer::hint() . $err . '</div>';
                 continue;
             }
-            $input = $kind === 'area'
-                ? '<textarea id="' . $id . '" name="' . e($field) . '" rows="' . (int) ($o['rows'] ?? 3) . '" class="plain" placeholder="' . e($ph) . '"' . $req . $max . $attrs . '>' . e($value) . '</textarea>'
-                : '<input type="text" id="' . $id . '" name="' . e($field) . '" value="' . e($value) . '" placeholder="' . e($ph) . '"' . $req . $max . $attrs . '>';
-            $h .= '<div class="fld ac-i18n"' . $wrapAttrs . '><label for="' . $id . '"><span>' . e($label) . ' ' . $tag . '</span></label>'
-                . $input . $hint . ($uk ? '' : (string) ($o['error'] ?? '')) . '</div>';
+            // однострочное поле с переводами строк в значении (импорт со старого сайта: списки в H1) — textarea:
+            // <input> молча склеил бы строки при сохранении
+            $area = $kind === 'area' || str_contains($value, "\n");
+            $input = $area
+                ? '<textarea id="' . e($id) . '" name="' . e($field) . '" rows="' . (int) ($o['rows'] ?? 3) . '" class="plain" placeholder="' . e($ph) . '"' . $req . $max . $attrs . '>' . "\n" . e($value) . '</textarea>'
+                : '<input type="text" id="' . e($id) . '" name="' . e($field) . '" value="' . e($value) . '" placeholder="' . e($ph) . '"' . $req . $max . $attrs . '>';
+            $h .= '<div class="fld l-' . $lang . '">' . $lbl . $input . $hint . $err . '</div>';
         }
         return $h;
     }
 
-    /** Textarea для HTML с простой панелью (жирный, список, ссылка…) и предпросмотром */
-    public static function editorBox(string $name, string $value, string $id, int $rows = 12, string $placeholder = ''): string
+    /**
+     * HTML-поле: textarea[data-editor] — панель, визуальный режим и HTML-код строит редактор content.js
+     * (тот же, что у страниц и статей). data-media-base — откуда брать картинки /wa-data/… в визуальном режиме (разработка).
+     */
+    public static function editorBox(string $name, string $value, string $id, int $rows = 12, string $placeholder = '', bool $uk = false): string
     {
         $remote = (string) App::config('images.remote_base', '');
-        return '<div class="ac-editor" data-remote="' . e($remote) . '">'
-            . '<div class="ac-etools" role="toolbar" aria-label="Оформление текста">'
-            . '<button type="button" class="btn btn-sm" data-cmd="b" title="Жирный" aria-label="Жирный"><b>Ж</b></button>'
-            . '<button type="button" class="btn btn-sm" data-cmd="i" title="Курсив" aria-label="Курсив"><i>К</i></button>'
-            . '<button type="button" class="btn btn-sm" data-cmd="h3" title="Подзаголовок" aria-label="Подзаголовок">H3</button>'
-            . '<button type="button" class="btn btn-sm" data-cmd="p" title="Абзац" aria-label="Абзац">¶</button>'
-            . '<button type="button" class="btn btn-sm" data-cmd="ul" title="Маркированный список">• Список</button>'
-            . '<button type="button" class="btn btn-sm" data-cmd="ol" title="Нумерованный список">1. Список</button>'
-            . '<button type="button" class="btn btn-sm" data-cmd="a" title="Ссылка">Ссылка</button>'
-            . '<span class="sp"></span><button type="button" class="btn btn-sm" data-cmd="preview" aria-pressed="false">Предпросмотр</button></div>'
-            . '<textarea class="code" id="' . e($id) . '" name="' . e($name) . '" rows="' . $rows . '" placeholder="' . e(str_limit($placeholder, 200)) . '">' . e($value) . '</textarea>'
-            . '<iframe class="ac-preview" hidden sandbox="" title="Предпросмотр"></iframe></div>';
+        // перевод строки сразу после <textarea> браузер отбрасывает — так сохранится перевод строки в начале самого текста
+        return '<textarea id="' . e($id) . '" name="' . e($name) . '" rows="' . $rows . '" data-editor' . ($uk ? ' data-uk' : '')
+            . ($remote !== '' ? ' data-media-base="' . e($remote) . '"' : '')
+            . ' placeholder="' . e(str_limit($placeholder, 200)) . '">' . "\n" . e($value) . '</textarea>';
     }
 
-    /** Строка из POST: пусто → null, обрезка по длине */
+    /**
+     * Строка из POST: пусто → null, обрезка по длине. Переводы строк — LF: браузер отправляет textarea с CRLF,
+     * а тексты в базе (перенос, переводы UA) — с LF; без этого «сохранить без правок» меняло бы каждый перевод строки.
+     */
     public static function postStr(string $key, int $max = 500): ?string
     {
-        $v = trim(mb_substr((string) (is_scalar($_POST[$key] ?? null) ? $_POST[$key] : ''), 0, $max));
+        $v = trim(mb_substr(str_replace("\r\n", "\n", (string) (is_scalar($_POST[$key] ?? null) ? $_POST[$key] : '')), 0, $max));
         return $v === '' ? null : $v;
     }
 
-    /** HTML из POST (описания): пусто → null */
+    /** HTML из POST (описания): пусто → null; переводы строк — LF (как PagesController::html) */
     public static function postHtml(string $key, int $max = 1000000): ?string
     {
-        $v = is_scalar($_POST[$key] ?? null) ? trim((string) $_POST[$key]) : '';
+        $v = is_scalar($_POST[$key] ?? null) ? trim(str_replace("\r\n", "\n", (string) $_POST[$key])) : '';
         return $v === '' ? null : mb_substr($v, 0, $max);
+    }
+
+    /**
+     * Поля без правок — прежние байты из базы. postStr/postHtml/PagesController::html() переводят CRLF в LF и обрезают края,
+     * а у текстов из Webasyst бывают CRLF и перевод строки в конце (H1 категорий) — «сохранить без правок» меняло их.
+     * Сравнение — после той же нормализации; текст, который очистил HtmlSanitizer (менеджер), отличается и сохраняется новым.
+     */
+    public static function keepUnchanged(array $new, array $old): array
+    {
+        $norm = static fn(string $s): string => trim(str_replace("\r\n", "\n", $s));
+        foreach ($new as $k => $v) {
+            if (is_string($v) && isset($old[$k]) && is_string($old[$k]) && $v !== $old[$k] && $norm($v) === $norm($old[$k])) $new[$k] = $old[$k];
+        }
+        return $new;
     }
 
     public static function storeName(): string

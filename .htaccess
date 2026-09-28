@@ -14,3 +14,9 @@
         RedirectMatch 403 (?i)^/(app|bin|config|database|docs|lang|storage|tools|vendor|\.git)(/|$)
     </IfModule>
 </IfModule>
+# Заголовки безопасности и для ответов 403 этого файла (как в public/.htaccess: только если их ещё нет — без повторов)
+<IfModule mod_headers.c>
+    Header always setifempty X-Content-Type-Options "nosniff" "expr=-z resp('X-Content-Type-Options')"
+    Header always setifempty Referrer-Policy "strict-origin-when-cross-origin" "expr=-z resp('Referrer-Policy')"
+    Header always setifempty X-Frame-Options "SAMEORIGIN" "expr=-z resp('X-Frame-Options')"
+</IfModule>

@@ -1,11 +1,12 @@
 <?php
 /**
- * Форма страницы: RU и UA поля (переключатель «RU | UA»), содержимое — HTML-редактор.
+ * Форма страницы: RU и UA поля (общий переключатель «RU | UA»), содержимое — HTML-редактор, SEO — общие поля (AdminCatalog::seoField).
  * @var array $page @var bool $isNew @var array $errors @var bool $dup @var ?array $original @var ?array $redirectHere
  * @var array $hints ['ru'|'uk' => ['title','desc','keys']] — что подставят SEO-шаблоны @var string $lang
  */
 use App\Controllers\Admin\BaseController;
 use App\Core\App;
+use App\Services\AdminCatalog;
 
 $err = static fn(string $k) => isset($errors[$k]) ? '<span class="fld-err" role="alert">' . e($errors[$k]) . '</span>' : '';
 $inv = static fn(string $k) => isset($errors[$k]) ? ' aria-invalid="true"' : '';
@@ -13,17 +14,18 @@ $action = $isNew ? '/admin/pages/new/' : '/admin/pages/' . (int) $page['id'] . '
 $host = (string) (parse_url((string) App::config('base_url', ''), PHP_URL_HOST) ?: 'tomobuv.com.ua');
 $mediaBase = (string) App::config('images.remote_base', '');
 $v = static fn(string $k) => (string) ($page[$k] ?? '');
-$ua = '<i class="lp" title="Украинская версия">UA</i>';
+$ru = AdminCatalog::langTag('ru');
+$ua = AdminCatalog::langTag('uk');
 ?>
 <?php if ($errors): ?><div class="flash bad">Проверьте поля формы: <?= e(implode('; ', $errors)) ?></div><?php endif; ?>
 
 <form method="post" action="<?= e($action) ?>" class="ed-form" data-lang="<?= e($lang) ?>" novalidate>
   <?= BaseController::tokenField() ?>
-  <?= $view->partial('admin/pages/_lang', ['lang' => $lang, 'what' => 'страницы']) ?>
+  <?= $view->partial('admin/partials/lang-bar', ['lang' => $lang, 'what' => 'страницы']) ?>
   <div class="grid3">
     <div>
       <div class="card">
-        <label class="fld l-ru"><span>Название *</span>
+        <label class="fld l-ru"><span>Название * <?= $ru ?></span>
           <input type="text" name="name" value="<?= e($v('name')) ?>" maxlength="255" required<?= $inv('name') ?>>
           <?= $err('name') ?><small class="hint">Выводится в меню и заголовком страницы (если не задан H1).</small>
         </label>
@@ -52,14 +54,16 @@ $ua = '<i class="lp" title="Украинская версия">UA</i>';
         <?php endif; ?>
 
         <div class="fld l-ru">
-          <label class="lbl" for="pg-content">Содержимое</label>
-          <textarea id="pg-content" name="content" rows="22" data-editor data-media-base="<?= e($mediaBase) ?>"><?= e($v('content')) ?></textarea>
+          <div class="lbl-row"><label class="lbl" for="pg-content">Содержимое <?= $ru ?></label></div>
+          <textarea id="pg-content" name="content" rows="22" data-editor data-media-base="<?= e($mediaBase) ?>"><?= "\n" . e($v('content')) ?></textarea>
+          <?= \App\Services\HtmlSanitizer::hint() ?>
         </div>
         <div class="fld l-uk">
           <div class="lbl-row"><label class="lbl" for="pg-content-uk">Содержимое <?= $ua ?></label>
             <button type="button" class="btn btn-sm" data-copy-from="content" data-copy-to="content_uk">Скопировать русский текст</button></div>
-          <textarea id="pg-content-uk" name="content_uk" rows="22" data-editor data-uk data-media-base="<?= e($mediaBase) ?>"><?= e($v('content_uk')) ?></textarea>
+          <textarea id="pg-content-uk" name="content_uk" rows="22" data-editor data-uk data-media-base="<?= e($mediaBase) ?>"><?= "\n" . e($v('content_uk')) ?></textarea>
           <small class="hint">Пусто — на /ua/ показывается русское содержимое. Удобно: скопируйте русский текст и переведите его.</small>
+          <?= \App\Services\HtmlSanitizer::hint() ?>
         </div>
       </div>
     </div>
@@ -74,28 +78,14 @@ $ua = '<i class="lp" title="Украинская версия">UA</i>';
       </div>
       <div class="card">
         <h2 id="h-seo">SEO</h2>
-        <?php foreach (['ru' => '', 'uk' => '_uk'] as $l => $sfx): $h = $hints[$l]; $path = ($l === 'uk' ? 'ua/' : '') . rtrim($v('url'), '/'); ?>
-        <div class="l-<?= $l ?>">
-          <div class="serp" data-serp="<?= $l ?>" aria-label="Как страница выглядит в поиске Google">
-            <div class="serp-url"><?= e($host) ?> › <span data-serp-url><?= e(str_replace('/', ' › ', $path)) ?></span></div>
-            <div class="serp-title" data-serp-title><?= e($v('title' . $sfx) ?: $h['title']) ?></div>
-            <div class="serp-desc" data-serp-desc><?= e($v('meta_description' . $sfx) ?: $h['desc']) ?></div>
-          </div>
-          <label class="fld"><span>Title<?= $l === 'uk' ? ' ' . $ua : '' ?></span>
-            <input type="text" name="title<?= $sfx ?>" value="<?= e($v('title' . $sfx)) ?>" maxlength="500" placeholder="<?= e($h['title']) ?>" data-counter="70" data-serp-src="title" data-serp-for="<?= $l ?>"<?= $l === 'uk' ? ' data-uk' : '' ?>>
-          </label>
-          <label class="fld"><span>H1<?= $l === 'uk' ? ' ' . $ua : '' ?></span>
-            <input type="text" name="h1<?= $sfx ?>" value="<?= e($v('h1' . $sfx)) ?>" maxlength="500" placeholder="<?= e($l === 'uk' ? ($v('h1') ?: $v('name_uk') ?: $v('name')) : ($v('name') ?: 'как название')) ?>"<?= $l === 'uk' ? ' data-uk' : '' ?>>
-          </label>
-          <label class="fld"><span>Meta description<?= $l === 'uk' ? ' ' . $ua : '' ?></span>
-            <textarea name="meta_description<?= $sfx ?>" rows="4" class="plain" placeholder="<?= e($h['desc']) ?>" data-counter="160" data-serp-src="desc" data-serp-for="<?= $l ?>"<?= $l === 'uk' ? ' data-uk' : '' ?>><?= e($v('meta_description' . $sfx)) ?></textarea>
-          </label>
-          <label class="fld"><span>Meta keywords<?= $l === 'uk' ? ' ' . $ua : '' ?></span>
-            <textarea name="meta_keywords<?= $sfx ?>" rows="2" class="plain" placeholder="<?= e($h['keys']) ?>"<?= $l === 'uk' ? ' data-uk' : '' ?>><?= e($v('meta_keywords' . $sfx)) ?></textarea>
-          </label>
-          <p class="hint"><?= $l === 'uk' ? 'Пусто — русское значение этого поля, а если и оно пусто — украинский вариант шаблона' : 'Пусто — по шаблону' ?> из <a href="/admin/settings/seo/">SEO-шаблонов</a>. В подсказке в поле — что будет на сайте.</p>
-        </div>
-        <?php endforeach; ?>
+        <p class="hint"><?= e(AdminCatalog::SEO_INTRO) ?> Шаблоны — в <a href="/admin/settings/seo/">SEO-шаблонах</a>.</p>
+        <div class="l-ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'page', 'row' => $page]]) ?></div>
+        <div class="l-uk"><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($v('url') !== '' ? '/ua/' . $v('url') : '', $page,
+          ['title' => $hints['uk']['title'], 'meta_description' => $hints['uk']['desc']], 'title')]) ?></div>
+        <?= AdminCatalog::seoField('meta_title', 'title', $page, ['tpl' => $hints['ru']['title'], 'tpl_uk' => $hints['uk']['title']]) ?>
+        <?= AdminCatalog::seoField('meta_description', 'meta_description', $page, ['tpl' => $hints['ru']['desc'], 'tpl_uk' => $hints['uk']['desc']]) ?>
+        <?= AdminCatalog::seoField('meta_keywords', 'meta_keywords', $page, ['tpl' => $hints['ru']['keys'], 'tpl_uk' => $hints['uk']['keys']]) ?>
+        <?= AdminCatalog::seoField('h1', 'h1', $page, ['placeholder' => $v('name'), 'empty' => 'Пусто — название страницы.', 'tpl_uk' => $v('h1') ?: $v('name_uk') ?: $v('name')]) ?>
         <label class="fld" style="margin-top:14px"><span>Канонический адрес</span>
           <input type="text" name="canonical" value="<?= e($v('canonical')) ?>" maxlength="255" placeholder="/o-kompanii/"<?= $inv('canonical') ?>>
           <?= $err('canonical') ?><small class="hint">Для дублей — адрес основной страницы. Обычно пусто.</small>

@@ -7,6 +7,7 @@
  * Товар: @var array $images @var array $features @var array $similar @var ?array $category @var float $rating @var int $ratingCount
  * Отзывы: @var App\Core\Paginator $pager @var ?array $flash
  */
+use App\Services\Cart;
 use App\Services\Catalog;
 
 $mode ??= 'product';
@@ -19,6 +20,12 @@ $inStock = (bool) $p['in_stock'];
 // «8 пар», «3 ящика» — ключи словаря целыми фразами (в украинском свои окончания)
 $pairs = static fn(int $n): string => t(plural($n, '{n} пара', '{n} пары', '{n} пар'), ['n' => $n]);
 $boxes = static fn(int $n): string => t(plural($n, '{n} ящик', '{n} ящика', '{n} ящиков'), ['n' => $n]);
+// Остаток (products.stock, в парах) → сколько ящиков можно заказать. Одинаково для всех посетителей — страница кэшируется.
+// data-max у блока покупки: app.js/product.js не дают выбрать больше, «+» на максимуме — aria-disabled.
+$maxBoxes = $inStock ? max(1, Cart::maxBoxes($p)) : 1;
+$limited = $inStock && $maxBoxes < Cart::MAX_BOXES;
+$maxNote = $limited ? t(plural($maxBoxes, 'Доступно не больше {n} ящика', 'Доступно не больше {n} ящиков', 'Доступно не больше {n} ящиков'), ['n' => $maxBoxes]) : '';
+$plusOff = $maxBoxes <= 1 ? ' aria-disabled="true"' : '';
 $stars = static function (float $r): string {
     $h = '<span class="stars" role="img" aria-label="' . e(t('Оценка {r} из 5', ['r' => rtrim(rtrim(number_format($r, 1, '.', ''), '0'), '.')])) . '">';
     for ($i = 1; $i <= 5; $i++) $h .= '<i class="' . ($r >= $i - 0.25 ? 'on' : ($r >= $i - 0.75 ? 'half' : '')) . '"></i>';
@@ -37,15 +44,16 @@ $reviewsUrl = $p['link'] . 'reviews/';
     <div class="pp-rvmain">
       <?= $view->partial('front/partials/product-reviews', ['p' => $p, 'reviews' => $reviews, 'rCount' => $rCount, 'full' => true, 'pager' => $pager, 'flash' => $flash ?? null, 'stars' => $stars]) ?>
     </div>
-    <aside class="pp-mini panel sticky" data-id="<?= (int) $p['id'] ?>" aria-label="<?= e(t('Товар')) ?>">
+    <aside class="pp-mini panel sticky" data-id="<?= (int) $p['id'] ?>" data-max="<?= $maxBoxes ?>" aria-label="<?= e(t('Товар')) ?>">
       <a class="pp-mini-ph" href="<?= e($p['link']) ?>"><img src="<?= e($p['img']) ?>" alt="<?= e($p['name']) ?>" width="200" height="200" loading="lazy"></a>
       <a class="pp-mini-nm" href="<?= e($p['link']) ?>"><?= e($p['name']) ?></a>
       <div class="pp-mini-meta muted"><?= $p['size'] !== '' ? e(t('р.')) . ' ' . e($p['size']) . ' · ' : '' ?><?= e(t('{pairs} в ящике', ['pairs' => $pairs($box)])) ?></div>
       <div class="pp-mini-pr"><?= price_html($p['box_price'], 'b') ?> <span class="muted"><?= e(t('за ящик')) ?> · <?= price_html($p['price']) ?> / <?= e(t('пара')) ?></span></div>
       <div class="pp-mini-buy">
-        <div class="qty"><button type="button" data-q="-1" aria-label="<?= e(t('Меньше ящиков')) ?>">−</button><input value="1" inputmode="numeric" aria-label="<?= e(t('Количество ящиков')) ?>"><button type="button" data-q="1" aria-label="<?= e(t('Больше ящиков')) ?>">+</button></div>
+        <div class="qty"><button type="button" data-q="-1" aria-label="<?= e(t('Меньше ящиков')) ?>">−</button><input value="1" inputmode="numeric" aria-label="<?= e(t('Количество ящиков')) ?>"<?= $limited ? ' aria-describedby="pp-mini-max"' : '' ?>><button type="button" data-q="1" aria-label="<?= e(t('Больше ящиков')) ?>"<?= $plusOff ?>>+</button></div>
         <button class="btn btn-o" data-act="cart"<?= $inStock ? '' : ' disabled' ?>><?= icon('cart', 'width:18px') ?><?= e(t('В корзину')) ?></button>
       </div>
+      <?php if ($limited): ?><p class="pp-max" id="pp-mini-max"><?= e($maxNote) ?></p><?php endif; ?>
       <a class="link" href="<?= e($p['link']) ?>">← <?= e(t('Вернуться к товару')) ?></a>
     </aside>
   </div>
@@ -96,7 +104,7 @@ $ico = static fn(string $n, int $s = 18): string => icon($n, "width:{$s}px;heigh
       </ul>
     </div>
 
-    <section class="pp-buy panel" id="pp-buy" data-id="<?= (int) $p['id'] ?>" data-box="<?= $box ?>" data-pair="<?= (int) round($p['price']) ?>" data-name="<?= e($p['name']) ?>" aria-label="<?= e(t('Покупка')) ?>">
+    <section class="pp-buy panel" id="pp-buy" data-id="<?= (int) $p['id'] ?>" data-max="<?= $maxBoxes ?>" data-box="<?= $box ?>" data-pair="<?= (int) round($p['price']) ?>" data-name="<?= e($p['name']) ?>" aria-label="<?= e(t('Покупка')) ?>">
       <div class="pp-boxinfo"><?= $ico('box', 20) ?><span><?= t('В одном ящике: <b>{pairs}</b> (минимальный заказ)', ['pairs' => e($pairs($box))]) ?><?= $p['size'] !== '' ? '<br>' . e(t('Размерный ряд')) . ': <b>' . e($p['size']) . '</b>' : '' ?></span></div>
 
       <div class="pp-price">
@@ -115,8 +123,9 @@ $ico = static fn(string $n, int $s = 18): string => icon($n, "width:{$s}px;heigh
       <div class="pp-cart">
         <div class="pp-qtyrow">
           <span class="pp-qtyl" id="pp-qtyl"><?= e(t('Количество ящиков')) ?></span>
-          <div class="qty pp-qty"><button type="button" data-q="-1" aria-label="<?= e(t('Меньше ящиков')) ?>"><?= $ico('minus') ?></button><input id="pp-qty" value="1" inputmode="numeric" maxlength="3" aria-labelledby="pp-qtyl"><button type="button" data-q="1" aria-label="<?= e(t('Больше ящиков')) ?>"><?= $ico('plus') ?></button></div>
+          <div class="qty pp-qty"><button type="button" data-q="-1" aria-label="<?= e(t('Меньше ящиков')) ?>"><?= $ico('minus') ?></button><input id="pp-qty" value="1" inputmode="numeric" maxlength="3" aria-labelledby="pp-qtyl"<?= $limited ? ' aria-describedby="pp-max"' : '' ?>><button type="button" data-q="1" aria-label="<?= e(t('Больше ящиков')) ?>"<?= $plusOff ?>><?= $ico('plus') ?></button></div>
         </div>
+        <?php if ($limited): ?><p class="pp-max" id="pp-max"><?= $ico('box', 16) ?><span><?= e($maxNote) ?></span></p><?php endif; ?>
         <div class="pp-calc" id="pp-calc" aria-live="polite"><span data-pp-boxes><?= e($boxes(1)) ?></span> = <span data-pp-pairs><?= e($pairs($box)) ?></span> = <b data-pp-sum data-uah="<?= (int) round($p['box_price']) ?>"><?= e(price_format($p['box_price'])) ?></b></div>
         <?php if (!$inStock): ?><p class="note warn pp-na" role="status"><?= e(t('Сейчас этой модели нет в наличии. Позвоните нам — подберём похожую.')) ?></p><?php endif; ?>
         <div class="pp-btns">

@@ -10,6 +10,8 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Settings;
 use App\Core\Str;
+use App\Services\AdminCatalog;
+use App\Services\HtmlSanitizer;
 
 /**
  * Блог: статьи /blog/{url}/ — список, создание, редактирование, удаление.
@@ -75,6 +77,7 @@ final class BlogController extends BaseController
                 'status'           => array_key_exists(Request::post('status'), self::STATUSES) ? Request::post('status') : 'draft',
                 'published_at'     => self::parseDate(Request::post('published_at')),
             ] + PagesController::ukValues(self::UK_FIELDS, ['text_before_cut_uk', 'text_uk']);
+            $data = AdminCatalog::keepUnchanged($data, $post);   // без правок — байт в байт (CRLF в текстах из Webasyst)
             if ($data['title'] === '') $errors['title'] = 'Укажите заголовок статьи';
             if ($data['url'] === '' && $data['title'] !== '') $data['url'] = Str::slug($data['title'], 120);
             if ($err = self::urlError($data['url'], $postId)) $errors['url'] = $err;
@@ -108,7 +111,7 @@ final class BlogController extends BaseController
                     $msg .= ' ' . RedirectsController::put('/blog/' . $post['url'] . '/', '/blog/' . $row['url'] . '/', 301);
                 }
                 Cache::flush();
-                $this->flash($msg);
+                $this->flash($msg . HtmlSanitizer::notice());   // HTML-поля очищает PagesController::html()
                 return Response::redirect('/admin/blog/' . $postId . '/' . ($lang === 'uk' ? '?lang=uk' : ''));
             }
             $post = $data + $post;

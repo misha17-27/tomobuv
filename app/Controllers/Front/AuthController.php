@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controllers\Front;
 
+use App\Controllers\Admin\UsersController;
 use App\Core\App;
 use App\Core\Auth;
 use App\Core\Csrf;
@@ -180,13 +181,12 @@ final class AuthController
                 $errors['form'] = t('Страница устарела. Обновите её и попробуйте ещё раз.');
             } elseif (!RateLimit::hit('reset:' . Request::ip(), 10, 900)) {
                 $errors['form'] = t('Слишком много попыток. Попробуйте через 15 минут.');
-            } elseif (mb_strlen($password) < self::MIN_PASSWORD) {
-                $errors['password'] = t('Пароль — не меньше {n} символов', ['n' => self::MIN_PASSWORD]);
-            } elseif (mb_strlen($password) > 200) {
-                $errors['password'] = t('Слишком длинный пароль');
+            } elseif (($pe = self::passwordError($password, (string) $user['role'])) !== '') {
+                $errors['password'] = $pe;          // сотрудник (ссылка-приглашение, восстановление) — правила админки
             } elseif ($password !== $password2) {
                 $errors['password2'] = t('Пароли не совпадают');
             } else {
+                // новый хеш пароля завершает остальные сеансы этой учётной записи (Auth: отпечаток пароля в сессии)
                 App::db()->update('customers', ['password' => password_hash($password, PASSWORD_DEFAULT),
                     'reset_token' => null, 'reset_expires' => null], 'id = ?', [$user['id']]);
                 $user = App::db()->row('SELECT * FROM customers WHERE id = ?', [$user['id']]);
@@ -203,13 +203,29 @@ final class AuthController
         return self::page('front/reset', t('Восстановление пароля'), [
             'errors' => $errors, 'token' => $user ? $token : '', 'valid' => (bool) $user,
             'who' => $user ? (string) ($user['email'] ?? '') : '',
+            'minPassword' => self::minPassword($user ? (string) $user['role'] : 'customer'),
         ], $errors ? 422 : ($user ? 200 : 404))->header('Referrer-Policy', 'no-referrer');
     }
 
+    /**
+     * Выход (адрес /logout/ — как на старом сайте). Разлогинивает только запрос с токеном:
+     * POST с _csrf (кнопка на странице подтверждения) или GET /logout/?t=… (ссылка в меню кабинета, Auth::logoutToken()).
+     * GET без токена — чужая страница, картинка <img src="/logout/">, старая закладка — не разлогинивает:
+     * вошедшему показываем страницу с кнопкой «Выйти», остальных отправляем на главную.
+     * Токен не вшивается в кэшируемые страницы витрины: ссылка выхода есть только в кабинете (/my/…, без кэша).
+     */
     public function logout(): Response
     {
-        Auth::logout();
-        return Response::redirect('/');
+        $ok = Request::isPost() ? Csrf::check() : Auth::checkLogoutToken(Request::get('t'));
+        if ($ok) {
+            Auth::logout();
+            return Response::redirect('/');
+        }
+        if (!Auth::check()) {                   // не вошёл — выходить не из чего (сессию гостя не трогаем)
+            Auth::forgetCookie();
+            return Response::redirect('/');
+        }
+        return self::page('front/logout', t('Выход'), ['stale' => Request::isPost()], Request::isPost() ? 422 : 200);
     }
 
     // ------------------------------------------------------------------ общие помощники
@@ -224,11 +240,37 @@ final class AuthController
         return $back;
     }
 
-    /** Логин для счётчика попыток: телефон в любом написании (093…, +38 093…, 38093…) — один и тот же ключ */
-    private static function loginKey(string $login): string
+    /** Логин для счётчика попыток: телефон в любом написании (093…, +38 093…, 38093…) — один и тот же ключ (и для входа в админку) */
+    public static function loginKey(string $login): string
     {
         $l = mb_strtolower(trim($login));
         return !str_contains($l, '@') && ($p = Str::phone($l)) !== '' ? $p : $l;
+    }
+
+    /** Минимальная длина пароля: сотрудникам (role не customer) — как в админке (10), покупателям — 8 */
+    public static function minPassword(string $role): int
+    {
+        return $role !== '' && $role !== 'customer' ? UsersController::MIN_PASSWORD : self::MIN_PASSWORD;
+    }
+
+    /**
+     * Проверка нового пароля на витрине ('' — подходит). Сотрудник тоже задаёт пароль здесь (ссылка-приглашение,
+     * восстановление, кабинет) — для него правила админки (UsersController::passwordError): не короче 10,
+     * без пробелов по краям, не «1234567890» / «qwertyuiop» / один символ подряд.
+     * $new — сообщение о длине в форме смены пароля («Новый пароль — не меньше…»).
+     */
+    public static function passwordError(string $password, string $role, bool $new = false): string
+    {
+        $min = self::minPassword($role);
+        if (mb_strlen($password) < $min) {
+            return $new ? t('Новый пароль — не меньше {n} символов', ['n' => $min]) : t('Пароль — не меньше {n} символов', ['n' => $min]);
+        }
+        if (mb_strlen($password) > 200) return t('Слишком длинный пароль');
+        if ($min > self::MIN_PASSWORD) {
+            if (trim($password) !== $password) return t('Пароль не должен начинаться или заканчиваться пробелом');
+            if (UsersController::passwordError($password) !== '') return t('Слишком простой пароль — придумайте другой');
+        }
+        return '';
     }
 
     /** Исчерпан ли лимит (без увеличения счётчика) — для учёта только неудачных попыток входа */
@@ -303,7 +345,7 @@ final class AuthController
     private static function userByToken(string $token): ?array
     {
         if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
-        return App::db()->row('SELECT id, email, name FROM customers WHERE reset_token = ? AND reset_expires > ? AND status = 1 LIMIT 1',
+        return App::db()->row('SELECT id, email, name, role FROM customers WHERE reset_token = ? AND reset_expires > ? AND status = 1 LIMIT 1',
             [hash('sha256', $token), date('Y-m-d H:i:s')]);
     }
 

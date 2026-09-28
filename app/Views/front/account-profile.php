@@ -1,7 +1,7 @@
 <?php
 /**
  * Кабинет: профиль покупателя и смена пароля.
- * @var array $d @var array $errors @var array $pwErrors @var bool $hasPassword @var ?string $flash @var View $view
+ * @var array $d @var array $errors @var array $pwErrors @var bool $hasPassword @var int $minPassword @var ?string $flash @var View $view
  */
 use App\Controllers\Front\AuthController as F;
 ?>
@@ -80,11 +80,11 @@ use App\Controllers\Front\AuthController as F;
             <div class="field">
               <label for="f-password"><?= e(t('Новый пароль')) ?></label>
               <div class="pw">
-                <input class="input<?= F::inv($pwErrors, 'password') ?>" id="f-password" type="password" name="password" required minlength="<?= F::MIN_PASSWORD ?>" autocomplete="new-password">
+                <input class="input<?= F::inv($pwErrors, 'password') ?>" id="f-password" type="password" name="password" required minlength="<?= (int) ($minPassword ?? F::MIN_PASSWORD) ?>" autocomplete="new-password">
                 <button type="button" class="pw-tg" aria-label="<?= e(t('Показать пароль')) ?>" aria-pressed="false"><?= icon('eye') ?></button>
               </div>
               <?= F::err($pwErrors, 'password') ?>
-              <?php if (!isset($pwErrors['password'])): ?><div class="hint"><?= e(t('Не меньше {n} символов', ['n' => F::MIN_PASSWORD])) ?></div><?php endif; ?>
+              <?php if (!isset($pwErrors['password'])): ?><div class="hint"><?= e(t('Не меньше {n} символов', ['n' => (int) ($minPassword ?? F::MIN_PASSWORD)])) ?></div><?php endif; ?>
             </div>
             <div class="field">
               <label for="f-password2"><?= e(t('Повторите новый пароль')) ?></label>

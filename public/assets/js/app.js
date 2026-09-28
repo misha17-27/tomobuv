@@ -27,12 +27,14 @@
   function listCookie(n) { var v = getCookie(n); return v ? v.split(',').filter(Boolean) : []; }
 
   /* ---------- CSRF (double submit cookie) ---------- */
+  /* на HTTPS — __Host-csrf (Secure, path=/, без domain: поддомен её не подменит), на HTTP — csrf (app/Core/Csrf.php) */
+  var CSRF_COOKIE = location.protocol === 'https:' ? '__Host-csrf' : 'csrf';
   function csrf() {
-    var t = getCookie('csrf');
+    var t = getCookie(CSRF_COOKIE);
     if (!/^[a-f0-9]{32}$/.test(t)) {
       var a = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(a);
       t = Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-      setCookie('csrf', t, 30);
+      setCookie(CSRF_COOKIE, t, 30);
     }
     return t;
   }
@@ -133,13 +135,32 @@
   }
   function addToCart(id, boxes) { return post('/cart/add/', { product_id: id, boxes: boxes || 1 }).then(afterCart); }
   function setCartQty(id, boxes) { return post('/cart/update/', { product_id: id, boxes: boxes }).then(afterCart); }
+
+  /* Остаток товара: data-max у блока с полем .qty (страница товара, корзина) — сколько ящиков можно выбрать
+     (Cart::maxBoxes; нет атрибута — 999, как Cart::MAX_BOXES). «+» на максимуме — aria-disabled: кнопка остаётся
+     в фокусе, нажатие показывает подсказку «Доступно не больше N ящиков». */
+  function maxText(n) { return t(n % 10 === 1 && n % 100 !== 11 ? 'Доступно не больше {n} ящика' : 'Доступно не больше {n} ящиков', { n: n }); }
+  function qtyMax(host) { return Math.max(1, Math.min(999, +(host && host.getAttribute('data-max')) || 999)); }
+  /* Привести поле количества в host к 1…max и обновить «+»; true — если было больше остатка (показана подсказка) */
+  function syncQty(host) {
+    var inp = host && $('.qty input', host); if (!inp) return false;
+    var max = qtyMax(host), v = parseInt(inp.value, 10) || 1, over = v > max;
+    v = Math.max(1, Math.min(max, v));
+    if (inp.value !== String(v)) inp.value = v;
+    var plus = $('[data-q="1"]', host);
+    if (plus) { if (v >= max) plus.setAttribute('aria-disabled', 'true'); else plus.removeAttribute('aria-disabled'); }
+    if (over) toast(maxText(max), true);
+    return over;
+  }
+
   function loadCart() {
     var bd = $('#ui-cart .bd'); if (!bd) return;
     getJSON('/cart/json/').then(function (r) {
       if (!r.items || !r.items.length) { bd.innerHTML = '<div class="empty">' + t('Корзина пуста') + '<br><a class="link" href="' + url('/category/dyetskaya-obuv/') + '">' + t('Перейти в каталог') + '</a></div>'; return; }
       bd.innerHTML = r.items.map(function (i) {
-        return '<div class="ci" data-cid="' + i.id + '"><a href="' + esc(url(i.url)) + '"><img src="' + esc(i.img) + '" alt="" width="64" height="64"></a><div class="t"><b>' + esc(i.name) + '</b><small>' + t('{b} ящ. × {p} пар', { b: i.boxes, p: i.box_qty }) + ' · <span data-uah="' + i.sum + '">' + money(i.sum) + '</span></small></div>'
-          + '<div class="qty"><button data-cq="-1" aria-label="' + t('Меньше') + '">−</button><input value="' + i.boxes + '" readonly aria-label="' + t('Ящиков') + '"><button data-cq="1" aria-label="' + t('Больше') + '">+</button></div></div>';
+        var mx = Math.max(1, +i.max || 999);   // остаток в ящиках (Cart::maxBoxes)
+        return '<div class="ci" data-cid="' + i.id + '" data-max="' + mx + '"><a href="' + esc(url(i.url)) + '"><img src="' + esc(i.img) + '" alt="" width="64" height="64"></a><div class="t"><b>' + esc(i.name) + '</b><small>' + t('{b} ящ. × {p} пар', { b: i.boxes, p: i.box_qty }) + ' · <span data-uah="' + i.sum + '">' + money(i.sum) + '</span></small></div>'
+          + '<div class="qty"><button data-cq="-1" aria-label="' + t('Меньше') + '">−</button><input value="' + i.boxes + '" readonly aria-label="' + t('Ящиков') + '"><button data-cq="1" aria-label="' + t('Больше') + '"' + (i.boxes >= mx ? ' aria-disabled="true"' : '') + '>+</button></div></div>';
       }).join('');
     }).catch(function () { bd.innerHTML = '<div class="empty">' + t('Не удалось загрузить корзину') + '</div>'; });
   }
@@ -256,6 +277,7 @@
       var cq = e.target.closest('[data-cq]');
       if (cq) {
         var row = cq.closest('[data-cid]'), inp = $('input', row), n = (+inp.value || 0) + (+cq.getAttribute('data-cq'));
+        if (+cq.getAttribute('data-cq') > 0 && n > qtyMax(row)) { toast(maxText(qtyMax(row)), true); return; }   // больше остатка — без запроса
         setCartQty(row.getAttribute('data-cid'), Math.max(0, n)); return;
       }
 
@@ -264,16 +286,18 @@
       var id = host.getAttribute('data-id'), qin = $('.qty input', host);
       if (b.hasAttribute('data-q')) {
         e.preventDefault();
-        if (qin) qin.value = Math.max(1, Math.min(999, (parseInt(qin.value, 10) || 1) + (+b.getAttribute('data-q'))));
+        if (qin) { qin.value = Math.max(1, (parseInt(qin.value, 10) || 1) + (+b.getAttribute('data-q'))); syncQty(host); }
         host.dispatchEvent(new CustomEvent('qtychange', { bubbles: true }));
         return;
       }
       var act = b.getAttribute('data-act');
-      if (act === 'cart') { e.preventDefault(); b.disabled = true; addToCart(id, qin ? Math.max(1, parseInt(qin.value, 10) || 1) : 1).then(function () { b.disabled = false; }); }
+      if (act === 'cart') { e.preventDefault(); b.disabled = true; addToCart(id, qin ? Math.min(qtyMax(host), Math.max(1, parseInt(qin.value, 10) || 1)) : 1).then(function () { b.disabled = false; }); }
       else if (act === 'fav' || act === 'cmp') { e.preventDefault(); toggleList(act, id); }
     });
     document.addEventListener('change', function (e) {
-      var i = e.target.closest('.qty input'); if (i && !i.readOnly) i.value = Math.max(1, Math.min(999, parseInt(i.value, 10) || 1));
+      var i = e.target.closest('.qty input'); if (!i || i.readOnly) return;
+      var host = i.closest('[data-id]');
+      if (host) syncQty(host); else i.value = Math.max(1, Math.min(999, parseInt(i.value, 10) || 1));
     });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
 
@@ -292,7 +316,8 @@
 
   window.UI = { $: $, $$: $$, t: t, url: url, post: post, getJSON: getJSON, toast: toast, dialog: dialog, open: open, close: close, money: money,
     refreshPrices: refreshPrices, renderCounters: renderCounters, addToCart: addToCart, setCartQty: setCartQty, loadCart: loadCart,
-    toggleList: toggleList, listCookie: listCookie, getCookie: getCookie, setCookie: setCookie, csrf: csrf, esc: esc, validPhone: validPhone };
+    toggleList: toggleList, listCookie: listCookie, getCookie: getCookie, setCookie: setCookie, csrf: csrf, esc: esc, validPhone: validPhone,
+    qtyMax: qtyMax, syncQty: syncQty, maxText: maxText };
 
   function init() {
     csrf(); bind(); bindSearch(); bindRequests(); bindSlider(); bindTabs(); bindMega();

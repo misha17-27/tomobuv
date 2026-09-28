@@ -75,8 +75,9 @@ final class Cart
         foreach (Products::cards(array_keys($lines)) as $p) {
             $boxes = $lines[$p['id']];
             $p['boxes'] = $boxes;
-            $p['available'] = (bool) $p['in_stock'];
             $p['max_boxes'] = self::maxBoxes($p);
+            // остаток задан и меньше ящика — как «нет в наличии» (не войдёт в заказ; так же страница товара и повтор заказа)
+            $p['available'] = (bool) $p['in_stock'] && $p['max_boxes'] > 0;
             $p['pairs'] = $p['box_qty'] * $boxes;
             $p['sum'] = $p['available'] ? round($p['box_price'] * $boxes, 2) : 0.0;
             $items[$p['id']] = $p;

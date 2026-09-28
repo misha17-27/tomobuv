@@ -72,6 +72,7 @@ $rest = array_slice($tables, 14);
     <li>В <code>config/config.php</code>: <code>debug =&gt; false</code>, <code>base_url =&gt; 'https://tomobuv.com.ua'</code>, свой <code>app_key</code>, пустой <code>images.remote_base</code>.</li>
     <li>Дайте права на запись папкам <code>storage/</code>, <code>public/uploads/</code> и <code>public/wa-data/</code>; скопируйте <code>wa-data</code> со старого сайта.</li>
     <li>Добавьте cron раз в час: <code>0 * * * * php <?= e(str_replace('\\', '/', ROOT)) ?>/bin/cron.php</code></li>
+    <li>Включите редирект на <code>https://tomobuv.com.ua</code> с http, www и чужих адресов (панель хостинга или блок «Принудительно HTTPS» в <code>public/.htaccess</code>). Сайт за Cloudflare — заполните <code>trusted_proxies</code> (строка «IP посетителей» выше).</li>
     <li>Настройте <a href="/admin/mail/">почту (SMTP)</a> и отправьте себе тестовое письмо.</li>
     <li>Проверьте <?= $isAdmin ? '<a href="/admin/users/">сотрудников</a>' : 'сотрудников (раздел администратора)' ?>: отключите лишние учётные записи, у каждого — свой вход.</li>
     <li>Вернитесь на эту страницу и убедитесь, что служебные адреса отдают 403/404, а красных крестиков нет.</li>

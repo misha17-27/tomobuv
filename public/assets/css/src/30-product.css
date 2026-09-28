@@ -105,6 +105,11 @@
 .pp-calc{margin:12px 0 14px;background:var(--bg);border-radius:10px;padding:10px 12px;font-size:14px;color:var(--muted);text-align:center}
 .pp-calc b{color:var(--ink);font-size:16px}
 .pp-na{margin:-2px 0 12px;padding:10px 12px;line-height:1.4}
+/* остаток товара: «Доступно не больше N ящиков»; «+» на максимуме (aria-disabled — и в корзине, и в выезжающей панели) */
+.pp-max{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin:8px 0 0;font-size:13px;font-weight:600;color:#7a3d0c}
+.pp-max svg{color:var(--orange);flex:none}
+.pp-mini .pp-max{justify-content:flex-start;margin:0;grid-column:1/-1}
+.qty button[aria-disabled="true"]{opacity:.35;cursor:not-allowed}
 .pp-btns{display:grid;gap:8px}
 .pp-add{height:54px;font-size:17px;justify-content:center;width:100%}
 .pp-one{justify-content:center;width:100%}

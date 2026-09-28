@@ -8,13 +8,12 @@ use App\Core\Auth;
 use App\Core\RateLimit;
 use App\Core\Request;
 use App\Core\Response;
-use App\Core\Session;
 use App\Core\Str;
 
 /**
  * «Мой аккаунт» (любой сотрудник): имя, e-mail, телефон; смена пароля с вводом текущего.
  * Смена e-mail (логина) тоже требует текущий пароль. Неверный текущий пароль — счётчик admin-pw:{id}
- * (10 попыток за 15 минут), после смены пароля — новый идентификатор сессии.
+ * (10 попыток за 15 минут), после смены пароля — новый идентификатор сессии, остальные сеансы завершаются.
  */
 final class AccountController extends BaseController
 {
@@ -98,8 +97,10 @@ final class AccountController extends BaseController
 
         App::db()->update('customers', ['password' => password_hash($new, PASSWORD_DEFAULT), 'reset_token' => null, 'reset_expires' => null], 'id = ?', [$uid]);
         App::db()->delete('rate_limits', 'k = ?', ['admin-pw:' . $uid]);
-        Session::regenerate();                          // новый идентификатор сессии: старый (если его подсмотрели) больше не действует
-        $ended = UsersController::endSessions($uid);    // другие открытые сеансы (другой браузер, чужое устройство) завершаются
+        // новый идентификатор сессии и отпечаток нового пароля: этот сеанс работает дальше, остальные сеансы
+        // учётной записи (другой браузер, чужое устройство) Auth больше не примет; их файлы удаляем сразу — для счётчика
+        Auth::passwordChanged($uid);
+        $ended = UsersController::endSessions($uid);
         $this->log('account_password', 'staff', $uid, $ended ? ['sessions_ended' => $ended] : null);
         $this->flash('Пароль изменён. В следующий раз входите с новым паролем.' . ($ended ? ' Другие открытые сеансы (' . $ended . ') завершены.' : ''));
         return Response::redirect('/admin/account/');

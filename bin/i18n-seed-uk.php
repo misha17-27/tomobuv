@@ -119,10 +119,18 @@ $steps['banners'] = function () use ($data, $setCols, $say) {
     $say("Баннеры: $n");
 };
 
-$steps['brands'] = function () use ($data, $setCols, $say) {
+$steps['brands'] = function () use ($db, $data, $setCols, $force, $say) {
     $n = 0;
     foreach ($data('brands') as $id => $f) $n += $setCols('brands', 'id = ?', [(int) $id], $f);
-    $say("Бренды: $n");
+    // название бренда — это и значение характеристики «Бренд» (id совпадают): фильтр и характеристики товара на /ua/
+    $v = 0;
+    $bf = (int) $db->value("SELECT id FROM features WHERE code = 'brand'");
+    if ($bf) {
+        $v = $db->query("UPDATE feature_values fv JOIN brands b ON b.id = fv.id SET fv.value_uk = b.name_uk
+            WHERE fv.feature_id = ? AND b.name_uk IS NOT NULL AND b.name_uk <> ''"
+            . ($force ? '' : " AND (fv.value_uk IS NULL OR fv.value_uk = '')"), [$bf])->rowCount();
+    }
+    $say("Бренды: $n, названий в характеристике «Бренд»: $v");
 };
 
 $steps['features'] = function () use ($db, $data, $setCols, $say) {

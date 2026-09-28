@@ -116,12 +116,16 @@ $blocked = !(int) $c['status'];
     <?php if ($canEdit): ?>
     <div class="card sl-actions">
       <h2>Доступ</h2>
+      <?php if ($isSelf): ?>
+      <p class="hint">Свой пароль меняйте в разделе <a href="/admin/account/#password">«Мой аккаунт»</a>.</p>
+      <?php else: ?>
       <form method="post" action="/admin/customers/<?= $cid ?>/" data-confirm="Установить клиенту новый временный пароль? Старый пароль перестанет работать.">
         <?= BaseController::tokenField() ?>
         <input type="hidden" name="action" value="password">
         <?php if ($c['email']): ?><label class="chk"><input type="checkbox" name="send" value="1"> Отправить пароль на <?= e($c['email']) ?></label><?php endif; ?>
         <button class="btn" type="submit"><?= icon('lock') ?> Сбросить пароль (временный)</button>
       </form>
+      <?php endif; ?>
       <form method="post" action="/admin/customers/<?= $cid ?>/">
         <?= BaseController::tokenField() ?>
         <input type="hidden" name="action" value="link">

@@ -50,6 +50,7 @@ $items = [
     <?php foreach ($items as [$key, $href, $ic, $label]): $on = $key === $active || ($key === 'orders' && $active === 'order'); ?>
       <a href="<?= e($href) ?>"<?= $on ? ' class="on"' . ($key === $active ? ' aria-current="page"' : '') : '' ?>><?= icon($ic) ?><span><?= e($label) ?></span></a>
     <?php endforeach; ?>
-    <a href="/logout/" class="acc-out"><?= icon('logout') ?><span><?= e(t('Выйти')) ?></span></a>
+    <?php /* выход — только с токеном (Auth::logoutToken): меню кабинета не кэшируется */ ?>
+    <a href="/logout/?t=<?= e(Auth::logoutToken()) ?>" class="acc-out" rel="nofollow"><?= icon('logout') ?><span><?= e(t('Выйти')) ?></span></a>
   </nav>
 </aside>

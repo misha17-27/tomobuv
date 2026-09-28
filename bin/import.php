@@ -132,8 +132,10 @@ flock($lock, LOCK_UN);
 fclose($lock);
 @unlink($lockFile);
 if ($job['status'] === 'error') $fail((string) $job['errors']);
-$say(sprintf('Готово за %.1f с: создано %d, обновлено %d, без изменений %d, пропущено %d, ошибок %d%s. Журнал: /admin/import/%d/log/',
-    microtime(true) - $t0, $job['created'], $job['updated'], $job['unchanged'], $job['skipped'], $job['error_count'],
-    isset($job['state']['hidden']) ? ', скрыто ' . (int) $job['state']['hidden'] : '', $jobId));
+$conflicts = (int) $db->value('SELECT COUNT(*) FROM import_seen WHERE job_id = ? AND conflict = 1', [$jobId]);   // изменены на сайте после выгрузки
+$say(sprintf('Готово за %.1f с: создано %d, обновлено %d, без изменений %d, пропущено %d, ошибок %d%s%s. Журнал: /admin/import/%d/log/',
+    microtime(true) - $t0, $job['created'], $job['updated'], $job['unchanged'], $job['skipped'] - $conflicts, $job['error_count'],
+    isset($job['state']['hidden']) ? ', скрыто ' . (int) $job['state']['hidden'] : '',
+    $conflicts ? ', изменены на сайте после выгрузки (не перезаписаны) ' . $conflicts : '', $jobId));
 Log::info(sprintf('bin/import: задание №%d готово — создано %d, обновлено %d, ошибок %d', $jobId, $job['created'], $job['updated'], $job['error_count']));
 exit(0);

@@ -10,7 +10,7 @@ declare(strict_types=1);
 use App\Controllers\Admin;
 
 $router->any('/admin/login/', [Admin\AuthController::class, 'login']);
-$router->get('/admin/logout/', [Admin\AuthController::class, 'logout']);
+$router->any('/admin/logout/', [Admin\AuthController::class, 'logout']);   // выход только с токеном: POST или ?t=
 $router->get('/admin/', [Admin\DashboardController::class, 'index']);
 $router->post('/admin/cache/clear/', [Admin\DashboardController::class, 'clearCache']);
 

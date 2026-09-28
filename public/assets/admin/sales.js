@@ -1,5 +1,6 @@
 /* Админка, раздел «Продажи».
    - быстрая смена статуса в списке заказов (select.sl-st → POST /admin/orders/{id}/status/);
+   - массовая смена статуса отмеченных / всех найденных заказов [data-sl-bulk];
    - редактор состава заказа [data-oi]: пересчёт на лету, удаление, добавление товара через поиск;
    - поиск клиента в новом заказе [data-cust-picker];
    - заявки: смена статуса / удаление кнопками [data-req]. */
@@ -57,6 +58,34 @@
       toast(err.message || 'Не удалось изменить статус', true);
     });
   });
+
+  // ------------------------------------------------ массовая смена статуса в списке (form[data-sl-bulk] → POST /admin/orders/bulk/)
+  var bulk = document.querySelector('form[data-sl-bulk]');
+  if (bulk) {
+    var bar = bulk.querySelector('[data-sl-bulk-bar]'), nEl = bulk.querySelector('[data-sl-bulk-n]'),
+      allBox = bulk.querySelector('[data-sl-bulk-all]'), heads = [].slice.call(bulk.querySelectorAll('[data-sl-check-all]')),
+      boxes = [].slice.call(bulk.querySelectorAll('input[name="ids[]"]')), total = +bulk.getAttribute('data-total') || 0;
+    var picked = function () { return boxes.filter(function (b) { return b.checked; }).length; };
+    var sync = function () {
+      var n = picked(), all = !!(allBox && allBox.checked);
+      nEl.textContent = (all ? total : n).toLocaleString('ru-RU');
+      bar.hidden = !n && !all;
+      heads.forEach(function (h) { h.checked = n > 0 && n === boxes.length; h.indeterminate = n > 0 && n < boxes.length; });
+    };
+    bulk.addEventListener('change', function (e) {
+      var isHead = heads.indexOf(e.target) >= 0;   // галочка в шапке таблицы или (на телефоне, где шапки нет) над ней
+      if (isHead) boxes.forEach(function (b) { b.checked = e.target.checked; });
+      if (e.target === allBox && allBox.checked) boxes.forEach(function (b) { b.checked = true; });
+      if (allBox && (isHead || e.target.name === 'ids[]') && picked() < boxes.length) allBox.checked = false;
+      sync();
+    });
+    bulk.addEventListener('submit', function (e) {
+      var sel = bulk.querySelector('select[name=to_status]');
+      if (!sel.value) { e.preventDefault(); sel.focus(); toast('Выберите новый статус', true); return; }
+      if (!confirm('Перевести заказов: ' + nEl.textContent + ' — в статус «' + sel.options[sel.selectedIndex].text + '»? Письма клиентам не отправляются.')) e.preventDefault();
+    });
+    sync();
+  }
 
   // ------------------------------------------------ универсальный выпадающий поиск
   function picker(input, drop, url, render, onPick) {

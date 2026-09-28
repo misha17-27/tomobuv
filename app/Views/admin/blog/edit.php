@@ -1,31 +1,32 @@
 <?php
 /**
- * Форма статьи блога: RU и UA поля (переключатель «RU | UA»), анонс и текст — HTML-редактор.
+ * Форма статьи блога: RU и UA поля (общий переключатель «RU | UA»), анонс и текст — HTML-редактор, SEO — общие поля (AdminCatalog::seoField).
  * @var array $post @var bool $isNew @var array $errors @var string $uploadLimit @var string $lang
  * @var array $blogName [ru|uk => название блога] — для подсказки title по умолчанию
  */
 use App\Controllers\Admin\BaseController;
 use App\Controllers\Admin\BlogController;
 use App\Core\App;
+use App\Services\AdminCatalog;
 
 $err = static fn(string $k) => isset($errors[$k]) ? '<span class="fld-err" role="alert">' . e($errors[$k]) . '</span>' : '';
 $inv = static fn(string $k) => isset($errors[$k]) ? ' aria-invalid="true"' : '';
 $action = $isNew ? '/admin/blog/new/' : '/admin/blog/' . (int) $post['id'] . '/';
 $dt = $post['published_at'] ? date('Y-m-d\TH:i', strtotime((string) $post['published_at'])) : '';
 $mediaBase = (string) App::config('images.remote_base', '');
-$serpHost = (string) (parse_url((string) App::config('base_url', ''), PHP_URL_HOST) ?: 'tomobuv.com.ua');   // превью Google
 $v = static fn(string $k) => (string) ($post[$k] ?? '');
-$ua = '<i class="lp" title="Украинская версия">UA</i>';
+$ru = AdminCatalog::langTag('ru');
+$ua = AdminCatalog::langTag('uk');
 ?>
 <?php if ($errors): ?><div class="flash bad">Проверьте поля формы: <?= e(implode('; ', $errors)) ?></div><?php endif; ?>
 
 <form method="post" action="<?= e($action) ?>" class="ed-form" data-lang="<?= e($lang) ?>" enctype="multipart/form-data" novalidate>
   <?= BaseController::tokenField() ?>
-  <?= $view->partial('admin/pages/_lang', ['lang' => $lang, 'what' => 'статьи']) ?>
+  <?= $view->partial('admin/partials/lang-bar', ['lang' => $lang, 'what' => 'статьи']) ?>
   <div class="grid3">
     <div>
       <div class="card">
-        <label class="fld l-ru"><span>Заголовок *</span>
+        <label class="fld l-ru"><span>Заголовок * <?= $ru ?></span>
           <input type="text" name="title" value="<?= e($v('title')) ?>" maxlength="255" required<?= $inv('title') ?>>
           <?= $err('title') ?>
         </label>
@@ -43,16 +44,18 @@ $ua = '<i class="lp" title="Украинская версия">UA</i>';
 
         <?php foreach (['' => 'l-ru', '_uk' => 'l-uk'] as $sfx => $cls): $isUk = $sfx !== ''; ?>
         <div class="fld <?= $cls ?>">
-          <div class="lbl-row"><label class="lbl" for="bl-cut<?= $sfx ?>">Анонс (текст до «Читать далее»)<?= $isUk ? ' ' . $ua : '' ?></label>
-            <?php if ($isUk): ?><button type="button" class="btn btn-sm" data-copy-from="text_before_cut" data-copy-to="text_before_cut_uk">Скопировать русский</button><?php endif; ?></div>
-          <textarea id="bl-cut<?= $sfx ?>" name="text_before_cut<?= $sfx ?>" rows="5" data-editor<?= $isUk ? ' data-uk' : '' ?> data-media-base="<?= e($mediaBase) ?>"><?= e($v('text_before_cut' . $sfx)) ?></textarea>
+          <div class="lbl-row"><label class="lbl" for="bl-cut<?= $sfx ?>">Анонс (текст до «Читать далее») <?= $isUk ? $ua : $ru ?></label>
+            <?php if ($isUk): ?><button type="button" class="btn btn-sm" data-copy-from="text_before_cut" data-copy-to="text_before_cut_uk">Скопировать русский текст</button><?php endif; ?></div>
+          <textarea id="bl-cut<?= $sfx ?>" name="text_before_cut<?= $sfx ?>" rows="5" data-editor<?= $isUk ? ' data-uk' : '' ?> data-media-base="<?= e($mediaBase) ?>"><?= "\n" . e($v('text_before_cut' . $sfx)) ?></textarea>
           <small class="hint">Показывается в списке статей и на главной. Пусто — возьмётся начало текста.</small>
+          <?= \App\Services\HtmlSanitizer::hint() ?>
         </div>
         <div class="fld <?= $cls ?>">
-          <div class="lbl-row"><label class="lbl" for="bl-text<?= $sfx ?>">Текст статьи<?= $isUk ? ' ' . $ua : '' ?></label>
+          <div class="lbl-row"><label class="lbl" for="bl-text<?= $sfx ?>">Текст статьи <?= $isUk ? $ua : $ru ?></label>
             <?php if ($isUk): ?><button type="button" class="btn btn-sm" data-copy-from="text" data-copy-to="text_uk">Скопировать русский текст</button><?php endif; ?></div>
-          <textarea id="bl-text<?= $sfx ?>" name="text<?= $sfx ?>" rows="22" data-editor<?= $isUk ? ' data-uk' : '' ?> data-media-base="<?= e($mediaBase) ?>"><?= e($v('text' . $sfx)) ?></textarea>
+          <textarea id="bl-text<?= $sfx ?>" name="text<?= $sfx ?>" rows="22" data-editor<?= $isUk ? ' data-uk' : '' ?> data-media-base="<?= e($mediaBase) ?>"><?= "\n" . e($v('text' . $sfx)) ?></textarea>
           <?php if ($isUk): ?><small class="hint">Пусто — на /ua/ показывается русский текст статьи.</small><?php endif; ?>
+          <?= \App\Services\HtmlSanitizer::hint() ?>
         </div>
         <?php endforeach; ?>
       </div>
@@ -85,28 +88,17 @@ $ua = '<i class="lp" title="Украинская версия">UA</i>';
       </div>
       <div class="card">
         <h2 id="h-seo">SEO</h2>
-        <?php foreach (['ru' => '', 'uk' => '_uk'] as $l => $sfx): $isUk = $l === 'uk';
-          // что будет в title, если поле пустое (как на витрине): UA — русский meta_title, иначе «Блог » Заголовок»
-          $auto = ($blogName[$l] ?? 'Tomobuv') . ' » ' . (($isUk ? $v('title_uk') : '') ?: ($v('title') ?: 'Заголовок'));
-          $tph = $isUk ? ($v('meta_title') ?: $auto) : $auto; ?>
-        <div class="l-<?= $l ?>">
-          <div class="serp" data-serp="<?= $l ?>" aria-label="Как статья выглядит в поиске Google">
-            <div class="serp-url"><?= e($serpHost) ?> › <?= $isUk ? 'ua › ' : '' ?>blog › <?= e($v('url') ?: '…') ?></div>
-            <div class="serp-title" data-serp-title><?= e($v('meta_title' . $sfx) ?: $tph) ?></div>
-            <div class="serp-desc" data-serp-desc><?= e($v('meta_description' . $sfx) ?: ($isUk ? $v('meta_description') : '')) ?></div>
-          </div>
-          <label class="fld"><span>Title<?= $isUk ? ' ' . $ua : '' ?></span>
-            <input type="text" name="meta_title<?= $sfx ?>" value="<?= e($v('meta_title' . $sfx)) ?>" maxlength="500" placeholder="<?= e($tph) ?>" data-counter="70" data-serp-src="title" data-serp-for="<?= $l ?>"<?= $isUk ? ' data-uk' : '' ?>>
-            <small class="hint">Пусто — <?= $isUk ? 'русский Title статьи, если он задан, иначе ' : '' ?>«<?= e($blogName[$l] ?? 'Tomobuv') ?> » заголовок», как на старом сайте.</small>
-          </label>
-          <label class="fld"><span>Meta description<?= $isUk ? ' ' . $ua : '' ?></span>
-            <textarea name="meta_description<?= $sfx ?>" rows="4" class="plain" data-counter="160" data-serp-src="desc" data-serp-for="<?= $l ?>"<?= $isUk ? ' data-uk placeholder="' . e($v('meta_description')) . '"' : '' ?>><?= e($v('meta_description' . $sfx)) ?></textarea>
-          </label>
-          <label class="fld"><span>Meta keywords<?= $isUk ? ' ' . $ua : '' ?></span>
-            <textarea name="meta_keywords<?= $sfx ?>" rows="2" class="plain"<?= $isUk ? ' data-uk placeholder="' . e($v('meta_keywords')) . '"' : '' ?>><?= e($v('meta_keywords' . $sfx)) ?></textarea>
-          </label>
-        </div>
-        <?php endforeach; ?>
+        <?php // что будет в title при пустом поле (как на витрине): «Блог » Заголовок»; на /ua/ — русский Title статьи, если задан
+          $autoRu = ($blogName['ru'] ?? 'Tomobuv') . ' » ' . ($v('title') ?: 'Заголовок');
+          $autoUk = $v('meta_title') ?: ($blogName['uk'] ?? 'Tomobuv') . ' » ' . ($v('title_uk') ?: ($v('title') ?: 'Заголовок')); ?>
+        <p class="hint"><?= e(AdminCatalog::SEO_INTRO) ?></p>
+        <div class="l-ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'blog', 'row' => $post]]) ?></div>
+        <div class="l-uk"><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($v('url') !== '' ? '/ua/blog/' . $v('url') . '/' : '', $post,
+          ['meta_title' => $autoUk, 'meta_description' => $v('meta_description')])]) ?></div>
+        <?= AdminCatalog::seoField('meta_title', 'meta_title', $post, ['placeholder' => $autoRu, 'tpl_uk' => $autoUk,
+          'empty' => 'Пусто — «' . ($blogName['ru'] ?? 'Tomobuv') . ' » заголовок», как на старом сайте.']) ?>
+        <?= AdminCatalog::seoField('meta_description', 'meta_description', $post, ['tpl_uk' => $v('meta_description')]) ?>
+        <?= AdminCatalog::seoField('meta_keywords', 'meta_keywords', $post, ['tpl_uk' => $v('meta_keywords')]) ?>
       </div>
     </div>
   </div>

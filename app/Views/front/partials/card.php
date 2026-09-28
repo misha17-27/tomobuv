@@ -7,7 +7,7 @@
  */
 $badge = $p['off'] ? '<span class="badge">−' . (int) $p['off'] . '%</span>' : ($p['is_new'] ? '<span class="badge nw">' . e(t('Новинка')) . '</span>' : '');
 ?>
-<article class="pc" data-id="<?= (int) $p['id'] ?>">
+<article class="pc" data-id="<?= (int) $p['id'] ?>" data-max="<?= \App\Services\Cart::maxBoxes($p) ?>">
   <a class="ph" href="<?= e($p['link']) ?>"><img src="<?= e($p['img']) ?>" alt="<?= e($p['name']) ?>" <?= empty($eager) ? 'loading="lazy"' : ($eager > 1 ? 'fetchpriority="high"' : 'decoding="async"') ?> width="240" height="240"><?= $badge ?></a>
   <div class="acts"><button class="fav" data-act="fav" aria-label="<?= e(t('В избранное')) ?>" title="<?= e(t('В избранное')) ?>"><?= icon('heart') ?></button><button data-act="cmp" aria-label="<?= e(t('К сравнению')) ?>" title="<?= e(t('К сравнению')) ?>"><?= icon('cmp') ?></button></div>
   <div class="b">

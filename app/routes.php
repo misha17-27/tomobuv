@@ -48,7 +48,7 @@ $router->any('/login/', [Front\AuthController::class, 'login']);
 $router->any('/signup/', [Front\AuthController::class, 'signup']);
 $router->any('/forgotpassword/', [Front\AuthController::class, 'forgot']);
 $router->any('/forgotpassword/reset/', [Front\AuthController::class, 'reset']);
-$router->get('/logout/', [Front\AuthController::class, 'logout']);
+$router->any('/logout/', [Front\AuthController::class, 'logout']);          // выход только с токеном: POST или ?t=
 $router->get('/my/', [Front\AccountController::class, 'index']);
 $router->get('/my/orders/', [Front\AccountController::class, 'orders']);
 $router->get('/my/order/{id}/', [Front\AccountController::class, 'order']);

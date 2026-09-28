@@ -34,7 +34,37 @@ final class PageCache
             && PHP_SAPI !== 'cli'
             && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
             && empty($_COOKIE['nocache'])
-            && !str_starts_with(Request::path(), '/admin');
+            && !str_starts_with(Request::path(), '/admin')
+            && self::hostAllowed((string) ($_SERVER['HTTP_HOST'] ?? ''), (string) App::config('base_url', ''));
+    }
+
+    /**
+     * Кэшируем только запросы на свой домен (хост base_url, с www или без; порт — как в base_url или стандартный).
+     * Если хостинг отдаёт сайт на любой Host (сайт по умолчанию на IP), случайными Host нельзя плодить файлы кэша:
+     * такие страницы работают, но без кэша. Локально (base_url на localhost/127.0.0.1) подходит любой локальный адрес и порт.
+     */
+    public static function hostAllowed(string $host, string $baseUrl): bool
+    {
+        $req = self::splitHost($host);
+        $base = parse_url($baseUrl);
+        if ($req === null || !is_array($base) || empty($base['host'])) return false;
+        [$bHost, $bPort] = [strtolower((string) $base['host']), $base['port'] ?? null];
+        $bHost = trim($bHost, '[]');
+        $local = static fn(string $h): bool => in_array($h, ['localhost', '127.0.0.1', '::1'], true) || str_ends_with($h, '.localhost');
+        if ($local($bHost)) return $local($req[0]);
+        $strip = static fn(string $h): string => str_starts_with($h, 'www.') ? substr($h, 4) : $h;
+        if ($strip($req[0]) !== $strip($bHost)) return false;
+        $port = $req[1];
+        return $port === null || $port === $bPort || ($bPort === null && ($port === 80 || $port === 443));
+    }
+
+    /** «Example.com:8080» → ['example.com', 8080]; «[::1]:8080» → ['::1', 8080]; некорректный Host → null */
+    private static function splitHost(string $host): ?array
+    {
+        $host = strtolower($host);
+        if ($host === '' || strlen($host) > 255) return null;
+        if (!preg_match('/^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(\d{1,5}))?$/D', $host, $m)) return null;
+        return [rtrim(trim($m[1], '[]'), '.'), isset($m[2]) ? (int) $m[2] : null];
     }
 
     public static function key(): ?string
@@ -52,7 +82,9 @@ final class PageCache
         $qs = $q ? '?' . http_build_query($q) : '';
         if (strlen($qs) > 500) return null;   // слишком сложные фильтры не кэшируем
         $isAjax = (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') ? ':ajax' : '';
-        return ($_SERVER['HTTP_HOST'] ?? '') . Lang::prefix() . Request::path() . $qs . $isAjax;
+        // Host в ключ не входит: кэш работает только для своего домена (enabled → hostAllowed), а страница от Host
+        // не зависит (абсолютные ссылки — из base_url). Иначе www/без www, регистр и порт в Host дали бы копии файлов.
+        return Lang::prefix() . Request::path() . $qs . $isAjax;
     }
 
     private static function file(string $key): string
@@ -87,13 +119,14 @@ final class PageCache
         return true;
     }
 
-    public static function store(string $body, int $ttl, string $contentType = 'text/html; charset=utf-8'): void
+    /** Сохранить страницу; false — кэш для этого запроса выключен (nocache, чужой Host, мусорные параметры…) */
+    public static function store(string $body, int $ttl, string $contentType = 'text/html; charset=utf-8'): bool
     {
-        if (!self::enabled() || !($key = self::key()) || $ttl <= 0) return;
+        if (!self::enabled() || !($key = self::key()) || $ttl <= 0) return false;
         $f = self::file($key);
         @mkdir(dirname($f), 0775, true);
         $meta = json_encode(['e' => time() + $ttl, 't' => $contentType, 'h' => substr(md5($body), 0, 16)]);
         $tmp = $f . '.' . getmypid() . '.tmp';
-        if (file_put_contents($tmp, $meta . "\n" . $body, LOCK_EX) !== false) @rename($tmp, $f);
+        return file_put_contents($tmp, $meta . "\n" . $body, LOCK_EX) !== false && @rename($tmp, $f);
     }
 }

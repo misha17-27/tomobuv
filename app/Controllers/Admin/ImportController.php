@@ -21,7 +21,9 @@ final class ImportController extends BaseController
 {
     private const JOBS_PER_PAGE = 20;
     private const LOG_PER_PAGE = 100;
-    private const LEVELS = ['error' => 'Ошибки', 'skip' => 'Пропущено', 'warn' => 'Предупреждения'];
+    private const LEVELS = ['error' => 'Ошибки', 'conflict' => 'Изменены на сайте', 'skip' => 'Пропущено', 'warn' => 'Предупреждения'];
+    /** Сколько товаров, изменённых на сайте после выгрузки, показывать списком в итоге (остальные — в журнале) */
+    private const CONFLICTS_SHOWN = 50;
 
     public function __construct()
     {
@@ -318,9 +320,13 @@ final class ImportController extends BaseController
             $this->flash('Импорт сейчас идёт — дождитесь окончания или остановите его.', true);
             return Response::redirect('/admin/import/' . $job['id'] . '/');
         }
+        $overwrite = Request::post('overwrite') === '1';                     // «Повторить с перезаписью» из итога импорта
+        if ($overwrite) Importer::saveSettings($job['id'], $job['mapping'], ['overwrite' => 1] + $job['options']);
         Importer::restart($job['id']);
-        $this->log('import_restart', 'import_job', $job['id']);
-        $this->flash('Файл разбирается заново — затем проверьте настройки и запустите импорт.');
+        $this->log('import_restart', 'import_job', $job['id'], $overwrite ? ['overwrite' => 1] : null);
+        $this->flash($overwrite
+            ? 'Файл разбирается заново с галочкой «Перезаписать всё равно» — проверьте предпросмотр и запустите импорт.'
+            : 'Файл разбирается заново — затем проверьте настройки и запустите импорт.');
         return Response::redirect('/admin/import/' . $job['id'] . '/');
     }
 
@@ -352,7 +358,10 @@ final class ImportController extends BaseController
         $db = App::db();
         $counts = array_map('intval', $db->pairs('SELECT level, COUNT(*) FROM import_errors WHERE job_id = ? GROUP BY level', [$job['id']]));
         $level = Request::get('level');
-        if (!isset(self::LEVELS[$level])) $level = isset($counts['error']) ? 'error' : (isset($counts['skip']) ? 'skip' : 'warn');
+        if (!isset(self::LEVELS[$level])) {
+            $level = 'warn';
+            foreach (['error', 'conflict', 'skip'] as $l) if (isset($counts[$l])) { $level = $l; break; }
+        }
         $total = (int) ($counts[$level] ?? 0);
         $pg = new Paginator($total, self::LOG_PER_PAGE, Request::page());
         $rows = $total ? $db->all('SELECT n, message FROM import_errors WHERE job_id = ? AND level = ? ORDER BY n, id LIMIT '
@@ -363,6 +372,10 @@ final class ImportController extends BaseController
             [$ph, $vals] = $db->in($created);
             $createdRows = $db->all("SELECT id, name, url, price, status FROM products WHERE id IN ($ph) ORDER BY id", $vals);
         }
+        // товары, изменённые на сайте после выгрузки файла (колонка updated_at): не перезаписаны
+        $conflictTotal = (int) $db->value('SELECT COUNT(*) FROM import_seen WHERE job_id = ? AND conflict = 1', [$job['id']]);
+        $conflictRows = $conflictTotal ? $db->all('SELECT p.id, p.name, p.status, p.updated_at FROM import_seen s JOIN products p ON p.id = s.product_id
+            WHERE s.job_id = ? AND s.conflict = 1 ORDER BY p.updated_at DESC, p.id LIMIT ' . self::CONFLICTS_SHOWN, [$job['id']]) : [];
         $active = in_array($job['status'], ['parsing', 'running', 'finishing', 'images'], true);
         return $this->render('admin/import/log', [
             'title'    => 'Итог импорта: ' . ($job['name'] !== '' ? $job['name'] : 'задание №' . $job['id']),
@@ -377,6 +390,8 @@ final class ImportController extends BaseController
             'rows'     => $rows,
             'pg'       => $pg,
             'createdRows' => $createdRows,
+            'conflictTotal' => max($conflictTotal, (int) ($counts['conflict'] ?? 0)),
+            'conflictRows'  => $conflictRows,
             'active'   => $active,
             'fileExists' => is_file(Importer::dir() . '/' . basename((string) $job['file'])),
             'profile'  => $job['profile_id'] ? Importer::profile((int) $job['profile_id']) : null,
@@ -388,7 +403,7 @@ final class ImportController extends BaseController
     {
         $job = $this->jobOr404($id);
         if (!$job) return $this->notFoundPage();
-        $names = ['error' => 'ошибка', 'skip' => 'пропуск', 'warn' => 'предупреждение'];
+        $names = ['error' => 'ошибка', 'conflict' => 'изменён на сайте', 'skip' => 'пропуск', 'warn' => 'предупреждение'];
         $h = fopen('php://temp', 'w+');
         fwrite($h, "\xEF\xBB\xBF");
         fputcsv($h, ['Строка', 'Тип', 'Сообщение'], ';', '"', '');

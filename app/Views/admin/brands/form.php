@@ -19,14 +19,17 @@ $ukFb = ['title' => $ruTitle, 'meta_description' => trim((string) ($b['meta_desc
 ?>
 <?php if ($errors): ?><div class="flash bad">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" id="brand-form" class="ac-form" action="<?= $id ? '/admin/brands/' . $id . '/' : '/admin/brands/new/' ?>">
+<form method="post" enctype="multipart/form-data" id="brand-form" class="ac-form ed-form" data-lang="ru" action="<?= $id ? '/admin/brands/' . $id . '/' : '/admin/brands/new/' ?>">
 <?= BaseController::tokenField() ?>
+<?= $view->partial('admin/partials/lang-bar', ['what' => 'бренда']) ?>
 <div class="grid3">
   <div class="ac-col">
     <section class="card" aria-labelledby="h-main">
       <h2 id="h-main">Основное</h2>
       <label class="fld"><span>Название *</span><input type="text" name="name" value="<?= e($name) ?>" required maxlength="255">
-        <small class="hint">Название бренда одинаково на обеих версиях сайта. Это же значение характеристики «Бренд» у товаров.</small><?= $err('name') ?></label>
+        <small class="hint">Это же значение характеристики «Бренд» у товаров. На украинской версии — то же название, если не задано поле UA.</small><?= $err('name') ?></label>
+      <div class="fld l-uk"><label class="lbl" for="b-name-uk">Название <?= AdminCatalog::langTag('uk') ?></label><input type="text" name="name_uk" id="b-name-uk" value="<?= e((string) ($b['name_uk'] ?? '')) ?>" maxlength="255" placeholder="<?= e($name) ?>">
+        <small class="hint">Только для служебных названий («Не указано» → «Не вказано»). Торговые марки не переводятся. Пусто — на украинской версии русское название. Адрес бренда от этого поля не зависит.</small></div>
       <div class="fld">
         <label for="b-url"><span>Адрес на сайте</span></label>
         <div class="ac-url"><span class="muted">/brand/</span><input type="text" name="url" id="b-url" value="<?= e($b['url']) ?>" maxlength="190" autocomplete="off"><span class="muted">/</span></div>
@@ -36,20 +39,21 @@ $ukFb = ['title' => $ruTitle, 'meta_description' => trim((string) ($b['meta_desc
     </section>
 
     <section class="card" aria-labelledby="h-text">
-      <div class="ac-cardhd"><h2 id="h-text">Тексты страницы бренда</h2><?= AdminCatalog::langTabs() ?></div>
+      <h2 id="h-text">Тексты страницы бренда</h2>
       <?= $i18n('area', 'summary', 'Краткое описание', $b, ['rows' => 2, 'max' => 500, 'hint' => 'Показывается в списке брендов и под заголовком.']) ?>
-      <?= $i18n('html', 'description', 'Описание над товарами (HTML)', $b, ['rows' => 8, 'id' => 'b-desc']) ?>
-      <?= $i18n('html', 'seo_description', 'SEO-текст под товарами (HTML)', $b, ['rows' => 10, 'id' => 'b-seodesc']) ?>
+      <?= $i18n('html', 'description', 'Описание над товарами', $b, ['rows' => 8, 'id' => 'b-desc']) ?>
+      <?= $i18n('html', 'seo_description', 'SEO-текст под товарами', $b, ['rows' => 10, 'id' => 'b-seodesc']) ?>
     </section>
 
     <section class="card" aria-labelledby="h-seo">
-      <div class="ac-cardhd"><h2 id="h-seo">SEO</h2><?= AdminCatalog::langTabs() ?></div>
-      <div data-l="ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'brand', 'row' => $b]]) ?></div>
-      <div data-l="uk" hidden><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($b['url'] !== '' ? '/ua' . Catalog::brandUrl($b) : '', $b, $ukFb, 'title')]) ?></div>
-      <?= $i18n('text', 'title', 'Title', $b, ['max' => 500, 'placeholder' => $name, 'hint' => 'Пусто — название бренда.', 'tpl_uk' => $ukFb['title']]) ?>
-      <?= $i18n('text', 'h1', 'Заголовок H1', $b, ['max' => 500, 'placeholder' => $name, 'hint' => 'Пусто — название бренда.', 'tpl_uk' => $ukFb['h1']]) ?>
-      <?= $i18n('area', 'meta_description', 'Description', $b, ['max' => 5000]) ?>
-      <?= $i18n('area', 'meta_keywords', 'Keywords', $b, ['max' => 5000]) ?>
+      <h2 id="h-seo">SEO</h2>
+      <p class="hint"><?= e(AdminCatalog::SEO_INTRO) ?></p>
+      <div class="l-ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'brand', 'row' => $b]]) ?></div>
+      <div class="l-uk"><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($b['url'] !== '' ? '/ua' . Catalog::brandUrl($b) : '', $b, $ukFb, 'title')]) ?></div>
+      <?= AdminCatalog::seoField('meta_title', 'title', $b, ['placeholder' => $name, 'empty' => 'Пусто — название бренда.', 'tpl_uk' => $ukFb['title']]) ?>
+      <?= AdminCatalog::seoField('meta_description', 'meta_description', $b) ?>
+      <?= AdminCatalog::seoField('meta_keywords', 'meta_keywords', $b) ?>
+      <?= AdminCatalog::seoField('h1', 'h1', $b, ['placeholder' => $name, 'empty' => 'Пусто — название бренда.', 'tpl_uk' => $ukFb['h1']]) ?>
     </section>
   </div>
 
@@ -93,6 +97,7 @@ $ukFb = ['title' => $ruTitle, 'meta_description' => trim((string) ($b['meta_desc
 <div class="form-actions">
   <button type="submit" class="btn btn-p"><?= $id ? 'Сохранить' : 'Создать бренд' ?></button>
   <a class="btn" href="/admin/brands/">К списку</a>
+  <span class="hint hide-sm">Ctrl+S — сохранить</span>
   <span class="sp"></span>
   <?php if ($id && !$all && !$dynCats): ?><button type="submit" class="btn btn-d" form="del-form">Удалить бренд</button><?php endif; ?>
 </div>
@@ -100,3 +105,4 @@ $ukFb = ['title' => $ruTitle, 'meta_description' => trim((string) ($b['meta_desc
 <?php if ($id && !$all && !$dynCats): ?>
 <form id="del-form" method="post" action="/admin/brands/<?= $id ?>/delete/" data-confirm="Удалить бренд «<?= e($name) ?>»?"><?= BaseController::tokenField() ?></form>
 <?php endif; ?>
+<?= $view->partial('admin/partials/editor') ?>

@@ -5,6 +5,8 @@ namespace App\Controllers\Admin;
 
 use App\Core\App;
 use App\Core\Auth;
+use App\Core\Cache;
+use App\Core\DB;
 use App\Core\Log;
 use App\Core\Mailer;
 use App\Core\Request;
@@ -16,8 +18,10 @@ use App\Core\View;
 /**
  * Сотрудники (только администратор) = учётные записи customers с ролью admin | manager.
  * Создание (или повышение существующего покупателя), роль, доступ, сброс пароля, лишение доступа.
- * Нельзя понизить, отключить или лишить доступа себя и последнего действующего администратора.
+ * Нельзя понизить, отключить или лишить доступа себя и последнего действующего администратора
+ * (проверка атомарная — updateGuarded, параллельные запросы не оставят 0 администраторов).
  * Сгенерированный пароль показывается один раз (одноразовое сообщение сессии).
+ * Новый пароль (сброс, смена роли покупателя на сотрудника) завершает открытые сеансы учётной записи (Core\Auth).
  */
 final class UsersController extends BaseController
 {
@@ -40,8 +44,10 @@ final class UsersController extends BaseController
         'off'     => ['Отключены', 'status = 0'],
     ];
 
-    public const MIN_PASSWORD = 10;
+    public const MIN_PASSWORD = 10;         // и на витрине для сотрудников (Front\AuthController::passwordError)
     private const INVITE_TTL = 72 * 3600;   // ссылка «задать пароль» в приглашении
+
+    private static bool $schemaOk = false;
 
     // ------------------------------------------------------------------ список
 
@@ -232,7 +238,8 @@ final class UsersController extends BaseController
             $changed[$k] = in_array($k, ['role', 'status'], true) ? ['from' => $u[$k], 'to' => $v] : true;   // личные данные в журнал не пишем
         }
         if (!$changed) { $this->flash('Изменений нет.'); return Response::redirect('/admin/users/' . $uid . '/'); }
-        $db->update('customers', $data, 'id = ?', [$uid]);
+        // проверка выше — для понятного сообщения; окончательная — атомарно при записи (параллельные понижения)
+        if (($err = self::updateGuarded($uid, $data)) !== '') return $this->card($u, ['role' => $err], $form, 409);
         $this->log('staff_update', 'staff', $uid, $changed);
         \App\Core\Cache::forget('admin.tally');
         $msg = [];
@@ -300,7 +307,11 @@ final class UsersController extends BaseController
             $this->flash('Это единственный действующий администратор — его нельзя лишить доступа.', true);
             return Response::redirect('/admin/users/' . $uid . '/');
         }
-        App::db()->update('customers', ['role' => 'customer', 'reset_token' => null, 'reset_expires' => null], 'id = ?', [$uid]);
+        // атомарно с проверкой «последний администратор» (параллельный запрос мог уже понизить другого)
+        if (($err = self::updateGuarded($uid, ['role' => 'customer', 'reset_token' => null, 'reset_expires' => null])) !== '') {
+            $this->flash($err, true);
+            return Response::redirect('/admin/users/' . $uid . '/');
+        }
         $this->log('staff_revoke', 'staff', $uid, ['from' => $u['role']]);
         \App\Core\Cache::forget('admin.tally');
         $this->flash('«' . ($u['name'] ?: $u['email']) . '» больше не сотрудник: вход в админку закрыт сразу. Учётная запись покупателя и заказы сохранены.');
@@ -318,9 +329,68 @@ final class UsersController extends BaseController
     private static function find(string $id): ?array
     {
         if (!ctype_digit($id)) return null;
+        self::ensureSchema();
         return App::db()->row("SELECT id, name, email, login, phone, role, status, created_at, last_login_at, orders_count,
-            (password LIKE 'wa:%') legacy, (password IS NULL OR password = '') nopass, reset_expires
+            (password LIKE 'wa:%') legacy, (password IS NULL OR password = '') nopass, reset_expires, invite_expires
             FROM customers WHERE id = ? AND role IN ('admin','manager')", [(int) $id]);
+    }
+
+    /**
+     * До какого времени действует приглашение ('' — нет действующего приглашения).
+     * Ссылка приглашения и восстановления пароля — общие поля reset_token/reset_expires; приглашение пишет ещё
+     * invite_expires тем же значением. Восстановление пароля (1 час) или ссылка из карточки клиента перезаписывают
+     * reset_expires — значения расходятся, и карточка сотрудника уже не выдаёт это за приглашение.
+     */
+    public static function inviteUntil(array $u): string
+    {
+        $inv = (string) ($u['invite_expires'] ?? '');
+        return $inv !== '' && $inv === (string) ($u['reset_expires'] ?? '') && strtotime($inv) > time() ? $inv : '';
+    }
+
+    /**
+     * Записать изменения учётной записи, от которых зависят права администратора (роль, доступ), атомарно.
+     * В транзакции блокируем строки действующих администраторов (SELECT … FOR UPDATE) и только потом проверяем и пишем:
+     * два администратора, одновременно понижающие (отключающие) друг друга, выполняются по очереди — второй запрос
+     * ждёт первый, видит уже новое состояние и получает отказ. В базе не остаётся 0 администраторов.
+     * Права того, кто меняет, тоже проверяются по заблокированным строкам (их могли отнять параллельным запросом).
+     * Возвращает '' или текст ошибки (тогда ничего не записано). Вызывается и из «Клиентов» (роль, блокировка).
+     */
+    public static function updateGuarded(int $uid, array $data): string
+    {
+        return App::db()->transaction(static function (DB $db) use ($uid, $data): string {
+            $admins = array_map('intval', $db->col("SELECT id FROM customers WHERE role = 'admin' AND status = 1 ORDER BY id FOR UPDATE"));
+            $cur = $db->row('SELECT role, status FROM customers WHERE id = ? FOR UPDATE', [$uid]);
+            if (!$cur) return 'Учётная запись не найдена.';
+            $was = in_array($uid, $admins, true);
+            $will = (string) ($data['role'] ?? $cur['role']) === 'admin' && (int) ($data['status'] ?? $cur['status']) === 1;
+            $actor = Auth::id();
+            if ($was !== $will && $actor && !in_array($actor, $admins, true)) {
+                return 'Ваши права администратора изменились — обновите страницу.';
+            }
+            if ($was && !$will && count($admins) <= 1) {
+                return 'Это единственный действующий администратор — сначала назначьте администратором кого-то ещё.';
+            }
+            $db->update('customers', $data, 'id = ?', [$uid]);
+            return '';
+        });
+    }
+
+    /** Колонка customers.invite_expires (database/migrations/security.sql): миграцию не выполнили — выполняем её */
+    private static function ensureSchema(): void
+    {
+        if (self::$schemaOk) return;
+        Cache::remember('security.schema.1', 86400, static function (): int {
+            $db = App::db();
+            if (!(int) $db->value("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'invite_expires'")) {
+                $sql = (string) preg_replace('/^\s*--.*$/m', '', (string) @file_get_contents(ROOT . '/database/migrations/security.sql'));
+                foreach (preg_split('/;\s*\n/', $sql) ?: [] as $stmt) {
+                    if (trim($stmt) !== '') $db->pdo()->exec($stmt);
+                }
+            }
+            return 1;
+        });
+        self::$schemaOk = true;
     }
 
     private function missing(string $id): Response
@@ -406,7 +476,10 @@ final class UsersController extends BaseController
         $u = $db->row('SELECT id, name, email, role FROM customers WHERE id = ?', [$id]);
         if (!$u || !$u['email']) return [false, 'Приглашение не отправлено: у сотрудника нет e-mail.'];
         $raw = bin2hex(random_bytes(32));
-        $db->update('customers', ['reset_token' => hash('sha256', $raw), 'reset_expires' => date('Y-m-d H:i:s', time() + self::INVITE_TTL)], 'id = ?', [$id]);
+        // invite_expires = reset_expires — признак приглашения для карточки (UsersController::inviteUntil)
+        self::ensureSchema();
+        $until = date('Y-m-d H:i:s', time() + self::INVITE_TTL);
+        $db->update('customers', ['reset_token' => hash('sha256', $raw), 'reset_expires' => $until, 'invite_expires' => $until], 'id = ?', [$id]);
         $store = (string) \App\Core\Settings::get('store_name', 'Tomobuv');
         $title = 'Доступ в админку ' . $store;
         try {

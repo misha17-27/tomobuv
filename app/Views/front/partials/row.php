@@ -4,7 +4,7 @@
  * @var array $p
  */
 ?>
-<tr data-id="<?= (int) $p['id'] ?>">
+<tr data-id="<?= (int) $p['id'] ?>" data-max="<?= \App\Services\Cart::maxBoxes($p) ?>">
   <td><a href="<?= e($p['link']) ?>"><img src="<?= e($p['img_small']) ?>" alt="" loading="lazy" width="56" height="56"></a></td>
   <td><a class="link" style="color:var(--ink)" href="<?= e($p['link']) ?>"><?= e($p['name']) ?></a><div class="muted" style="font-size:12px"><?= e($p['brand']) ?><?= $p['off'] ? ' · <b style="color:var(--orange)">−' . (int) $p['off'] . '%</b>' : '' ?><?= $p['in_stock'] ? '' : ' · ' . e(t('нет в наличии')) ?></div></td>
   <td><?= e($p['size']) ?></td>

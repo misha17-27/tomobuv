@@ -8,9 +8,17 @@ namespace App\Core;
  * Пароли: password_hash(). Пароли, перенесённые из Webasyst (md5), помечены префиксом «wa:»
  * и при первом успешном входе автоматически перехешируются.
  * Cookie `auth=1` (не секретная) нужна только JS, чтобы в кэшируемой шапке показать «Кабинет».
+ *
+ * Сеанс привязан к паролю: при входе в сессию пишется отпечаток хеша пароля (pwf), при каждой загрузке
+ * пользователя он сверяется с базой. Пароль сменили (кабинет, восстановление, админка, сброс администратором) —
+ * все остальные сеансы этой учётной записи завершаются на следующем запросе; свой сеанс после смены пароля
+ * продолжает работать (Auth::passwordChanged). «Запомнить меня» нет — сеанс живёт до закрытия браузера.
  */
 final class Auth
 {
+    /** Ключ отпечатка пароля в сессии */
+    private const PW_KEY = 'pwf';
+
     private static ?array $user = null;
     private static bool $loaded = false;
 
@@ -20,8 +28,17 @@ final class Auth
             self::$loaded = true;
             $id = Session::exists() ? (int) Session::get('uid', 0) : 0;
             if ($id) {
-                self::$user = App::db()->row('SELECT * FROM customers WHERE id = ? AND status = 1', [$id]);
-                if (!self::$user) Session::forget('uid');
+                $u = App::db()->row('SELECT * FROM customers WHERE id = ? AND status = 1', [$id]);
+                if ($u) {
+                    $fp = Session::get(self::PW_KEY);
+                    if ($fp === null) {
+                        Session::set(self::PW_KEY, self::fingerprint($u));   // сеанс, открытый до появления отпечатков
+                    } elseif (!is_string($fp) || !hash_equals(self::fingerprint($u), $fp)) {
+                        $u = null;                                          // пароль сменили — этот сеанс завершён
+                    }
+                }
+                if (!$u) self::drop();
+                self::$user = $u;
             }
         }
         return self::$user;
@@ -82,7 +99,9 @@ final class Auth
         }
         if (!$u) return null;
         if (str_starts_with((string) $u['password'], 'wa:') || password_needs_rehash((string) $u['password'], PASSWORD_DEFAULT)) {
-            $db->update('customers', ['password' => password_hash($password, PASSWORD_DEFAULT)], 'id = ?', [$u['id']]);
+            // md5 из Webasyst → bcrypt; отпечаток в сессии (Auth::login) берётся уже от нового хеша — вход не сбрасывается
+            $u['password'] = password_hash($password, PASSWORD_DEFAULT);
+            $db->update('customers', ['password' => $u['password']], 'id = ?', [$u['id']]);
         }
         return $u;
     }
@@ -100,16 +119,85 @@ final class Auth
     {
         Session::regenerate();
         Session::set('uid', (int) $user['id']);
+        // отпечаток — от хеша, который сейчас в базе (после перехеширования «wa:» при входе он уже новый)
+        $hash = App::db()->value('SELECT password FROM customers WHERE id = ?', [$user['id']]);
+        Session::set(self::PW_KEY, self::fingerprint(['id' => $user['id'], 'password' => $hash]));
         App::db()->update('customers', ['last_login_at' => date('Y-m-d H:i:s')], 'id = ?', [$user['id']]);
         setcookie('auth', '1', ['expires' => time() + 86400 * 30, 'path' => '/', 'secure' => Session::https(), 'samesite' => 'Lax']);
+        $user['password'] = $hash;
         self::$user = $user;
+        self::$loaded = true;
+    }
+
+    /**
+     * Свой пароль изменён в этом сеансе (кабинет, «Мой аккаунт»): новый идентификатор сессии и отпечаток нового хеша.
+     * Текущий сеанс продолжает работать, остальные сеансы учётной записи завершатся на следующем запросе.
+     */
+    public static function passwordChanged(int $id): void
+    {
+        if ($id <= 0 || (int) Session::get('uid', 0) !== $id) return;
+        $u = App::db()->row('SELECT * FROM customers WHERE id = ? AND status = 1', [$id]);
+        if (!$u) return;
+        Session::regenerate();
+        Session::set(self::PW_KEY, self::fingerprint($u));
+        self::$user = $u;
         self::$loaded = true;
     }
 
     public static function logout(): void
     {
-        Session::destroy();
-        setcookie('auth', '', ['expires' => time() - 3600, 'path' => '/']);
+        if (Session::exists() || session_status() === PHP_SESSION_ACTIVE) Session::destroy();
+        self::forgetCookie();
         self::$user = null;
+        self::$loaded = true;
+    }
+
+    /**
+     * Токен ссылки выхода (/logout/?t=…, /admin/logout/?t=…) — защита от выхода по чужой ссылке или картинке.
+     * Производный от CSRF-токена (витрина — cookie csrf, админка — токен сессии): сам токен форм в адрес,
+     * журналы сервера и историю браузера не попадает. Вшивать только в некэшируемые страницы (кабинет, админка).
+     */
+    public static function logoutToken(bool $admin = false): string
+    {
+        return self::logoutHash($admin ? Csrf::sessionToken() : Csrf::token());
+    }
+
+    /** Верный ли токен выхода из адреса (новый токен при проверке не создаётся) */
+    public static function checkLogoutToken(string $t, bool $admin = false): bool
+    {
+        $base = $admin ? Session::get('_csrf') : Csrf::current();
+        if (!is_string($base) || strlen($base) !== 32 || !preg_match('/^[a-f0-9]{32}$/', $t)) return false;
+        return hash_equals(self::logoutHash($base), $t);
+    }
+
+    private static function logoutHash(string $base): string
+    {
+        return substr(hash_hmac('sha256', 'logout', $base), 0, 32);
+    }
+
+    /**
+     * Отпечаток пароля для сессии: HMAC от id и хеша пароля (сам хеш в файл сессии не пишем).
+     * Меняется при любой записи нового пароля в customers — на любом пути, включая сброс администратором.
+     */
+    private static function fingerprint(array $u): string
+    {
+        $key = (string) App::config('app_key', '');
+        return substr(hash_hmac('sha256', (int) $u['id'] . '|' . (string) ($u['password'] ?? ''), $key !== '' ? $key : 'tomobuv-session'), 0, 32);
+    }
+
+    /** Сеанс больше не действует: забыть вошедшего (сама сессия — корзина гостя и т.п. — остаётся) */
+    private static function drop(): void
+    {
+        Session::forget('uid');
+        Session::forget(self::PW_KEY);
+        self::forgetCookie();
+    }
+
+    /** Снять cookie-подсказку «вошёл» (шапка витрины перестанет показывать «Кабинет») */
+    public static function forgetCookie(): void
+    {
+        if (!headers_sent() && isset($_COOKIE['auth'])) {
+            setcookie('auth', '', ['expires' => time() - 3600, 'path' => '/', 'secure' => Session::https(), 'samesite' => 'Lax']);
+        }
     }
 }

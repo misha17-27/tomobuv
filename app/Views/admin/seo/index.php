@@ -6,6 +6,7 @@
  * @var string $filter @var string $group @var string $lang @var string $q @var array $rows @var array $prod @var ?App\Core\Paginator $pager
  * @var array $groupCount @var array $groupAll @var array $chipCount @var array $tally @var array $split @var array $sitemap @var array $cover
  * @var int $at @var array $sample @var int $sampleId @var array $templates @var array $service
+ * @var bool $withHidden чип «Закрыто от индексации»: база «из M» — все адреса вместе со скрытыми
  */
 use App\Services\SeoAudit;
 
@@ -16,8 +17,9 @@ $dots = SeoAudit::STATES;
 $lim = ['title' => [SeoAudit::TITLE_MIN, SeoAudit::TITLE_MAX], 'desc' => [SeoAudit::DESC_MIN, SeoAudit::DESC_MAX]];
 $isUk = $lang === 'uk';
 // ссылка на этот экран с изменёнными параметрами (страница списка сбрасывается)
-$u = static function (array $ch = [], string $hash = '#list') use ($filter, $group, $q, $lang): string {
-    $p = array_merge(['group' => $group, 'show' => $filter, 'q' => $group === 'products' ? $q : '', 'lang' => $lang === 'ru' ? '' : $lang], $ch);
+$u = static function (array $ch = [], string $hash = '#list') use ($filter, $group, $q, $lang, $sampleId): string {
+    $p = array_merge(['group' => $group, 'show' => $filter, 'q' => $group === 'products' ? $q : '', 'lang' => $lang === 'ru' ? '' : $lang,
+        'sample' => $sampleId ?: ''], $ch);
     $p = array_filter($p, static fn($v) => $v !== '' && $v !== null);
     return '/admin/seo/' . ($p ? '?' . http_build_query($p) : '') . $hash;
 };
@@ -191,10 +193,10 @@ $noUk = array_values(array_filter($templates, static fn($t) => $t['used'] && $t[
     <p class="muted">Если у товара, категории или страницы нет своего title / description, сайт подставляет шаблон из настроек (на /ua/ — его украинский вариант).
       <?php if ($sp): ?>Пример — товар <a href="/admin/products/<?= (int) $sp['id'] ?>/"><?= e($sp['name']) ?></a> (№ <?= (int) $sp['id'] ?><?= (string) $sp['sku'] !== '' ? ', арт. ' . e($sp['sku']) : '' ?>, <?= e(price_format($sp['price'])) ?> за пару)<?php if ($sc): ?> и его категория «<?= e($sc['name']) ?>»<?php endif; ?>.<?php endif; ?></p>
     <form class="filter-bar seo-sample" method="get" action="/admin/seo/#templates">
-      <?php foreach (['group' => $group, 'show' => $filter, 'lang' => $isUk ? $lang : ''] as $k => $v): if ($v !== ''): ?><input type="hidden" name="<?= $k ?>" value="<?= e($v) ?>"><?php endif; endforeach; ?>
+      <?php foreach (['group' => $group, 'show' => $filter, 'q' => $group === 'products' ? $q : '', 'lang' => $isUk ? $lang : ''] as $k => $v): if ($v !== ''): ?><input type="hidden" name="<?= $k ?>" value="<?= e($v) ?>"><?php endif; endforeach; ?>
       <input type="number" name="sample" min="1" step="1" value="<?= $sampleId ?: '' ?>" placeholder="№ товара" aria-label="Номер товара для примера">
       <button class="btn btn-sm" type="submit">Показать на другом товаре</button>
-      <?php if ($sampleId): ?><a class="btn btn-sm" href="<?= e($u([], '#templates')) ?>">Последний товар</a><?php endif; ?>
+      <?php if ($sampleId): ?><a class="btn btn-sm" href="<?= e($u(['sample' => ''], '#templates')) ?>">Последний товар</a><?php endif; ?>
       <?php if ($sampleId && (!$sp || (int) $sp['id'] !== $sampleId)): ?><span class="muted">Товара № <?= $sampleId ?> нет — показан последний.</span><?php endif; ?>
     </form>
     <?php if ($sp || $sc): ?>
@@ -260,7 +262,7 @@ $noUk = array_values(array_filter($templates, static fn($t) => $t['used'] && $t[
 <div class="card">
   <div class="card-hd">
     <h2><?= e($hdTitle) ?></h2>
-    <span class="muted"><?= $fmt($listedTotal) ?> из <?= $fmt($groupTotal) ?></span>
+    <span class="muted"><?= $fmt($listedTotal) ?> из <?= $fmt($groupTotal) ?><?= $withHidden ? ' адресов вместе со скрытыми' : '' ?></span>
   </div>
   <div class="pad seo-bar-pad">
     <nav class="subtabs seo-langs" aria-label="Версия сайта">
@@ -279,10 +281,11 @@ $noUk = array_values(array_filter($templates, static fn($t) => $t['used'] && $t[
         <input type="hidden" name="group" value="products">
         <?php if ($filter !== ''): ?><input type="hidden" name="show" value="<?= e($filter) ?>"><?php endif; ?>
         <?php if ($isUk): ?><input type="hidden" name="lang" value="uk"><?php endif; ?>
+        <?php if ($sampleId): ?><input type="hidden" name="sample" value="<?= $sampleId ?>"><?php endif; ?>
         <input type="search" name="q" value="<?= e($q) ?>" maxlength="100" placeholder="Товар: название, артикул или №" aria-label="Поиск товара">
         <button class="btn btn-p" type="submit">Найти</button>
         <?php if ($q !== ''): ?><a class="btn" href="<?= e($u(['q' => ''])) ?>">Сбросить</a>
-          <span class="muted">Найдено товаров: <?= $fmt($prod['found'] ?? 0) ?><?= !empty($prod['limited']) ? ' — показаны самые новые, уточните запрос' : '' ?></span><?php endif; ?>
+          <span class="muted">Найдено товаров на сайте: <?= $fmt($prod['found'] ?? 0) ?><?= !empty($prod['found_hidden']) ? ', ещё скрытых: ' . $fmt($prod['found_hidden']) . ' (они — в «Закрыто от индексации»)' : '' ?><?= !empty($prod['limited']) ? ' — показаны самые новые, уточните запрос' : '' ?></span><?php endif; ?>
       </form>
     <?php endif; ?>
   </div>

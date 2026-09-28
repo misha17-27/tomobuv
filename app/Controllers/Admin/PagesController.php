@@ -10,6 +10,8 @@ use App\Core\Response;
 use App\Core\Seo;
 use App\Core\Settings;
 use App\Core\Str;
+use App\Services\AdminCatalog;
+use App\Services\HtmlSanitizer;
 
 /**
  * Информационные страницы (/o-kompanii/, /dostavka-i-oplata/…).
@@ -90,6 +92,7 @@ final class PagesController extends BaseController
                 'sort'             => max(-99999, min(99999, Request::postInt('sort'))),
                 'canonical'        => self::normalizeCanonical(Request::post('canonical')),
             ] + self::ukValues(self::UK_FIELDS, ['content_uk']);
+            $data = AdminCatalog::keepUnchanged($data, $old);   // без правок — байт в байт (CRLF в текстах из Webasyst)
             if ($data['name'] === '') $errors['name'] = 'Укажите название страницы';
             if ($data['url'] === '' && $data['name'] !== '') $data['url'] = Str::slug($data['name'], 120) . '/';
             if ($err = self::urlError($data['url'], $pageId)) $errors['url'] = $err;
@@ -116,7 +119,7 @@ final class PagesController extends BaseController
                     $this->log('redirect_save', 'redirect', null, ['from' => '/' . $old['url'], 'to' => '/' . $row['url']]);
                 }
                 Cache::flush();
-                $this->flash($msg);
+                $this->flash($msg . HtmlSanitizer::notice());
                 return Response::redirect('/admin/pages/' . $pageId . '/' . ($lang === 'uk' ? '?lang=uk' : ''));
             }
             $page = $data + $page;
@@ -223,12 +226,15 @@ final class PagesController extends BaseController
         return $out;
     }
 
-    /** HTML-поле формы как есть (пустое — если одни пробелы) */
+    /**
+     * HTML-поле формы (пустое — если одни пробелы). Администратору — как есть, остальным сотрудникам — без скриптов
+     * и опасных атрибутов (HtmlSanitizer::staff): иначе менеджер мог бы выполнить свой код в браузере администратора.
+     */
     public static function html(string $key): string
     {
         $v = $_POST[$key] ?? '';
         $v = is_string($v) ? str_replace("\r\n", "\n", $v) : '';
-        return trim($v) === '' ? '' : $v;
+        return trim($v) === '' ? '' : (HtmlSanitizer::staff($v) ?? '');
     }
 
     /** Канонический адрес: '' | '/path/' | 'https://…'; false — неверный */

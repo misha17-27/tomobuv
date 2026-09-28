@@ -69,6 +69,43 @@ final class OrdersController extends BaseController
         'sum' => 'o.total DESC, o.id DESC',
     ];
     private const PER_PAGE = 50;
+    /**
+     * «Новые заказы» — одна логика для плитки на главной, счётчика в меню и списка по ссылке из них:
+     * статус «Новый» и оформлен за последние FRESH_DAYS дней, считая сегодняшний (с 00:00 — как фильтр «с» в списке).
+     * Более старые «новые» (в основном необработанные заказы со старого сайта) показываются отдельной подсказкой.
+     */
+    public const FRESH_DAYS = 30;
+    /** Больше заказов одной массовой сменой статуса не меняем — пусть сузят фильтр */
+    private const BULK_MAX = 5000;
+
+    // ============================================================ «новые заказы»
+
+    /** Первый день окна «новых» (Y-m-d) */
+    public static function freshFrom(): string
+    {
+        return date('Y-m-d', strtotime('-' . (self::FRESH_DAYS - 1) . ' days'));
+    }
+
+    /** Новые заказы: fresh — за окно FRESH_DAYS, stale — старше; один запрос по индексу status (status, created_at) */
+    public static function newCounts(): array
+    {
+        $from = self::freshFrom() . ' 00:00:00';
+        $r = App::db()->row("SELECT COALESCE(SUM(created_at >= ?), 0) fresh, COALESCE(SUM(created_at < ?), 0) stale FROM orders WHERE status = 'new'",
+            [$from, $from]) ?? [];
+        return ['fresh' => (int) ($r['fresh'] ?? 0), 'stale' => (int) ($r['stale'] ?? 0)];
+    }
+
+    /** Список «новых» за окно — ровно те, что в плитке и в меню */
+    public static function freshUrl(): string
+    {
+        return '/admin/orders/?' . http_build_query(['status' => 'new', 'from' => self::freshFrom()]);
+    }
+
+    /** Список «новых» старше окна — для массового закрытия */
+    public static function staleUrl(): string
+    {
+        return '/admin/orders/?' . http_build_query(['status' => 'new', 'to' => date('Y-m-d', strtotime(self::freshFrom() . ' -1 day')), 'sort' => 'old']);
+    }
 
     // ============================================================ список
 
@@ -93,7 +130,8 @@ final class OrdersController extends BaseController
         $qs = http_build_query(array_filter(['status' => $f['status'], 'q' => $f['q'], 'from' => $f['from'], 'to' => $f['to'],
             'source' => $f['source'], 'lang' => $f['lang'], 'sort' => $f['sort'] !== 'new' ? $f['sort'] : ''], static fn($v) => $v !== ''));
         return $this->render('admin/orders/index', [
-            'title' => 'Заказы', 'f' => $f, 'counts' => $counts, 'all' => $all, 'total' => $total, 'orders' => $orders, 'pg' => $pg,
+            'title' => 'Заказы', 'f' => $f, 'counts' => $counts, 'all' => $all, 'total' => $total, 'orders' => $orders, 'pg' => $pg, 'qs' => $qs,
+            'newCounts' => $f['status'] === 'new' ? self::newCounts() : null, 'bulkMax' => self::BULK_MAX,
             'shipping' => self::methods('shipping_methods'), 'payment' => self::methods('payment_methods'),
             'styles' => ['admin/sales.css'], 'scripts' => ['admin/sales.js'],
             'actions' => '<a class="btn btn-sm" href="/admin/orders/export.csv/' . ($qs ? '?' . e($qs) : '') . '">' . icon('doc') . ' Экспорт CSV</a>'
@@ -317,6 +355,77 @@ final class OrdersController extends BaseController
                 : 'Промокод ' . $code . ' не восстановлен: ' . rtrim((string) $r['error'], '.') . '. Скидка в заказе осталась — проверьте сумму.';
         }
         return '';
+    }
+
+    /**
+     * POST /admin/orders/bulk/ — массовая смена статуса: отмеченные заказы (ids[]) или все найденные по фильтрам списка (all=1;
+     * фильтры — в адресе формы, как у самого списка). Каждый заказ — как при одиночной смене: промокод при отмене возвращается
+     * в лимит, запись в историю, пересчёт клиента. Письма клиентам не отправляются.
+     */
+    public function bulk(): Response
+    {
+        $f = self::filters();
+        $qs = http_build_query(array_filter(['status' => $f['status'], 'q' => $f['q'], 'from' => $f['from'], 'to' => $f['to'],
+            'source' => $f['source'], 'lang' => $f['lang'], 'sort' => $f['sort'] !== 'new' ? $f['sort'] : ''], static fn($v) => $v !== ''));
+        $back = '/admin/orders/' . ($qs !== '' ? '?' . $qs : '');
+        $to = Request::post('to_status');
+        if (!isset(self::STATUSES[$to])) { $this->flash('Выберите новый статус.', true); return Response::redirect($back); }
+        $db = App::db();
+        if (Request::post('all') === '1') {
+            [$where, $params] = self::where($f);
+            $ids = array_map('intval', $db->col('SELECT o.id FROM orders o WHERE ' . implode(' AND ', $where)
+                . ' ORDER BY o.id LIMIT ' . (self::BULK_MAX + 1), $params));
+        } else {
+            $raw = $_POST['ids'] ?? [];
+            $ids = array_values(array_unique(array_filter(array_map('intval', is_array($raw) ? $raw : []), static fn($i) => $i > 0)));
+        }
+        if (!$ids) { $this->flash(Request::post('all') === '1' ? 'По условиям списка заказов не найдено.' : 'Отметьте заказы галочками.', true); return Response::redirect($back); }
+        if (count($ids) > self::BULK_MAX) {
+            $this->flash('За один раз можно изменить не больше ' . number_format(self::BULK_MAX, 0, '', ' ') . ' заказов — сузьте фильтр.', true);
+            return Response::redirect($back);
+        }
+
+        $changed = 0;
+        $customers = [];
+        $now = date('Y-m-d H:i:s');
+        $uid = Auth::id() ?: null;
+        $toOff = in_array($to, self::CANCELLED, true);
+        foreach (array_chunk($ids, 500) as $chunk) {
+            // пачка — одной транзакцией и тремя запросами; FOR UPDATE — параллельная смена статуса тех же заказов дождётся
+            $db->transaction(static function ($db) use ($chunk, $to, $toOff, $now, $uid, &$changed, &$customers) {
+                [$ph, $vals] = $db->in($chunk);
+                $orders = $db->all('SELECT id, customer_id, status, source, discount, phone, params FROM orders
+                    WHERE id IN (' . $ph . ') AND status <> ? FOR UPDATE', array_merge($vals, [$to]));
+                if (!$orders) return;
+                [$ph, $vals] = $db->in(array_map(static fn($o) => (int) $o['id'], $orders));
+                $db->query('UPDATE orders SET status = ?, updated_at = ? WHERE id IN (' . $ph . ')', array_merge([$to, $now], $vals));
+                // промокод — как при одиночной смене (couponOnStatus), но только у заказов, где он может быть:
+                // отмена — у кого есть применение в coupon_usages; выход из отмены — у заказов нового сайта со скидкой
+                $used = $toOff ? array_flip(array_map('intval', $db->col('SELECT order_id FROM coupon_usages WHERE order_id IN (' . $ph . ')', $vals))) : [];
+                $log = [];
+                foreach ($orders as $o) {
+                    $from = (string) $o['status'];
+                    $note = isset($used[(int) $o['id']]) || (!$toOff && in_array($from, self::CANCELLED, true) && $o['source'] !== 'webasyst' && (float) $o['discount'] > 0)
+                        ? self::couponOnStatus($o, $from, $to) : '';
+                    $log[] = ['order_id' => (int) $o['id'], 'user_id' => $uid, 'status_from' => $from, 'status_to' => $to,
+                        'text' => 'Массовая смена статуса в списке заказов' . ($note !== '' ? "\n" . $note : '')];
+                    if ((int) $o['customer_id'] > 0) $customers[(int) $o['customer_id']] = true;
+                }
+                $db->insertMany('order_log', $log);
+                $changed += count($orders);
+            });
+        }
+        self::recalcCustomers(array_keys($customers));
+        if ($changed) {
+            Cache::forget('admin.tally');   // счётчики в меню админки
+            $this->log('order_bulk_status', 'order', null, ['to' => $to, 'count' => $changed, 'ids' => count($ids) <= 50 ? $ids : count($ids)]);
+        }
+        $skipped = count($ids) - $changed;
+        $this->flash($changed
+            ? 'Статус «' . self::STATUSES[$to] . '»: ' . $changed . ' ' . plural($changed, 'заказ', 'заказа', 'заказов')
+                . ($skipped ? ' (ещё ' . $skipped . ' уже были в этом статусе или не найдены)' : '') . '.'
+            : 'Ничего не изменилось: отмеченные заказы уже в статусе «' . self::STATUSES[$to] . '».');
+        return Response::redirect($back);
     }
 
     /** Письмо клиенту о смене статуса — на языке, на котором оформлен заказ (orders.lang) */
@@ -745,6 +854,21 @@ final class OrdersController extends BaseController
         App::db()->query('UPDATE customers SET orders_count = (SELECT COUNT(*) FROM orders WHERE customer_id = ?),
             total_spent = (SELECT COALESCE(SUM(total), 0) FROM orders WHERE customer_id = ? AND status IN (' . $ph . '))
             WHERE id = ?', array_merge([$cid, $cid], $vals, [$cid]));
+    }
+
+    /** recalcCustomer() для многих клиентов — одним запросом на пачку (массовая смена статуса) */
+    public static function recalcCustomers(array $ids): void
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), static fn($i) => $i > 0));
+        if (!$ids) return;
+        $db = App::db();
+        [$paid, $paidVals] = $db->in(self::PAID);
+        foreach (array_chunk($ids, 500) as $chunk) {
+            [$ph, $vals] = $db->in($chunk);
+            $db->query('UPDATE customers c SET orders_count = (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id),
+                total_spent = (SELECT COALESCE(SUM(o.total), 0) FROM orders o WHERE o.customer_id = c.id AND o.status IN (' . $paid . '))
+                WHERE c.id IN (' . $ph . ')', array_merge($paidVals, $vals));
+        }
     }
 
     /** Товары по id (для позиций заказа): [id => row] — одним запросом */

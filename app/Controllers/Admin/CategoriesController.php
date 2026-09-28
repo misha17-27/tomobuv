@@ -11,6 +11,7 @@ use App\Core\Str;
 use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\CatalogIndexer;
+use App\Services\HtmlSanitizer;
 
 /** Админка → Категории: дерево (nested set), создание/редактирование, перемещение, удаление с переносом товаров. */
 final class CategoriesController extends BaseController
@@ -121,7 +122,8 @@ final class CategoriesController extends BaseController
 
         if (Request::isPost()) {
             $str = static fn(string $k, int $max = 500) => ($v = mb_substr(Request::post($k), 0, $max)) === '' ? null : $v;
-            $html = static fn(string $k) => ($v = trim((string) ($_POST[$k] ?? ''))) === '' ? null : mb_substr($v, 0, 1000000);
+            // HTML-описания: у менеджера — без скриптов и опасных атрибутов (HtmlSanitizer::staff), у администратора — как есть
+            $html = static fn(string $k) => ($v = trim((string) ($_POST[$k] ?? ''))) === '' ? null : HtmlSanitizer::staff(mb_substr($v, 0, 1000000));
             $d = [
                 'name'             => mb_substr(Request::post('name'), 0, 255),
                 'parent_id'        => max(0, Request::postInt('parent_id')),
@@ -141,9 +143,10 @@ final class CategoriesController extends BaseController
             // украинская версия (пусто — на /ua/ показывается русский текст)
             foreach (self::UK_FIELDS as $k) {
                 $d[$k . '_uk'] = in_array($k, ['description', 'seo_description'], true)
-                    ? AdminCatalog::postHtml($k . '_uk')
+                    ? HtmlSanitizer::staff(AdminCatalog::postHtml($k . '_uk'))
                     : AdminCatalog::postStr($k . '_uk', $k === 'name' ? 255 : (str_starts_with($k, 'meta_') && $k !== 'meta_title' ? 5000 : 500));
             }
+            $d = AdminCatalog::keepUnchanged($d, $c);   // без правок — байт в байт (перевод строки в конце H1 из импорта)
             $sort = Request::post('sort_products');
             $d['sort_products'] = (isset(AdminCatalog::CATEGORY_SORTS[$sort]) || $sort === (string) ($c['sort_products'] ?? '')) && $sort !== '' ? $sort : null;
             // фильтры: «price» + id характеристик в порядке отметки
@@ -208,7 +211,7 @@ final class CategoriesController extends BaseController
                 if (!empty($old['image']) && $old['image'] !== $d['image']) AdminCatalog::deleteUpload($old['image']);
                 Cache::flush();
                 $this->log($old['id'] ? 'category_update' : 'category_create', 'category', $id, ['name' => $d['name']]);
-                $this->flash($old['id'] ? 'Категория сохранена.' : 'Категория создана.');
+                $this->flash(($old['id'] ? 'Категория сохранена.' : 'Категория создана.') . HtmlSanitizer::notice());
                 return Response::redirect('/admin/categories/' . $id . '/');
             }
             $c = array_merge($c, $d, ['image' => $picked === false ? $c['image'] : $picked]);

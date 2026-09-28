@@ -19,9 +19,13 @@ final class ExportController extends BaseController
 {
     private const CHUNK = 2000;
 
-    /** Колонки файла: основные всегда, остальные — по галочкам */
+    /**
+     * Колонки файла: основные всегда, остальные — по галочкам. updated_at — когда товар изменён на сайте:
+     * при импорте этого файла товары, изменённые на сайте позже выгрузки, не перезаписываются (Importer::buildUpdate).
+     * В пустом шаблоне для поставщика её нет.
+     */
     private const COLS_MAIN = ['id', 'url', 'name', 'sku', 'supplier', 'supplier_code', 'category', 'brand', 'size', 'box_qty', 'min_qty',
-        'price', 'price_box', 'compare_price', 'purchase_price', 'stock', 'in_stock', 'status', 'image'];
+        'price', 'price_box', 'compare_price', 'purchase_price', 'stock', 'in_stock', 'status', 'image', 'updated_at'];
     private const COLS_SEO = ['meta_title', 'meta_description', 'meta_keywords'];
     private const COLS_DESC = ['description'];
     private const COLS_UK = ['name_uk', 'description_uk', 'meta_title_uk', 'meta_description_uk', 'meta_keywords_uk'];
@@ -114,6 +118,7 @@ final class ExportController extends BaseController
         $f = self::filters($_GET);
         $cols = array_merge(self::COLS_MAIN, $f['seo'] ? self::COLS_SEO : [], $f['desc'] ? self::COLS_DESC : [], $f['uk'] ? self::COLS_UK : []);
         $template = Request::get('template') === '1';
+        if ($template) $cols = array_values(array_diff($cols, ['updated_at']));
         [$where, $params] = self::where($f);
         $db = App::db();
         $this->log('export_products', null, null, array_filter(['filters' => array_filter($f), 'template' => $template ?: null]));
@@ -135,7 +140,7 @@ final class ExportController extends BaseController
         $brands = $db->pairs('SELECT id, name FROM brands');
         $needTexts = $f['desc'] || $f['uk'];
         $sel = 'p.id, p.url, p.name, p.sku, p.supplier, p.supplier_code, p.category_id, p.brand_id, p.size, p.box_qty, p.min_qty, p.price,
-            p.compare_price, p.purchase_price, p.stock, p.in_stock, p.status, p.image_id, p.image_ext'
+            p.compare_price, p.purchase_price, p.stock, p.in_stock, p.status, p.image_id, p.image_ext, p.updated_at'
             . ($f['seo'] ? ', p.meta_title, p.meta_description, p.meta_keywords' : '')
             . ($f['uk'] ? ', p.name_uk, p.meta_title_uk, p.meta_description_uk, p.meta_keywords_uk' : '');
         $last = 0;
@@ -161,7 +166,7 @@ final class ExportController extends BaseController
                     $r['category_id'] ? ($paths[(int) $r['category_id']] ?? '') : '', $r['brand_id'] ? ($brands[(int) $r['brand_id']] ?? '') : '',
                     $r['size'], $box, max(1, (int) $r['min_qty']), self::num($r['price']), self::num((float) $r['price'] * $box),
                     self::num($r['compare_price']), self::num($r['purchase_price']), $r['stock'] === null ? '' : (int) $r['stock'],
-                    (int) $r['in_stock'], (int) $r['status'], $img,
+                    (int) $r['in_stock'], (int) $r['status'], $img, (string) $r['updated_at'],
                 ];
                 if ($f['seo']) array_push($line, (string) $r['meta_title'], (string) $r['meta_description'], (string) $r['meta_keywords']);
                 if ($f['desc']) $line[] = (string) ($texts[$id]['description'] ?? '');

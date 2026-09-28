@@ -33,7 +33,7 @@ $n = count($products);
             <th scope="col" class="cmp-lab"><span class="cmp-hint"><?= e(t('Строки с разными значениями подсвечены')) ?></span></th>
             <?php foreach ($products as $p): ?>
               <th scope="col" class="cmp-col" data-col="<?= (int) $p['id'] ?>">
-                <div class="cmp-card" data-id="<?= (int) $p['id'] ?>">
+                <div class="cmp-card" data-id="<?= (int) $p['id'] ?>" data-max="<?= \App\Services\Cart::maxBoxes($p) ?>">
                   <button type="button" class="cmp-rm" data-cmp-remove="<?= (int) $p['id'] ?>" aria-label="<?= e(t('Удалить из сравнения: {name}', ['name' => $p['name']])) ?>" title="<?= e(t('Удалить из сравнения')) ?>"><?= icon('x', 'width:16px;height:16px') ?></button>
                   <a class="ph" href="<?= e($p['link']) ?>" tabindex="-1" aria-hidden="true"><img src="<?= e($p['img']) ?>" alt="" width="160" height="160" loading="lazy"></a>
                   <a class="nm" href="<?= e($p['link']) ?>"><?= e($p['name']) ?></a>

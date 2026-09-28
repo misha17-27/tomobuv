@@ -16,9 +16,11 @@ $qs = http_build_query(array_filter(['vq' => $vq, 'vsort' => $vsort !== 'sort' ?
 ?>
 <?php if ($errors): ?><div class="flash bad">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
 
-<form method="post" class="card" action="<?= $id ? '/admin/features/' . $id . '/' : '/admin/features/new/' ?>">
+<div class="lang-scope" data-lang="ru">
+<?= $view->partial('admin/partials/lang-bar', ['note' => 'Названия характеристики и её значений на украинской версии сайта (<code>/ua/</code>). Пустое поле UA — показывается русское название.']) ?>
+<form method="post" class="card ed-form" action="<?= $id ? '/admin/features/' . $id . '/' : '/admin/features/new/' ?>">
   <?= BaseController::tokenField() ?>
-  <div class="ac-cardhd"><h2>Настройки</h2><?= AdminCatalog::langTabs() ?></div>
+  <h2>Настройки</h2>
   <div class="row2">
     <div><?= AdminCatalog::i18nField('text', 'name', 'Название *', $f, ['required' => true, 'max' => 255, 'error' => $err('name')]) ?></div>
     <label class="fld"><span>Код</span><input type="text" name="code" value="<?= e($f['code']) ?>" <?= $id ? 'readonly' : 'required pattern="[a-z][a-z0-9_]{1,63}"' ?> maxlength="64">
@@ -33,7 +35,7 @@ $qs = http_build_query(array_filter(['vq' => $vq, 'vsort' => $vsort !== 'sort' ?
   </div>
   <label class="chk"><input type="checkbox" name="is_filter" value="1"<?= (int) $f['is_filter'] ? ' checked' : '' ?>> <span>Можно использовать в фильтре каталога <small class="muted">(какие фильтры показывать — задаётся в настройках категории)</small></span></label>
   <label class="chk"><input type="checkbox" name="multiple" value="1"<?= (int) $f['multiple'] ? ' checked' : '' ?>> У товара может быть несколько значений (например, несколько цветов)</label>
-  <div class="form-actions"><button class="btn btn-p" type="submit"><?= $id ? 'Сохранить' : 'Создать' ?></button><a class="btn" href="/admin/features/">К списку</a></div>
+  <div class="form-actions"><button class="btn btn-p" type="submit"><?= $id ? 'Сохранить' : 'Создать' ?></button><a class="btn" href="/admin/features/">К списку</a><span class="hint hide-sm">Ctrl+S — сохранить</span></div>
 </form>
 
 <?php if ($id): ?>
@@ -80,7 +82,7 @@ $qs = http_build_query(array_filter(['vq' => $vq, 'vsort' => $vsort !== 'sort' ?
     <?php else: ?>
     <div class="table-scroll">
       <table class="tbl ac-values">
-        <thead><tr><th class="tick"><input type="checkbox" id="values-all" aria-label="Отметить все"></th><th title="Какое значение оставить при объединении">Оставить</th><th>№</th><th><span class="ac-thlang">Значение <?= AdminCatalog::langTabs() ?></span></th><th class="num">Товаров</th></tr></thead>
+        <thead><tr><th class="tick"><input type="checkbox" id="values-all" aria-label="Отметить все"></th><th title="Какое значение оставить при объединении">Оставить</th><th>№</th><th>Значение <span class="l-ru"><?= AdminCatalog::langTag('ru') ?></span><span class="l-uk"><?= AdminCatalog::langTag('uk') ?></span></th><th class="num">Товаров</th></tr></thead>
         <tbody>
         <?php foreach ($rows as $v): $vid = (int) $v['id']; $n = (int) ($counts[$vid] ?? 0); ?>
           <tr>
@@ -88,8 +90,8 @@ $qs = http_build_query(array_filter(['vq' => $vq, 'vsort' => $vsort !== 'sort' ?
             <td class="tick"><input type="radio" name="target" value="<?= $vid ?>" aria-label="Оставить «<?= e($v['value']) ?>» при объединении"></td>
             <td class="muted"><?= $vid ?></td>
             <td><div class="ac-url"><?php if ($isColor && $v['code'] !== null): ?><i class="ac-sw" style="background:#<?= e(sprintf('%06x', (int) $v['code'])) ?>"></i><?php endif; ?>
-              <input type="text" class="ac-vname" name="names[<?= $vid ?>]" value="<?= e($v['value']) ?>" maxlength="255" aria-label="Название значения №<?= $vid ?>" data-l="ru">
-              <input type="text" class="ac-vname" name="names_uk[<?= $vid ?>]" value="<?= e((string) $v['value_uk']) ?>" maxlength="255" placeholder="<?= e($v['value']) ?>" aria-label="Украинское название значения №<?= $vid ?>" data-l="uk" hidden></div></td>
+              <input type="text" name="names[<?= $vid ?>]" value="<?= e($v['value']) ?>" maxlength="255" aria-label="Название значения №<?= $vid ?>" class="ac-vname l-ru">
+              <input type="text" name="names_uk[<?= $vid ?>]" value="<?= e((string) $v['value_uk']) ?>" maxlength="255" placeholder="<?= e($v['value']) ?>" aria-label="Украинское название значения №<?= $vid ?>" class="ac-vname l-uk" data-uk></div></td>
             <td class="num"><?php if ($n): ?><a href="/admin/products/?<?= e(http_build_query($f['code'] === 'brand' ? ['brand' => $vid] : ['ff' => $id, 'fv' => $vid])) ?>"><?= number_format($n, 0, '', ' ') ?></a><?php else: ?><span class="muted">0</span><?php endif; ?></td>
           </tr>
         <?php endforeach; ?>
@@ -132,3 +134,5 @@ $qs = http_build_query(array_filter(['vq' => $vq, 'vsort' => $vsort !== 'sort' ?
 </form>
 <?php endif; ?>
 <?php endif; ?>
+</div>
+<?= $view->partial('admin/partials/editor') ?>
