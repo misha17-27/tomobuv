@@ -873,10 +873,25 @@ final class Importer
         return $v === '' ? '' : Str::slug($v);
     }
 
-    /** Описание от поставщика: только безопасные теги без атрибутов (защита от XSS на витрине) — HtmlSanitizer::supplier */
-    private static function cleanHtml(string $html): string
+    /**
+     * Описание из файла. Прайс поставщика — только безопасные теги без атрибутов (защита от XSS на витрине,
+     * HtmlSanitizer::supplier). Своя выгрузка сайта ($own, Importer::ownExport) — белый список, как HTML менеджера
+     * (HtmlSanitizer::clean): ссылки, картинки, таблицы описаний, написанных на сайте, остаются после правки в Excel.
+     */
+    private static function cleanHtml(string $html, bool $own = false): string
     {
-        return HtmlSanitizer::supplier($html);
+        return $own ? HtmlSanitizer::clean($html) : HtmlSanitizer::supplier($html);
+    }
+
+    /**
+     * Файл — выгрузка самого сайта (/admin/export/): сопоставлены обе служебные колонки выгрузки — «ID товара на сайте»
+     * и «Изменён на сайте (из выгрузки)». Заголовок второй узнаётся только наш (updated_at, см. SYNONYMS), в прайсах
+     * поставщиков и в шаблоне для поставщика её нет.
+     */
+    public static function ownExport(array $map): bool
+    {
+        $f = array_flip(array_filter($map, 'is_string'));
+        return isset($f['id'], $f['updated_at']);
     }
 
     // ============================================================ строка файла → запись
@@ -932,7 +947,7 @@ final class Importer
                     if ($u !== '') $f['url'] = $u;
                     break;
                 case 'description': case 'description_uk':
-                    $f[$k] = self::cleanHtml($v);
+                    $f[$k] = self::cleanHtml($v, $ctx['own']);
                     break;
                 case 'summary': case 'summary_uk':
                     $f[$k] = mb_substr(trim(strip_tags($v)), 0, 2000);
@@ -1054,6 +1069,7 @@ final class Importer
     {
         $db = App::db();
         $ctx = self::context($opt);
+        $ctx['own'] = self::ownExport($map);                               // своя выгрузка — описания с разметкой
         $key = isset(self::KEYS[$opt['key']]) ? (string) $opt['key'] : 'sku';
         $mode = (string) $opt['mode'];
         $supplierOpt = trim((string) $opt['supplier']);
@@ -1352,7 +1368,7 @@ final class Importer
                 if (!isset($f[$t])) continue;
                 $old = trim((string) ($texts[$id][$t] ?? ''));
                 // в файле текст уже очищен — сравниваем с так же очищенным текстом из базы (экспорт → импорт ничего не меняет)
-                $oldClean = str_starts_with($t, 'description') ? self::cleanHtml($old) : mb_substr(trim(strip_tags($old)), 0, 2000);
+                $oldClean = str_starts_with($t, 'description') ? self::cleanHtml($old, $ctx['own']) : mb_substr(trim(strip_tags($old)), 0, 2000);
                 if ($old !== trim($f[$t]) && $oldClean !== trim($f[$t])) { $it['texts'][$t] = $f[$t]; $changes[] = $tNames[$t]; }
             }
             if (!empty($opt['images']) && $ex['image_id'] === null && $it['rec']['img']) {
@@ -1801,26 +1817,33 @@ final class Importer
             $state['reindex_total'] = count($state['reindex_queue']);
             self::saveState($jobId, $state);
         });
-        // перестройка категорий порциями: одна категория на 50 тыс. товаров — 1–2 с
+        // перестройка категорий порциями: одна категория на 50 тыс. товаров — 1–2 с. Под общей блокировкой с
+        // bin/reindex.php и кнопкой «Перестроить индекс» (CatalogIndexer::exclusive): идёт другая перестройка —
+        // ждём до min(5 с, половина бюджета шага), не дождались — продолжим на следующем шаге (очередь сохранена)
         $t = microtime(true);
         $queue = $state['reindex_queue'];
-        if ($queue) {
-            $all = $db->all('SELECT id, parent_id, lft, rgt, type, conditions, include_sub, status FROM categories');
-            $byId = array_column($all, null, 'id');
-            while ($queue && microtime(true) - $t < $budget) {
-                $cid = (int) array_shift($queue);
-                if (isset($byId[$cid])) CatalogIndexer::rebuildCategory($byId[$cid], $all);
-            }
+        if ($queue || !empty($state['reindex_total'])) {
+            $ok = CatalogIndexer::exclusive(static function () use ($db, &$queue, &$state, $t, $budget): void {
+                if ($queue) {
+                    $all = $db->all('SELECT id, parent_id, lft, rgt, type, conditions, include_sub, status FROM categories');
+                    $byId = array_column($all, null, 'id');
+                    while ($queue && microtime(true) - $t < $budget) {
+                        $cid = (int) array_shift($queue);
+                        if (isset($byId[$cid])) CatalogIndexer::rebuildCategory($byId[$cid], $all);
+                    }
+                }
+                if (!$queue && !empty($state['reindex_total'])) {                 // категории перестраивались целиком
+                    if (($state['reindex'] ?? '') === 'full') CatalogIndexer::rebuildSignatures();   // все учтены по текущим характеристикам
+                    CatalogIndexer::updateCounters();
+                }
+            }, min(5.0, $budget / 2));
+            if (!$ok) return;                                                 // не дождались — очередь сохранена, шаг повторится
         }
         $state['reindex_queue'] = $queue;
         if ($queue) {
             $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
             self::saveState($jobId, $state);
             return;
-        }
-        if (!empty($state['reindex_total'])) {                                // категории перестраивались целиком
-            if (($state['reindex'] ?? '') === 'full') CatalogIndexer::rebuildSignatures();   // все учтены по текущим характеристикам
-            CatalogIndexer::updateCounters();
         }
         $state['reindex_ms'] = (int) ($state['reindex_ms'] ?? 0) + (int) ((microtime(true) - $t) * 1000);
         if (($state['reindex'] ?? 'none') !== 'none') Cache::flush();

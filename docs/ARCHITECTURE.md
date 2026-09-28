@@ -39,7 +39,8 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
    `product_rid = 4294967295 − product_id` (`… DESC, product_rid DESC`): MySQL/MariaDB не читают по индексу смешанные
    направления сортировки (database/migrations/perf.sql). Новый ORDER BY для витрины — сначала EXPLAIN: без «Using filesort».
    После изменения товаров: `$s = CatalogIndexer::snapshot($ids)` до изменения и `CatalogIndexer::products($ids, $s)` после
-   (1–10 товаров — ~20 мс; без снимка тоже верно, ~0,15 с), после массового импорта — `CatalogIndexer::rebuildAll()`.
+   (1–10 товаров — ~20 мс; без снимка тоже верно, ~0,15 с), после массового импорта — `CatalogIndexer::rebuildAll()`
+   (полные перестройки — по одной за раз: `CatalogIndexer::exclusive`, блокировка `storage/cache/reindex.lock`).
 3. **Фильтры**: `product_features (feature_id, value_id, product_id)`, заранее посчитанные `category_facets`.
 4. **Файловый кэш данных** (`Core/Cache`) для справочников — категории, бренды, настройки, меню.
 5. **Сессия только при необходимости** (`Session::start()` вызывается входом, оформлением, админкой).
@@ -61,7 +62,8 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
   миграцию, зависящую от более поздней по алфавиту.
 - **Любой вывод в шаблонах — через `e()`**. HTML из базы (описания, страницы) выводится как есть — его пишет админ.
   HTML-поле формы админки сохраняется через `HtmlSanitizer::staff()` (или `PagesController::html()`): администратору — как есть,
-  менеджеру — без скриптов, on*-атрибутов, javascript:-ссылок и чужих iframe; описания из импорта — `HtmlSanitizer::supplier()`.
+  менеджеру — без скриптов, on*-атрибутов, javascript:-ссылок и чужих iframe; описания из импорта — `HtmlSanitizer::supplier()`,
+  из файла своей выгрузки (колонки ID и updated_at, `Importer::ownExport`) — `HtmlSanitizer::clean()`, как у менеджера.
 - Формы витрины: CSRF «double submit» — `csrf_field()` в форме или заголовок `X-CSRF-Token` (JS: `UI.post()`),
   проверка `Csrf::check()`. Админка: `BaseController` сам проверяет токен сессии на каждом POST (`BaseController::tokenField()`, JS: `Adm.post()`).
 - Спам-защита публичных форм: скрытое поле `website` (honeypot) + `RateLimit::hit("key:ip", N, sec)`.

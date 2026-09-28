@@ -11,7 +11,7 @@ use App\Core\Settings;
 use App\Core\Str;
 
 /**
- * Общая логика раздела админки «Каталог»: быстрое точечное обновление индекса каталога,
+ * Общая логика раздела админки «Каталог»: перестройка категорий в индексе каталога,
  * дерево категорий (nested set), фото товаров, значения характеристик, бренды.
  */
 final class AdminCatalog
@@ -31,158 +31,19 @@ final class AdminCatalog
     ];
 
     // ======================================================================= индекс каталога
-
-    /** Товары со значениями фильтруемых характеристик: [pid => [[fid, vid], …]] */
-    private static function filterPairs(array $ids): array
-    {
-        $db = App::db();
-        $fids = $db->col('SELECT id FROM features WHERE is_filter = 1');
-        if (!$ids || !$fids) return [];
-        [$ph, $vals] = $db->in($ids);
-        [$fph, $fvals] = $db->in($fids);
-        $out = [];
-        foreach ($db->all("SELECT product_id, feature_id, value_id FROM product_features WHERE product_id IN ($ph) AND feature_id IN ($fph)", array_merge($vals, $fvals)) as $r) {
-            $out[(int) $r['product_id']][] = [(int) $r['feature_id'], (int) $r['value_id']];
-        }
-        return $out;
-    }
+    // Товары после изменения — CatalogIndexer::snapshot() до и CatalogIndexer::products() после (точечно, как импорт).
 
     /**
-     * Снимок состояния товаров ДО изменения (нужен для точного пересчёта фильтров категорий).
-     * Использование: $s = AdminCatalog::snapshot($ids); …изменения…; AdminCatalog::reindex($ids, $s);
+     * Пересчитать фильтры всех категорий (после смены «в фильтре» у характеристики): как в rebuildAll — и скрытых
+     * (открываются по прямому адресу); подписи товаров — заново, они считаются по фильтруемым характеристикам.
      */
-    public static function snapshot(array $ids): array
-    {
-        $ids = self::ids($ids);
-        if (!$ids || count($ids) > 500) return ['ids' => $ids, 'rows' => [], 'pairs' => [], 'brands' => [], 'big' => count($ids) > 500];
-        $db = App::db();
-        [$ph, $vals] = $db->in($ids);
-        return [
-            'ids'    => $ids,
-            'rows'   => array_map(static fn($r) => [(int) $r['category_id'], (int) $r['product_id']],
-                $db->all("SELECT category_id, product_id FROM catalog_index WHERE product_id IN ($ph)", $vals)),
-            'pairs'  => self::filterPairs($ids),
-            'brands' => array_map('intval', $db->col("SELECT DISTINCT brand_id FROM products WHERE id IN ($ph) AND brand_id IS NOT NULL", $vals)),
-            'big'    => false,
-        ];
-    }
-
-    /**
-     * Точечное обновление catalog_index / category_facets / счётчиков после изменения товаров.
-     * Логика принадлежности товара категории — как в CatalogIndexer::rebuildCategory, но без
-     * перестройки целых категорий (CatalogIndexer::products на категории в 57 тыс. товаров — ~3 с,
-     * здесь — десятки мс). Больше 500 товаров — полная перестройка CatalogIndexer::rebuildAll().
-     */
-    public static function reindex(array $ids, ?array $before = null): void
-    {
-        $ids = self::ids($ids);
-        if (!$ids) return;
-        if (count($ids) > 500 || ($before['big'] ?? false)) {
-            CatalogIndexer::rebuildAll();
-            return;
-        }
-        if ($before === null) {                       // без снимка точно посчитать фильтры нельзя
-            CatalogIndexer::products($ids);
-            return;
-        }
-        $db = App::db();
-        [$ph, $vals] = $db->in($ids);
-        $cats = $db->all('SELECT id, parent_id, lft, rgt, type, conditions, include_sub, status FROM categories');
-        $prods = $db->keyed("SELECT id, in_stock, created_at, price, LEFT(name, 64) AS name, brand_id FROM products WHERE id IN ($ph) AND status = 1", $vals);
-        $links = [];
-        if ($prods) {
-            [$aph, $avals] = $db->in(array_keys($prods));
-            foreach ($db->all("SELECT category_id, product_id, sort FROM category_products WHERE product_id IN ($aph)", $avals) as $l) {
-                $links[(int) $l['product_id']][] = [(int) $l['category_id'], (int) $l['sort']];
-            }
-        }
-        $byId = array_column($cats, null, 'id');
-        $new = [];                                    // "cid:pid" => строка индекса
-        foreach ($cats as $c) {
-            if (!(int) $c['status']) continue;
-            $cid = (int) $c['id'];
-            if ((int) $c['type'] === 1) {             // динамическая: условие считает БД
-                if (!$prods) continue;
-                [$where, $params] = CatalogIndexer::conditionSql((string) $c['conditions']);
-                if ($where === '') continue;
-                [$aph, $avals] = $db->in(array_keys($prods));
-                foreach ($db->col("SELECT p.id FROM products p WHERE p.id IN ($aph) AND p.status = 1 AND $where", array_merge($avals, $params)) as $pid) {
-                    $new[$cid . ':' . $pid] = [$cid, (int) $pid, 0];
-                }
-                continue;
-            }
-            foreach ($prods as $pid => $p) {
-                $min = null;
-                foreach ($links[$pid] ?? [] as [$lc, $ls]) {
-                    $x = $byId[$lc] ?? null;
-                    if (!$x) continue;
-                    $inside = $lc === $cid || ((int) $c['include_sub'] && (int) $x['lft'] > (int) $c['lft'] && (int) $x['rgt'] < (int) $c['rgt']);
-                    if ($inside) $min = $min === null ? $ls : min($min, $ls);
-                }
-                if ($min !== null) $new[$cid . ':' . $pid] = [$cid, (int) $pid, $min];
-            }
-        }
-
-        $db->transaction(static function ($db) use ($ids, $ph, $vals, $new, $prods, $before) {
-            $db->query("DELETE FROM catalog_index WHERE product_id IN ($ph)", $vals);
-            $rows = [];
-            foreach ($new as [$cid, $pid, $sort]) {
-                $p = $prods[$pid];
-                $rows[] = ['category_id' => $cid, 'product_id' => $pid, 'in_stock' => (int) $p['in_stock'], 'created_at' => $p['created_at'],
-                    'price' => $p['price'], 'sort' => $sort, 'name' => (string) $p['name']];
-            }
-            $db->insertMany('catalog_index', $rows, true);
-
-            // фильтры: разница «было − стало» по тройкам (категория, характеристика, значение)
-            $after = self::filterPairs($ids);
-            $delta = [];
-            foreach ($before['rows'] as [$cid, $pid]) {
-                foreach ($before['pairs'][$pid] ?? [] as [$f, $v]) $delta["$cid:$f:$v"] = ($delta["$cid:$f:$v"] ?? 0) - 1;
-            }
-            foreach ($new as [$cid, $pid]) {
-                foreach ($after[$pid] ?? [] as [$f, $v]) $delta["$cid:$f:$v"] = ($delta["$cid:$f:$v"] ?? 0) + 1;
-            }
-            $plus = []; $minus = [];
-            foreach ($delta as $k => $d) {
-                if ($d === 0) continue;
-                [$c, $f, $v] = array_map('intval', explode(':', $k));
-                if ($d > 0) $plus[] = ['category_id' => $c, 'feature_id' => $f, 'value_id' => $v, 'cnt' => $d];
-                else $minus[-$d][] = [$c, $f, $v];
-            }
-            foreach (array_chunk($plus, 300) as $part) {
-                $sql = 'INSERT INTO category_facets (category_id, feature_id, value_id, cnt) VALUES '
-                    . implode(',', array_fill(0, count($part), '(?,?,?,?)')) . ' ON DUPLICATE KEY UPDATE cnt = cnt + VALUES(cnt)';
-                $params = [];
-                foreach ($part as $r) array_push($params, $r['category_id'], $r['feature_id'], $r['value_id'], $r['cnt']);
-                $db->query($sql, $params);
-            }
-            foreach ($minus as $d => $triples) {
-                foreach (array_chunk($triples, 200) as $part) {
-                    $w = implode(' OR ', array_fill(0, count($part), '(category_id = ? AND feature_id = ? AND value_id = ?)'));
-                    $db->query("UPDATE category_facets SET cnt = IF(cnt > ?, cnt - ?, 0) WHERE $w", array_merge([$d, $d], array_merge(...$part)));
-                }
-            }
-            $affected = array_values(array_unique(array_merge(array_column($before['rows'], 0), array_column($new, 0))));
-            if ($affected) {
-                [$cph, $cvals] = $db->in($affected);
-                $db->query("DELETE FROM category_facets WHERE cnt = 0 AND category_id IN ($cph)", $cvals);
-                $db->query("UPDATE categories c SET c.product_count = (SELECT COUNT(*) FROM catalog_index ci WHERE ci.category_id = c.id) WHERE c.id IN ($cph)", $cvals);
-            }
-            $brands = array_values(array_unique(array_filter(array_merge($before['brands'],
-                array_map(static fn($p) => (int) $p['brand_id'], array_values($prods)),
-                array_map('intval', $db->col("SELECT DISTINCT brand_id FROM products WHERE id IN ($ph) AND brand_id IS NOT NULL", $vals))))));
-            if ($brands) {
-                [$bph, $bvals] = $db->in($brands);
-                $db->query("UPDATE brands b SET b.product_count = (SELECT COUNT(*) FROM products p WHERE p.brand_id = b.id AND p.status = 1) WHERE b.id IN ($bph)", $bvals);
-            }
-        });
-        Cache::flush();
-    }
-
-    /** Пересчитать фильтры всех категорий (после смены «в фильтре» у характеристики или слияния значений) */
     public static function rebuildAllFacets(): void
     {
-        foreach (App::db()->col('SELECT id FROM categories WHERE status = 1') as $cid) CatalogIndexer::rebuildFacets((int) $cid);
+        $run = static function (): void {
+            foreach (App::db()->col('SELECT id FROM categories') as $cid) CatalogIndexer::rebuildFacets((int) $cid);
+            CatalogIndexer::rebuildSignatures();
+        };
+        if (!CatalogIndexer::exclusive($run, 120)) $run();
         Cache::flush();
     }
 
@@ -207,14 +68,8 @@ final class AdminCatalog
                 if ((int) $a['lft'] < (int) $x['lft'] && (int) $a['rgt'] > (int) $x['rgt']) $todo[(int) $a['id']] = 1;
             }
         }
-        foreach (array_keys($todo) as $id) {
-            if ((int) $byId[$id]['status']) {
-                CatalogIndexer::rebuildCategory($byId[$id], $all);
-            } else {                                   // скрытая категория — убираем из индекса
-                $db->query('DELETE FROM catalog_index WHERE category_id = ?', [$id]);
-                $db->query('DELETE FROM category_facets WHERE category_id = ?', [$id]);
-            }
-        }
+        // и скрытые (status=0) — как в CatalogIndexer::rebuildAll: в меню их нет, но по прямому адресу они открываются
+        foreach (array_keys($todo) as $id) CatalogIndexer::rebuildCategory($byId[$id], $all);
         if ($todo) {                                   // счётчики только затронутых категорий
             [$ph, $vals] = $db->in(array_keys($todo));
             $db->query("UPDATE categories c SET c.product_count = (SELECT COUNT(*) FROM catalog_index ci WHERE ci.category_id = c.id) WHERE c.id IN ($ph)", $vals);
@@ -296,46 +151,32 @@ final class AdminCatalog
         return $p['path'] . (isset($p['query']) ? '?' . $p['query'] : '');
     }
 
-    /** Удалить товары полностью (строки во всех таблицах + файлы фото). Возвращает количество. */
+    /**
+     * Удалить товары полностью (строки во всех таблицах + файлы фото). Возвращает количество.
+     * Индекс — точечно, как после сохранения: снимок (фильтры, бренды) до удаления, CatalogIndexer::products после.
+     * Строки catalog_index удалённых товаров убирает он же — по ним видно, в каких категориях уменьшить фильтры и счётчики.
+     */
     public static function deleteProducts(array $ids): int
     {
         $ids = self::ids($ids);
         if (!$ids) return 0;
         $db = App::db();
-        $big = count($ids) > 500;
-        $cats = []; $brands = []; $urls = [];
+        $snap = CatalogIndexer::snapshot($ids);
+        $urls = [];
         foreach (array_chunk($ids, 1000) as $part) {
             [$ph, $vals] = $db->in($part);
-            if (!$big) {
-                $cats = array_merge($cats, $db->col("SELECT DISTINCT category_id FROM catalog_index WHERE product_id IN ($ph)", $vals));
-                $brands = array_merge($brands, $db->col("SELECT DISTINCT brand_id FROM products WHERE id IN ($ph) AND brand_id IS NOT NULL", $vals));
-            }
             foreach ($db->col("SELECT url FROM products WHERE id IN ($ph)", $vals) as $u) $urls[] = '/product/' . $u . '/';
             $db->transaction(static function ($db) use ($ph, $vals) {
-                foreach (['product_texts', 'product_images', 'product_features', 'category_products', 'catalog_index', 'cart_items', 'product_set_items'] as $t) {
+                foreach (['product_texts', 'product_images', 'product_features', 'category_products', 'cart_items', 'product_set_items'] as $t) {
                     $db->query("DELETE FROM `$t` WHERE product_id IN ($ph)", $vals);
                 }
                 $db->query("DELETE FROM product_related WHERE product_id IN ($ph) OR related_product_id IN ($ph)", array_merge($vals, $vals));
                 $db->query("DELETE FROM products WHERE id IN ($ph)", $vals);
             });
         }
+        CatalogIndexer::products($ids, $snap);
         foreach ($ids as $id) self::deleteProductFiles($id);
         self::dropRedirectsTo($urls);
-        if ($big) {
-            CatalogIndexer::rebuildAll();
-        } else {
-            $cats = array_values(array_unique(array_map('intval', $cats)));
-            foreach ($cats as $cid) CatalogIndexer::rebuildFacets($cid);
-            if ($cats) {
-                [$cph, $cvals] = $db->in($cats);
-                $db->query("UPDATE categories c SET c.product_count = (SELECT COUNT(*) FROM catalog_index ci WHERE ci.category_id = c.id) WHERE c.id IN ($cph)", $cvals);
-            }
-            if ($brands) {
-                [$bph, $bvals] = $db->in(array_values(array_unique(array_map('intval', $brands))));
-                $db->query("UPDATE brands b SET b.product_count = (SELECT COUNT(*) FROM products p WHERE p.brand_id = b.id AND p.status = 1) WHERE b.id IN ($bph)", $bvals);
-            }
-            Cache::flush();
-        }
         return count($ids);
     }
 

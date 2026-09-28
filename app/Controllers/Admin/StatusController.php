@@ -58,27 +58,21 @@ final class StatusController extends BaseController
             $this->flash('Перестраивать индекс может только администратор.', true);
             return Response::redirect('/admin/status/');
         }
-        // одна перестройка за раз: повторный клик или второй администратор не запускают вторую параллельно
-        @mkdir(STORAGE . '/cache', 0775, true);
-        $lock = @fopen(STORAGE . '/cache/reindex.lock', 'c');
-        if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
-            if ($lock) fclose($lock);
-            $this->flash('Индекс уже перестраивается — подождите минуту и обновите страницу.', true);
-            return Response::redirect('/admin/status/');
-        }
         // на хостинге эти функции бывают в disable_functions — в PHP 8 вызов отключённой функции = фатальная ошибка
         if (function_exists('set_time_limit')) @set_time_limit(600);
         if (function_exists('ignore_user_abort')) @ignore_user_abort(true);
         $t = microtime(true);
         try {
-            CatalogIndexer::rebuildAll();
+            // одна перестройка за раз (блокировка storage/cache/reindex.lock — общая с bin/reindex.php и импортом):
+            // повторный клик, второй администратор или идущая перестройка — не ждём, сообщаем
+            if (!CatalogIndexer::rebuildAll(null, 0)) {
+                $this->flash('Индекс уже перестраивается — подождите минуту и обновите страницу.', true);
+                return Response::redirect('/admin/status/');
+            }
         } catch (\Throwable $e) {
             \App\Core\Log::error('Перестройка индекса из админки: ' . $e->getMessage());
             $this->flash('Индекс не перестроен — ошибка записана в журнал storage/logs/error-' . date('Y-m') . '.log.', true);
             return Response::redirect('/admin/status/');
-        } finally {
-            flock($lock, LOCK_UN);
-            fclose($lock);
         }
         $sec = round(microtime(true) - $t, 1);
         $this->log('catalog_reindex', null, null, ['sec' => $sec]);

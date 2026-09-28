@@ -99,9 +99,18 @@ final class Auth
         }
         if (!$u) return null;
         if (str_starts_with((string) $u['password'], 'wa:') || password_needs_rehash((string) $u['password'], PASSWORD_DEFAULT)) {
-            // md5 из Webasyst → bcrypt; отпечаток в сессии (Auth::login) берётся уже от нового хеша — вход не сбрасывается
-            $u['password'] = password_hash($password, PASSWORD_DEFAULT);
-            $db->update('customers', ['password' => $u['password']], 'id = ?', [$u['id']]);
+            // md5 из Webasyst → bcrypt; отпечаток в сессии (Auth::login) берётся уже от нового хеша — вход не сбрасывается.
+            // Запись — только если в базе ещё старый хеш: при одновременном входе с двух устройств оба перехешируют,
+            // но записывает первый, второй берёт его хеш из базы. Иначе второй затирал бы хеш первого, и сеанс первого
+            // завершился бы на следующем запросе (отпечаток pwf от хеша, которого в базе уже нет).
+            $new = password_hash($password, PASSWORD_DEFAULT);
+            if ($db->update('customers', ['password' => $new], 'id = ? AND password = ?', [$u['id'], $u['password']])) {
+                $u['password'] = $new;
+            } else {
+                $cur = (string) $db->value('SELECT password FROM customers WHERE id = ?', [$u['id']]);
+                if (!self::verify($password, $cur)) return null;          // пароль тем временем сменили — старым не входим
+                $u['password'] = $cur;
+            }
         }
         return $u;
     }

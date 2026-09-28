@@ -404,6 +404,9 @@ final class FeaturesController extends BaseController
         [$ph, $vals] = $db->in($src);
         $pids = array_map('intval', $db->col("SELECT DISTINCT product_id FROM product_features WHERE feature_id = ? AND value_id IN ($ph)", array_merge([$fid], $vals)));
         $targetName = (string) $db->value('SELECT value FROM feature_values WHERE id = ?', [$target]);
+        // значение фильтра или бренд — товары переиндексируются точечно; снимок их фильтров и брендов — до слияния
+        $index = $pids && ((int) $f['is_filter'] || $f['code'] === 'brand');
+        $snap = $index ? CatalogIndexer::snapshot($pids) : null;
         $db->transaction(static function ($db) use ($fid, $target, $ph, $vals, $f, $pids, $targetName) {
             $db->query("INSERT IGNORE INTO product_features (product_id, feature_id, value_id)
                 SELECT product_id, ?, ? FROM product_features WHERE feature_id = ? AND value_id IN ($ph)", array_merge([$fid, $target, $fid], $vals));
@@ -435,8 +438,11 @@ final class FeaturesController extends BaseController
             if ($new !== $c['conditions']) $db->update('categories', ['conditions' => $new], 'id = ?', [(int) $c['id']]);
             $dyn[] = (int) $c['id'];
         }
+        // сначала товары (их категории, в том числе скрытые, фильтры, подписи, счётчики), затем динамические категории
+        // с новым условием — целиком: в них могли попасть и другие товары. Наоборот — в перестроенных категориях
+        // новые значения уже учтены, и точечная разница «было − стало» учла бы их второй раз.
+        if ($index) CatalogIndexer::products($pids, $snap, false);
         if ($dyn) AdminCatalog::reindexCategories($dyn, false);
-        if ((int) $f['is_filter']) AdminCatalog::rebuildAllFacets();
         if ($code === 'brand' || $dyn) CatalogIndexer::updateCounters();
         Cache::flush();
         return count($pids);

@@ -290,7 +290,7 @@ final class ProductsController extends BaseController
             if ($pct === 0.0 || $pct < -90 || $pct > 500) return $this->bulkBack('Укажите процент от −90 до 500 (например, 10 или −5).', true);
         }
 
-        $snap = AdminCatalog::snapshot($ids);
+        $snap = CatalogIndexer::snapshot($ids);                           // фильтры и бренды до изменения
         $now = date('Y-m-d H:i:s');
         foreach (array_chunk($ids, 1000) as $part) {
             [$ph, $vals] = $db->in($part);
@@ -320,7 +320,7 @@ final class ProductsController extends BaseController
             }
         }
         if ($action === 'addcat' || $action === 'delcat') Cache::forget('admin.category_direct_counts');
-        AdminCatalog::reindex($ids, $snap);
+        CatalogIndexer::products($ids, $snap);
         $this->log('products_bulk_' . $action, 'product', null, ['count' => $n, 'category' => $catId ?: null, 'percent' => $pct ?: null, 'ids' => array_slice($ids, 0, 200)]);
         $msg = self::BULK[$action];
         if ($cat) $msg = ($action === 'addcat' ? 'Добавлено в категорию «' : 'Убрано из категории «') . $cat['name'] . '»';
@@ -397,7 +397,7 @@ final class ProductsController extends BaseController
                     }
                     if ($imgErrors) $this->flash('Фото не загружены — ' . implode('; ', $imgErrors), true);
                 }
-                AdminCatalog::reindex([$newId], $this->snap);
+                CatalogIndexer::products([$newId], $this->snap);
                 Cache::forget('admin.category_direct_counts');
                 $this->log($id ? 'product_update' : 'product_create', 'product', $newId, ['name' => $data['name']]);
                 $this->flash(($id ? 'Товар сохранён.' : 'Товар создан.') . HtmlSanitizer::notice());
@@ -459,7 +459,7 @@ final class ProductsController extends BaseController
         ]);
     }
 
-    /** Снимок индекса до сохранения (для точного пересчёта фильтров) */
+    /** Снимок товара до сохранения — CatalogIndexer::snapshot (для точного пересчёта фильтров и счётчиков брендов) */
     private ?array $snap = null;
 
     /** Разбор и проверка формы: [данные products, категории, характеристики, ошибки] */
@@ -559,7 +559,7 @@ final class ProductsController extends BaseController
     private function save(int $id, array $old, array $d, array $links, array $state, array $features): int
     {
         $db = App::db();
-        $this->snap = $id ? AdminCatalog::snapshot([$id]) : null;
+        $this->snap = $id ? CatalogIndexer::snapshot([$id]) : null;
 
         // новые значения характеристик → id (для «Бренда» создаётся и бренд)
         foreach ($state as $fid => &$items) {
@@ -606,7 +606,8 @@ final class ProductsController extends BaseController
             $db->insertMany('product_features', $rows, true);
             return $id;
         });
-        $this->snap ??= ['ids' => [$id], 'rows' => [], 'pairs' => [], 'brands' => [], 'big' => false];
+        // новый товар — в снимок «пустым»: до сохранения у него не было ни фильтров, ни бренда
+        $this->snap ??= ['ids' => [$id], 'pairs' => [], 'brands' => [], 'big' => false];
 
         // смена адреса — 301 со старого (если отмечено)
         if (!empty($old['url']) && $old['url'] !== $d['url'] && Request::post('redirect') === '1') {
