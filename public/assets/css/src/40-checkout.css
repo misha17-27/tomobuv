@@ -1,0 +1,147 @@
+/* ==========================================================================
+   Корзина и оформление заказа (/cart/, /order/success/)
+   ========================================================================== */
+.co-page .page-head{padding-bottom:4px}
+.co-sec-h{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.co-sec-h h2{font-size:20px;line-height:1.2}
+.co-step{width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:15px;display:grid;place-items:center;flex:none}
+.co-lines{margin-left:auto;font-size:14px}
+.co-note{margin-bottom:14px}
+.co-hint{color:var(--muted);font-size:14px;margin:-6px 0 16px}
+.co-hint b{color:var(--ink)}
+
+/* таблица позиций */
+.co-tblwrap{border-radius:12px}
+.co-tbl td{padding:12px 10px}
+.co-tbl th{padding:10px}
+.co-tbl .c-img{width:84px}
+.co-tbl img{width:64px;height:64px}
+.co-nm{font-weight:700;line-height:1.3;display:inline-block}
+a.co-nm:hover{color:var(--blue)}
+.co-attr{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--muted);margin-top:4px}
+.co-attr b{color:var(--ink)}
+.co-meta{display:none;font-size:12px;color:var(--muted);margin-top:4px}
+.co-meta span{white-space:nowrap}
+.co-warn{font-size:12px;font-weight:700;color:#c0392b;margin-top:4px}
+.co-tbl tr.off .c-img img,.co-tbl tr.off .co-nm{opacity:.5}
+.co-tbl .c-sum,.co-tbl .c-boxes{white-space:nowrap}
+.co-tbl .c-sum b,.co-tbl .c-boxes b{font-size:16px}
+.co-tbl .c-sum small,.co-tbl .c-boxes small{display:block;color:var(--muted);font-size:12px}
+.co-qty{height:40px;width:max-content;background:#fff}
+.co-qty button{width:34px;font-size:18px}
+.co-qty button:hover{color:var(--blue)}
+.co-qty input{width:44px;height:100%;background:transparent;color:var(--ink)}
+.co-qty input:focus{outline:none;background:var(--blue-l)}
+.co-qty.busy{opacity:.6}
+.co-del{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--muted);border:1px solid transparent}
+.co-del:hover{color:#e8445a;border-color:#f3c2ca;background:#fff5f6}
+.co-tbl tr.gone{opacity:0;transition:opacity .25s}
+
+/* итоги под таблицей */
+.co-foot{display:flex;justify-content:space-between;align-items:center;gap:16px 24px;flex-wrap:wrap;padding-top:18px}
+.co-ship{flex:1 1 280px;max-width:440px}
+.co-ship-t{font-size:14px;margin-bottom:8px}
+.co-bar{height:8px;background:rgba(127,127,127,.18);border-radius:4px;overflow:hidden}
+.co-bar i{display:block;height:100%;background:var(--green);border-radius:4px;transition:width .3s}
+.co-total{font-size:15px;color:var(--muted)}
+.co-total b{color:var(--ink)}
+.co-total .co-t-sum{font-size:20px;font-weight:800}
+.co-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.co-actions .btn{gap:6px}
+.co-clear:hover{color:#e8445a;border-color:#e8445a}
+
+/* форма */
+.co-form{margin-top:16px}
+.co-formerr{margin-bottom:16px}
+.co-fs{border:0;min-width:0}
+.co-fs .errtxt{font-size:12px;color:#e8445a;margin-top:8px}
+.co-opts{grid-template-columns:repeat(2,minmax(0,1fr))}
+.co-opts .opt-card small{display:block}
+.co-addr{margin-top:16px}
+.co-comment{margin-top:16px}
+.field>label.co-agree{align-items:flex-start;font-size:14px;font-weight:500;color:var(--ink)}
+.co-agree .link{font-weight:600}
+.field .errtxt[hidden]{display:none}
+.co-nojs{margin-top:16px}
+
+/* сводка справа */
+.co-sum h2{font-size:20px;margin-bottom:10px}
+.co-sum .line b{font-weight:800}
+.co-sum .line.total{align-items:baseline}
+.co-submit{margin-top:18px;height:54px;font-size:17px}
+.co-quick{margin-top:8px}
+.co-help{font-size:13px;color:var(--muted);margin-top:14px;line-height:1.5}
+.co-help a{color:var(--blue);font-weight:700;white-space:nowrap}
+.co-status{background:var(--blue-l);color:var(--blue-d);font-weight:700;font-size:13px;padding:2px 10px;border-radius:20px;white-space:nowrap}
+.co-status.st-paid,.co-status.st-shipped,.co-status.st-completed{background:#e6f6ee;color:#146c40}
+.co-status.st-refunded,.co-status.st-deleted{background:#fdecee;color:#b3261e}
+.co-done.co-state{border-color:var(--line);background:#fff}
+.co-state .co-status{font-size:15px;vertical-align:1px}
+
+/* промокод и скидка в сводке */
+.co-disc small{color:var(--muted);font-weight:700;font-size:12px}
+.co-disc-v{color:#1a8f55;white-space:nowrap}
+.co-coupon{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+.co-coupon summary{cursor:pointer;font-size:14px;font-weight:700;color:var(--blue);list-style:none;display:inline-block}
+.co-coupon summary::-webkit-details-marker{display:none}
+.co-coupon summary:hover{text-decoration:underline}
+.co-coupon-f{display:flex;gap:8px;margin-top:10px}
+.co-coupon-f .input{height:42px;min-width:0;flex:1;text-transform:uppercase;letter-spacing:.5px}
+.co-coupon-f .input::placeholder{text-transform:none;letter-spacing:0}
+.co-coupon-f .btn{height:42px;flex:none}
+.co-coupon .errtxt{font-size:12px;color:#e8445a;margin-top:6px}
+.co-coupon-ok{margin-top:8px;font-size:13px;color:#146c40;background:#e6f6ee;border-radius:10px;padding:8px 10px;line-height:1.4}
+.co-coupon-x{color:#146c40;text-decoration:underline;font-size:13px;font-weight:700;margin-left:4px}
+
+/* пустая корзина */
+.co-empty{margin:10px 0 20px}
+.co-empty-a{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+
+/* заказ оформлен */
+.co-done{display:flex;gap:16px;align-items:flex-start;border-color:#bfe6d0;background:#f3fbf7;margin-bottom:16px}
+.co-done-ic{width:52px;height:52px;border-radius:50%;background:var(--green);color:#fff;display:grid;place-items:center;flex:none}
+.co-done-t{font-size:17px;font-weight:800;margin-bottom:4px}
+.co-done p+p{color:var(--muted)}
+.co-done p b{color:var(--ink)}
+.co-dl{display:grid;gap:0}
+.co-dl div{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.co-dl div:last-child{border-bottom:0}
+.co-dl dt{color:var(--muted);font-size:14px}
+.co-dl dd{font-weight:600;overflow-wrap:anywhere}
+
+/* диалог «Купить в 1 клик» */
+.co-qform{display:grid;gap:10px}
+.co-qform .input{margin:0}
+.co-qform .errtxt{font-size:12px;color:#e8445a;margin-top:-4px}
+
+@media (max-width:1180px){
+  .co-tbl .c-hide{display:none}
+  .co-meta{display:block}
+}
+@media (max-width:760px){
+  .co-cart .co-tblwrap{border:0;border-radius:0;overflow:visible;background:none}
+  .co-tbl,.co-tbl tbody{display:block}
+  .co-tbl thead{display:none}
+  .co-tbl tr{display:grid;grid-template-columns:64px minmax(0,1fr) auto;grid-template-areas:"img name del" "img qty sum";gap:10px 12px;padding:14px 0;border-bottom:1px solid var(--line)}
+  .co-tbl-ro tr{grid-template-areas:"img name name" "img qty sum"}
+  .co-tbl tr:first-child{padding-top:0}
+  .co-tbl td{padding:0;border:0;display:block}
+  .co-tbl .c-img{grid-area:img;width:auto}
+  .co-tbl .c-name{grid-area:name;min-width:0}
+  .co-tbl .c-del{grid-area:del;justify-self:end;margin:-8px -8px 0 0}
+  .co-tbl .c-qty,.co-tbl .c-boxes{grid-area:qty;align-self:center;text-align:left}
+  .co-tbl .c-sum{grid-area:sum;align-self:center}
+  .co-tbl .c-boxes small{display:inline;margin-left:6px}
+  .co-foot{flex-direction:column;align-items:stretch}
+  .co-ship{max-width:none;flex-basis:auto}
+  .co-opts{grid-template-columns:minmax(0,1fr)}
+  .co-dl div{grid-template-columns:minmax(0,1fr);gap:2px}
+}
+@media (max-width:680px){
+  .co-sec-h h2{font-size:18px}
+  .co-lines{margin-left:0;flex-basis:100%}
+  .co-actions .btn{flex:1 1 auto;justify-content:center}
+  .co-done{flex-direction:column;gap:10px}
+}
+.co-page [hidden]{display:none!important}
+#order,#cart{scroll-margin-top:100px}

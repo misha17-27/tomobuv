@@ -1,0 +1,226 @@
+/* ==========================================================================
+   Кабинет и формы: вход, регистрация, восстановление пароля, личный кабинет,
+   сравнение товаров (.cmp-*), отзывы о магазине (.srv-*)
+   Имена классов с префиксами раздела — чтобы не пересекаться с шапкой (.hicon.cmp)
+   и отзывами о товаре (.rv-*, .stars в 30-product.css).
+   ========================================================================== */
+
+/* подзаголовок под H1 (класс .sub в базе занят блоком подписки) */
+.acc-sub{color:var(--muted);margin-top:4px}
+
+/* ---------- вход / регистрация ---------- */
+.auth{display:grid;grid-template-columns:minmax(0,520px) minmax(0,1fr);gap:24px;align-items:start;padding:10px 0 20px}
+.auth>.panel+.panel{margin-top:0}
+.auth-card{padding:28px}
+.auth-card .form{display:grid;gap:16px}
+.auth-t{font-size:20px;margin-bottom:14px}
+.auth-lead{font-size:14px;margin:-6px 0 16px}
+.auth-card .note{margin-bottom:14px}
+.auth-row{display:flex;justify-content:flex-end;margin-top:-8px;font-size:14px}
+.auth-alt{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;color:var(--muted);text-align:center}
+.auth-links{display:flex;gap:16px;font-size:13px;margin-top:2px}
+.auth-done{text-align:center;display:grid;gap:12px;justify-items:center}
+.auth-done p{color:var(--ink);font-size:15px}
+.auth-done p.muted{color:var(--muted);font-size:14px}
+.auth-done .ic{width:64px;height:64px;border-radius:18px;background:var(--blue-l);color:var(--blue);display:grid;place-items:center}
+.auth-done .ic.warn{background:#fff3e8;color:var(--orange-d)}
+.auth-done .auth-t{margin-bottom:0}
+
+/* поле пароля с кнопкой «показать» */
+.pw{position:relative}
+.pw .input{padding-right:48px}
+.pw-tg{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:38px;border-radius:9px;display:grid;place-items:center;color:var(--muted)}
+.pw-tg:hover,.pw-tg.on{color:var(--blue)}
+.pw-tg svg{width:20px;height:20px}
+
+/* блок «Зачем кабинет» */
+.auth-info{background:linear-gradient(160deg,#f2f9fd,#fff 60%)}
+.auth-info h2{font-size:20px;margin-bottom:16px}
+.acc-ben{list-style:none;display:grid;gap:14px}
+.acc-ben li{display:flex;gap:14px;align-items:flex-start;font-size:14px;color:var(--muted);line-height:1.45}
+.acc-ben b{display:block;color:var(--ink);font-size:15px;margin-bottom:2px}
+.acc-ben .ic{width:42px;height:42px;border-radius:12px;background:var(--blue-l);color:var(--blue);display:grid;place-items:center;flex:none}
+.acc-ben .ic svg{width:20px;height:20px}
+.acc-help{display:flex;gap:10px;align-items:flex-start;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+.acc-help svg{color:var(--blue);margin-top:2px}
+
+/* ---------- личный кабинет ---------- */
+.acc-side{display:grid;gap:12px}
+.acc-user{display:flex;gap:12px;align-items:center;padding:16px}
+.acc-user .av,.srv .av{width:44px;height:44px;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center;font-weight:800;font-size:18px;flex:none}
+.acc-user .who{min-width:0}
+.acc-user b{display:block;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-user small{display:block;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-nav{padding:8px}
+.acc-nav a{display:flex;align-items:center;gap:10px}
+.acc-nav a svg{width:20px;height:20px;color:var(--muted)}
+.acc-nav a.on svg{color:var(--blue)}
+.acc-nav .acc-out{color:var(--muted);border-top:1px solid var(--line);border-radius:0 0 10px 10px;margin-top:4px}
+/* колонка minmax(0,1fr): иначе широкая таблица внутри растягивает сетку шире экрана на телефоне */
+.acc-main{min-width:0;display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-content:start}
+.acc-main>*,.acc-2>*{min-width:0}
+.acc-main .panel+.panel{margin-top:0}
+.acc-main .panel h2{font-size:18px;margin-bottom:14px}
+.acc-flash{margin:0}
+.acc-lead{font-size:14px;margin:-6px 0 14px}
+.acc-oh{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.acc-ph{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.acc-main .acc-ph h2{margin:0}
+.acc-form{display:grid;gap:16px}
+.acc-form .hint{font-size:13px;color:var(--muted)}
+/* поля в .row2 растягиваются по высоте соседа (подсказка/ошибка) — подпись и поле держим сверху */
+.auth-card .field,.acc-form .field,.srv-form .field{align-content:start}
+
+/* статусы заказа */
+.acc-st{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.acc-st::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.acc-st-new{background:var(--blue-l);color:var(--blue-d)}
+.acc-st-processing{background:#fff3e8;color:#9a4a0b}
+.acc-st-paid{background:#eaf1ff;color:#2952a3}
+.acc-st-shipped{background:#f1ebff;color:#5b3aa6}
+.acc-st-completed{background:#e6f6ee;color:#146c40}
+.acc-st-refunded{background:#fdecee;color:#b3263a}
+.acc-st-deleted{background:#eef1f3;color:#6b7780}
+.acc-oh .acc-st{font-size:13px;padding:5px 12px}
+
+/* список заказов */
+.acc-orders td{padding:14px 12px}
+.acc-orders .link{font-size:15px}
+.acc-m-date{display:none;color:var(--muted);font-size:12px}
+
+/* состав заказа */
+.acc-items-wrap{border-radius:12px}
+.acc-items td:first-child,.acc-items th:first-child{width:80px}
+.acc-iname{font-weight:700;display:block;line-height:1.3}
+a.acc-iname:hover{color:var(--blue)}
+.acc-imeta{display:block;font-size:12px;margin-top:2px}
+.acc-m-price{display:none}
+.acc-na{color:#b3263a;font-weight:600}
+.acc-sum{max-width:420px;margin:16px 0 0 auto}
+.acc-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.acc-dl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:14px}
+.acc-dl dt{color:var(--muted)}
+.acc-dl dd{font-weight:600;overflow-wrap:anywhere}
+.acc-hist{list-style:none;position:relative;display:grid;gap:16px;padding-left:28px}
+.acc-hist::before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;background:var(--line)}
+.acc-hist li{position:relative;display:grid}
+.acc-hist li::before{content:"";position:absolute;left:-28px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid var(--blue);box-sizing:border-box}
+.acc-hist li:last-child::before{background:var(--blue)}
+.acc-hist li.hs-deleted::before,.acc-hist li.hs-refunded::before{border-color:#b3263a}
+.acc-hist li.hs-deleted:last-child::before,.acc-hist li.hs-refunded:last-child::before{background:#b3263a}
+.acc-hist li.hs-completed::before{border-color:var(--green)}
+.acc-hist li.hs-completed:last-child::before{background:var(--green)}
+.acc-hist small{color:var(--muted);font-size:13px}
+.acc-actions{display:flex;gap:10px;flex-wrap:wrap}
+.acc-q{font-size:14px}
+.acc-f-half{max-width:calc(50% - 7px)}
+
+/* ---------- сравнение ---------- */
+.cmp-bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.cmp-bar .check{font-weight:700;align-items:center}
+.cmp-bar .check input{margin-top:0}
+.cmp-bar .btn{margin-left:auto}
+.cmp-wrap{position:relative}
+.cmp-tbl{table-layout:fixed;width:auto;min-width:100%}
+.cmp-tbl th,.cmp-tbl td{width:240px;min-width:240px;vertical-align:top;white-space:normal}
+.cmp-tbl .cmp-lab{width:190px;min-width:190px;position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 var(--line);font-size:13px;color:var(--muted);font-weight:700}
+.cmp-tbl thead th{background:#fff;font-size:14px;color:var(--ink);font-weight:400;padding:14px 12px}
+.cmp-tbl thead .cmp-lab{vertical-align:bottom}
+.cmp-hint{display:flex;gap:8px;align-items:center;font-weight:600;font-size:12px;line-height:1.35}
+.cmp-hint::before{content:"";width:14px;height:14px;border-radius:4px;background:#fff1de;border:1px solid #f6d3a8;flex:none}
+.cmp-tbl tbody tr.diff td,.cmp-tbl tbody tr.diff th{background:#fff8ef}
+.cmp-tbl tbody tr.diff .cmp-lab{color:#9a4a0b}
+.cmp-tbl.only-diff tbody tr.same{display:none}
+.cmp-tbl td{overflow-wrap:anywhere}
+.cmp-card{position:relative;display:flex;flex-direction:column;gap:8px;height:100%}
+.cmp-card .ph{display:flex;align-items:center;justify-content:center;height:180px;background:#fff;border-radius:12px;border:1px solid var(--line);padding:8px;overflow:hidden}
+.cmp-tbl .cmp-card .ph img{width:auto;height:auto;max-width:100%;max-height:162px;object-fit:contain;border:0;border-radius:0;background:none}
+.cmp-card .nm{font-weight:700;line-height:1.3;min-height:2.6em;overflow-wrap:anywhere}
+.cmp-card .nm:hover{color:var(--blue)}
+.cmp-card .pr b{font-size:18px;font-weight:800}
+.cmp-card .pr small{color:var(--muted);font-size:12px}
+.cmp-card .buy{display:flex;gap:6px;margin-top:auto}
+.cmp-card .buy .btn{flex:1;justify-content:center;padding:0 10px;height:40px}
+.cmp-card .qty input{width:30px}
+.cmp-rm{position:absolute;top:6px;right:6px;z-index:1;width:32px;height:32px;border-radius:9px;background:#fff;border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
+.cmp-rm:hover{color:#e8445a;border-color:#e8445a}
+.cmp-note{font-size:13px;margin-top:10px}
+
+/* ---------- отзывы о магазине ---------- */
+.srv-list{display:grid;gap:14px;min-width:0}
+.srv-list .panel+.panel{margin-top:0}
+.srv-sum{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.srv-sum-n{display:grid;justify-items:center;gap:4px;min-width:90px}
+.srv-sum-n b{font-size:34px;font-weight:800;line-height:1}
+.srv-sum-n small{font-size:12px;color:var(--muted)}
+.srv-sum-n .ic{width:56px;height:56px;border-radius:16px;background:#fff3e8;color:var(--orange);display:grid;place-items:center}
+.srv-sum-t{flex:1;min-width:200px;display:grid;gap:2px}
+.srv-sum-t b{font-size:18px}
+.srv-sum-t .muted{font-size:14px}
+.srv-stars{display:inline-flex;gap:1px;color:#cfd6dc}
+.srv-stars svg{width:18px;height:18px}
+.srv-stars .on{color:var(--orange)}
+.srv-stars .on svg{fill:currentColor}
+.srv-h{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.srv-h .who{flex:1;min-width:0;display:grid}
+.srv-h time{font-size:13px;color:var(--muted)}
+.srv .av{background:var(--blue-l);color:var(--blue-d)}
+.srv-t{font-size:15px;line-height:1.65;overflow-wrap:anywhere}
+.srv-ans{margin-top:14px;padding:14px 16px;border-radius:12px;background:var(--bg);border-left:3px solid var(--blue);font-size:14px}
+.srv-ans b{display:flex;align-items:center;gap:6px;color:var(--blue-d);margin-bottom:4px}
+.srv-form h2{font-size:20px;margin-bottom:8px}
+.srv-form .form{display:grid;gap:16px}
+.srv-lead{font-size:14px;margin-bottom:14px}
+.srv-form .note{margin-bottom:12px}
+.srv-msg:empty{display:none}
+.srv-rate{border:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}
+.srv-rate legend{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:6px;padding:0}
+.rate-in{display:inline-flex;flex-direction:row-reverse;gap:2px}
+.rate-in input{position:absolute;opacity:0;width:1px;height:1px}
+.rate-in label{cursor:pointer;color:#cfd6dc;padding:2px;border-radius:6px}
+.rate-in label svg{width:28px;height:28px}
+.rate-in input:checked~label,.rate-in label:hover,.rate-in label:hover~label{color:var(--orange)}
+.rate-in input:checked~label svg,.rate-in label:hover svg,.rate-in label:hover~label svg{fill:currentColor}
+.rate-in input:focus-visible+label{outline:3px solid rgba(11,127,193,.35)}
+.rate-clear{font-size:13px;color:var(--muted);cursor:pointer;text-decoration:underline dotted}
+#srv-r0:checked+.rate-clear{text-decoration:none;font-weight:700}
+#srv-r0:focus-visible+.rate-clear{outline:3px solid rgba(11,127,193,.35)}
+
+/* ---------- адаптив ---------- */
+@media (max-width:980px){
+  .auth{grid-template-columns:minmax(0,1fr)}
+  .auth-card,.auth-info{max-width:620px;width:100%}
+  .acc-side{grid-template-columns:minmax(0,1fr)}
+  .acc-user{display:none}
+  /* меню кабинета — «таблетки» в несколько строк: все пункты (и «Выйти») видны без прокрутки вбок */
+  .acc-nav{display:flex;flex-wrap:wrap;gap:4px;padding:6px}
+  .acc-nav a{white-space:nowrap;flex:1 1 auto;justify-content:center;padding:9px 12px}
+  .acc-nav .acc-out{border-top:0;margin-top:0;border-radius:10px}
+  .srv-layout .srv-side{order:2}
+}
+@media (max-width:680px){
+  .auth-card{padding:20px 18px}
+  .acc-2{grid-template-columns:minmax(0,1fr)}
+  .acc-f-half{max-width:none}
+  .acc-orders td{padding:12px 10px}
+  .acc-m-date{display:block}
+  .acc-items th:first-child,.acc-items td:first-child{display:none}
+  .acc-m-price{display:block}
+  .acc-items td,.acc-items th{padding:10px 8px}
+  .acc-sum{max-width:none}
+  .acc-actions{flex-direction:column}
+  .acc-actions .btn{justify-content:center}
+  .cmp-bar{gap:10px}
+  .cmp-bar .btn{margin-left:0}
+  .cmp-tbl th,.cmp-tbl td{width:170px;min-width:170px;padding:10px 8px}
+  .cmp-tbl .cmp-lab{width:104px;min-width:104px;font-size:12px}
+  .cmp-hint{display:none}
+  .cmp-card .buy{flex-direction:column}
+  .cmp-card .qty{justify-content:space-between}
+  .cmp-card .pr b{font-size:16px}
+  .cmp-card .ph{height:140px}
+  .cmp-tbl .cmp-card .ph img{max-height:122px}
+  .srv-sum{gap:14px}
+  .srv-sum .btn{width:100%;justify-content:center}
+  .rate-in label svg{width:32px;height:32px}
+}

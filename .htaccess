@@ -1,0 +1,16 @@
+# Если хостинг не позволяет сделать папку public/ корнем сайта (DocumentRoot),
+# положите проект целиком в public_html — этот файл перенаправит запросы в public/,
+# а служебные папки (app, config, storage, bin, database) закроет от доступа.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(app|bin|config|database|docs|lang|storage|tools|vendor)(/|$) - [F,L]
+    RewriteRule ^(\.git|\.env|composer\.(json|lock)) - [F,L]
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+# Без mod_rewrite сайт не работает, но служебные папки (сессии, логи, config) всё равно закрыты
+<IfModule !mod_rewrite.c>
+    <IfModule mod_alias.c>
+        RedirectMatch 403 (?i)^/(app|bin|config|database|docs|lang|storage|tools|vendor|\.git)(/|$)
+    </IfModule>
+</IfModule>

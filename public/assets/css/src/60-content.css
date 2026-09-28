@@ -1,0 +1,115 @@
+/* ==========================================================================
+   Контент: инфо-страницы (/o-kompanii/ …), «Контакты», блог, HTML-карта сайта
+   ========================================================================== */
+
+/* ---- инфо-страницы: меню слева, текст справа ---- */
+.cp-nav{padding:10px;position:sticky;top:96px}
+.cp-main{min-width:0;display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+/* отступы задаёт gap сетки — базовое .panel+.panel здесь не нужно */
+.cp-main .panel+.panel,.cp-cards .panel+.panel,.cp-row .panel+.panel,.bl-aside .panel+.panel{margin-top:0}
+.cp-content{max-width:none}
+
+/* Старый HTML из Webasyst: фиксированные ширины, таблицы, iframe — не должны ломать вёрстку */
+.prose{overflow-wrap:break-word;word-break:normal}
+.prose *{max-width:100%}
+.prose img{height:auto!important;display:inline-block}
+.prose iframe,.prose video,.prose embed,.prose object{max-width:100%}
+.prose iframe{width:100%;height:auto;aspect-ratio:4/3;border:0;border-radius:12px}
+.prose table{display:block;overflow-x:auto}
+.prose h1{font-size:24px;font-weight:800;margin:24px 0 10px;line-height:1.25}
+.prose center{display:block}
+.prose [style*="line-height: 32px"]{line-height:1.7!important}
+/* битые картинки старого контента скрывает onerror; фиксированные размеры из редактора — не больше колонки */
+.prose img{max-width:100%!important}
+
+/* ---- «Контакты» ---- */
+.cp-contacts{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+.cp-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.cp-card{display:flex;gap:14px;align-items:flex-start}
+.cp-card h2{font-size:15px;margin-bottom:4px}
+.cp-card p{color:var(--muted)}
+.cp-ic{width:46px;height:46px;border-radius:14px;background:var(--blue-l);color:var(--blue);display:grid;place-items:center;flex:none}
+.cp-tel{display:block;font-size:18px;font-weight:800;color:var(--ink);line-height:1.5}
+.cp-tel:hover{color:var(--blue)}
+.cp-social{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-weight:700;color:var(--muted)}
+.cp-row{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;align-items:stretch}
+.cp-row.cp-row-1{grid-template-columns:minmax(0,1fr)}
+.cp-mapbox{padding:0;overflow:hidden;min-height:380px;display:flex}
+.cp-map{width:100%;min-height:380px;border:0;display:block;flex:1}
+.cp-formbox h2{font-size:20px;margin-bottom:4px}
+.cp-formbox .muted{font-size:14px;margin-bottom:14px}
+
+/* ---- «Статьи»: список статей блога под текстом ---- */
+.cp-posts-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:8px 0 14px;flex-wrap:wrap}
+.cp-posts-head h2{font-size:22px;font-weight:800}
+
+/* ---- блог ---- */
+.bl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}
+.bl-list-page{padding:10px 0 4px}
+.bl-card{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .2s}
+.bl-card:hover{box-shadow:var(--shadow)}
+.bl-ph{display:block;aspect-ratio:16/9;background:var(--blue-l);overflow:hidden;position:relative}
+/* заглушка всегда под фото: если картинка не загрузилась (onerror убирает её), видна иконка */
+.bl-ph img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--blue-l)}
+.bl-noimg{display:grid;place-items:center;width:100%;height:100%;color:var(--blue)}
+.bl-lead{color:var(--muted);margin-top:4px;max-width:760px}
+.bl-b{padding:18px 20px 20px;display:flex;flex-direction:column;gap:8px;flex:1}
+.bl-date{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);font-weight:600}
+.bl-t{font-size:18px;font-weight:800;line-height:1.3}
+.bl-t a:hover{color:var(--blue)}
+.bl-b p{color:var(--muted);font-size:14px;flex:1}
+.bl-more{align-self:flex-start}
+.bl-meta{margin-top:8px}
+.bl-text{max-width:none}
+.bl-aside{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;position:sticky;top:96px;min-width:0}
+.bl-others h2,.bl-cta h2{font-size:18px;margin-bottom:10px}
+.bl-others ul{list-style:none;margin-bottom:14px}
+.bl-others li{padding:10px 0;border-bottom:1px solid var(--line);display:grid;gap:2px}
+.bl-others li:last-child{border-bottom:0}
+.bl-others a{font-weight:700;line-height:1.35}
+.bl-others a:hover{color:var(--blue)}
+.bl-others small{color:var(--muted);font-size:12px}
+.bl-cta{background:linear-gradient(135deg,var(--blue-l),#fff)}
+.bl-cta p{color:var(--muted);font-size:14px;margin-bottom:14px}
+
+/* ---- HTML-карта сайта ---- */
+.sm-map{display:grid;gap:26px}
+.sm-sec h2{font-size:20px;font-weight:800;margin-bottom:10px}
+.sm-sec ul{list-style:none;display:grid;gap:6px}
+.sm-sec a{color:var(--ink);font-weight:600}
+.sm-sec a:hover{color:var(--blue)}
+.sm-tree ul ul{margin:6px 0 4px 18px;padding-left:12px;border-left:2px solid var(--line)}
+.sm-tree ul ul a{font-weight:500}
+.sm-tree>ul{columns:2;column-gap:28px;display:block}
+.sm-tree>ul>li{break-inside:avoid;margin-bottom:12px}
+.sm-cols{display:block!important;columns:4;column-gap:20px}
+.sm-cols li{margin-bottom:6px;break-inside:avoid}
+
+@media (max-width:1180px){
+  .cp-cards{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .sm-cols{columns:3}
+}
+@media (max-width:980px){
+  /* меню инфо-страниц — горизонтальная лента над текстом */
+  .cp-nav{position:static;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:8px}
+  .cp-nav::-webkit-scrollbar{display:none}
+  .cp-nav a{white-space:nowrap;flex:none;padding:8px 14px;background:var(--bg)}
+  .cp-row{grid-template-columns:minmax(0,1fr)}
+  .bl-aside{position:static}
+  .sm-tree>ul{columns:1}
+}
+@media (max-width:680px){
+  .cp-cards{grid-template-columns:minmax(0,1fr)}
+  .cp-mapbox,.cp-map{min-height:300px}
+  .cp-tel{font-size:17px}
+  .bl-grid{grid-template-columns:minmax(0,1fr);gap:14px}
+  /* на телефоне пустая заглушка фото (картинки нет или она битая — onerror её убрал) только удлиняет список */
+  .bl-ph:not(:has(img)){display:none}
+  /* отступы-«центровка» из старого редактора (margin-left: 400px и т.п.) на телефоне не нужны */
+  .prose [style*="margin-left"],.prose [style*="padding-left"]{margin-left:0!important;padding-left:0!important}
+  .prose [style*="width:"],.prose [style*="width: "]{width:auto!important}
+  /* выравнивание по ширине на узком экране даёт «реки» пробелов */
+  .prose [align="justify"],.prose [style*="justify"]{text-align:left!important}
+  .sm-cols{columns:2}
+  .prose{font-size:15px}
+}

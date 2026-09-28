@@ -1,0 +1,127 @@
+/* Админка → SEO-обзор. Дополняет admin.css (card, stats, chip, tabs, grid, seo-dot, seo-tally, serp) —
+   здесь только то, чего там нет: таблица с группами (как .seo-table в ARG FLEX), состав sitemap, полосы title/description. */
+
+/* шапка: форма «Пересчитать» в ряду кнопок */
+.seo-refresh{display:inline-flex;margin:0}
+
+/* состав sitemap.xml */
+.seo-map{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin:14px 0 4px}
+.seo-map a{display:block;border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--steel);font-size:12.5px;font-weight:600;line-height:1.3}
+.seo-map a:hover{border-color:var(--brand);text-decoration:none}
+.seo-map b{display:block;color:var(--ink);font-size:1.15rem;font-weight:800;letter-spacing:-.02em;margin-bottom:2px}
+
+/* полосы: доля состояний у title и у description */
+.seo-split{display:grid;gap:10px;margin:16px 0 4px}
+.seo-split-row{display:grid;grid-template-columns:92px minmax(0,1fr);gap:4px 12px;align-items:center}
+.seo-split-lbl{font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+.seo-split-row small{grid-column:2;color:var(--steel);font-size:12px}
+.seo-bar{display:flex;height:10px;border-radius:99px;overflow:hidden;background:var(--line-2)}
+.seo-bar i{display:block;height:100%;min-width:3px}
+.seo-bar i.ok{background:var(--ok)}.seo-bar i.warn{background:var(--warn)}.seo-bar i.auto{background:#c7d0de}.seo-bar i.none{background:var(--bad)}
+
+/* итоги: счётчики-ссылки на фильтр таблицы */
+a.seo-count:hover{text-decoration:none;color:var(--ink)}
+
+/* левая колонка верхнего блока: итоги + украинская версия */
+.seo-main{min-width:0}
+.seo-main > .card:last-child{margin-bottom:0}
+
+/* покрытие украинской версии */
+.seo-uk .pad > .muted{font-size:14px}
+.seo-uk .seo-tally{margin-top:8px}
+.seo-cover td{vertical-align:top}
+.seo-cover td:nth-child(3),.seo-cover td:nth-child(4){min-width:190px;width:36%}
+.seo-cover-cell{display:flex;align-items:center;gap:10px}
+.seo-cover-cell .seo-bar{flex:1;min-width:80px}
+.seo-cover-cell b{font-size:13.5px;min-width:38px;text-align:right}
+.seo-cover-sum td{background:#fafbfd}
+.seo-uk-foot{border-top:1px solid var(--line);padding-top:12px}
+.seo-uk-foot .hint{margin:0 0 6px}
+.seo-uk-foot .seo-dot{width:8px;height:8px;margin:0 2px 0 6px}
+.seo-uk-foot .seo-dot:first-child{margin-left:0}
+
+/* украинский вариант шаблона и его результат */
+.seo-lang{display:inline-block;flex:none;font:700 9.5px var(--mono);letter-spacing:.08em;color:var(--steel);border:1px solid var(--line);
+  border-radius:4px;padding:1px 4px;line-height:1.3;margin-right:8px;vertical-align:1px}
+.seo-uk-tpl{margin-top:6px}
+.seo-uk-tpl em.warn{font-style:normal;font-size:12px;font-weight:700;color:#b26b00}
+.seo-uk-res{display:flex;align-items:flex-start;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.seo-uk-res > div{min-width:0}
+.seo-uk-res em{display:block;margin-left:17px;font-style:normal;font-size:11.5px;color:var(--steel)}
+.seo-uk-res em.warn{color:#b26b00;font-weight:700}
+/* украинский результат — одной строкой (полный текст во всплывающей подсказке) */
+.seo-wrap .seo-uk-res .seo-line{align-items:center}
+.seo-wrap .seo-uk-res .seo-line .seo-dot{margin-top:0}
+.seo-wrap .seo-uk-res .seo-line > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.seo-uk-res .seo-lang{margin-top:2px}
+
+/* переключатель версии сайта над таблицей */
+.seo-langs{margin:-6px 0 14px}
+.seo-langs-hint{margin:-6px 0 14px}
+
+/* служебное */
+.seo-service h3:first-of-type{margin-top:0}
+.seo-service p{font-size:13.5px;color:var(--ink-2)}
+.seo-service .flash{font-size:13px;margin-bottom:14px}
+.seo-service code{word-break:break-all}
+.seo-robots{margin:-4px 0 6px}
+.seo-robots summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--brand)}
+.seo-robots .log{margin:8px 0 0;max-height:260px;overflow:auto}
+
+/* шаблоны: полная таблица под спойлером */
+.seo-tpl-all > summary{padding:14px 20px;border-top:1px solid var(--line);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--brand)}
+.seo-tpl-all > summary .muted{font-weight:500}
+.seo-tpl-all[open] > summary{border-bottom:1px solid var(--line)}
+
+/* шаблоны: пример и превью */
+.seo-sample input[type=number]{width:130px}
+.seo-previews .lbl{margin-bottom:6px}
+.seo-previews .serp{margin-bottom:6px}
+.seo-previews .hint{margin-bottom:6px}
+
+/* вкладки групп над таблицей и фильтры */
+.seo-groups{scroll-margin-top:16px}
+.seo-filters{display:flex;flex-wrap:wrap;gap:8px}
+.seo-filters .chip .seo-dot{width:8px;height:8px}
+.seo-filters .chip.on .seo-dot{box-shadow:0 0 0 2px #fff}
+.seo-bar-pad{border-bottom:1px solid var(--line)}
+.seo-search{margin:14px 0 0}
+.seo-search input[type=search]{width:320px;max-width:100%}
+
+/* таблица: группы, ячейки title/description */
+.seo-table td{vertical-align:top}
+.seo-table .seo-page{min-width:220px;max-width:340px}
+.seo-table .seo-page b{display:block;overflow-wrap:anywhere}
+.seo-path{color:var(--steel);font:12px var(--mono);overflow-wrap:anywhere}
+.seo-path:hover{color:var(--brand)}
+.seo-closed{font-style:normal;font-weight:700;color:var(--bad)}
+.seo-cell{min-width:210px}
+.seo-line{display:flex;align-items:center;gap:8px;min-width:0}
+.seo-line > span{min-width:0;max-width:270px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+.seo-line > span.auto{color:var(--steel);font-style:italic}
+.seo-cell > em{display:block;margin-left:17px;font-style:normal;font-size:11.5px;color:var(--steel)}
+.seo-cell > em.warn{color:#b26b00;font-weight:700}
+.seo-wrap{max-width:560px}
+.seo-wrap .seo-line{align-items:flex-start}
+.seo-wrap .seo-line .seo-dot{margin-top:6px}
+.seo-wrap .seo-line > span{white-space:normal;max-width:none}
+.seo-tpl .seo-fld{min-width:130px;max-width:200px}
+.seo-group td{background:#fafbfd;font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--steel);padding:9px 16px}
+.seo-group td span{letter-spacing:0;font-weight:600;opacity:.8;margin-left:4px}
+.seo-acts{white-space:nowrap}
+.seo-acts .btn + .btn{margin-left:6px}
+.seo-acts small{white-space:normal;max-width:180px;margin-left:auto}
+.seo-more td{background:#fffaf7;font-size:13.5px;color:var(--ink-2)}
+.seo-empty{padding:26px 16px!important;color:var(--steel)}
+.seo-pager .pager{margin:0}
+.seo-tpl .seo-code{min-width:260px;max-width:420px}
+.seo-tpl .seo-code code{white-space:normal;word-break:break-word;background:none;padding:0;color:var(--ink-2)}
+
+@media(max-width:640px){
+  .seo-map{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .seo-split-row{grid-template-columns:1fr}
+  .seo-split-row small{grid-column:1}
+  .seo-search input[type=search]{width:100%}
+  .seo-search .btn{flex:1}
+  .seo-sample input[type=number]{width:100%}
+}

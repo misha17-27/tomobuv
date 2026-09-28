@@ -1,0 +1,28 @@
+# секреты и локальные настройки
+/config/config.php
+.env
+
+# данные сайта (не код)
+/storage/*
+!/storage/.gitkeep
+/public/wa-data/
+*.sql.gz
+*.sql
+!/database/schema.sql
+
+# системное
+.DS_Store
+Thumbs.db
+node_modules/
+/tools/shots/
+.idea/
+.vscode/
+/.claude/
+!/database/migrations/*.sql
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# случайные файлы разработки
+/*.html
+__pycache__/
+*.pyc

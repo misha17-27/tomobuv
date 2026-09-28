@@ -1,0 +1,70 @@
+/* Админка, раздел «Промокоды». Основа — компоненты admin.css (stats, tabs, filter-bar, bulk-bar, grid, pill, fld, pair,
+   chip, subtabs, detail, meter, bars, savebar, empty-card); здесь только то, чего там нет. Свои классы — с префиксом cp-. */
+
+/* ---------- список ---------- */
+.cp-code{font:700 14px var(--mono);letter-spacing:.04em;color:var(--ink);white-space:nowrap}
+a.cp-code:hover{color:var(--brand)}
+.cp-code.big{white-space:normal;word-break:break-all;font-size:20px;background:var(--card);border:1.5px dashed var(--line);border-radius:9px;padding:4px 12px}
+.cp-list td{vertical-align:top}
+.cp-list td.tick{padding-top:14px}
+.cp-meter{margin-top:6px;width:90px;min-width:0}
+.cp-found{margin-left:auto;font-size:13.5px}
+.cp-site{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--steel)}
+.cp-site-off{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.cp-site-off form{margin:0}
+
+/* ---------- форма ---------- */
+fieldset.cp-fs{border:0;margin:0;padding:0;min-width:0}
+/* обёртки полей внутри .fld — не подписи: правило admin.css .fld > span:not(.hint) (подпись КАПСОМ, display:block)
+   перебивается только селектором не слабее (0,3,1) */
+.fld > span.cp-codebox:not(.hint),.fld > span.cp-unit:not(.hint){display:flex;gap:8px;align-items:stretch;font:inherit;letter-spacing:normal;text-transform:none;color:inherit}
+.cp-codebox input{flex:1;min-width:0}
+input.cp-code-in{font:700 16px var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.cp-unit{position:relative}
+.cp-unit input{flex:1;min-width:0;padding-right:50px}
+.cp-unit b{position:absolute;right:13px;top:50%;transform:translateY(-50%);font-weight:600;font-size:13.5px;color:var(--steel);pointer-events:none}
+.cp-err{color:var(--bad);font-size:12.5px;font-weight:600}
+.fld input[aria-invalid=true],.fld select[aria-invalid=true]{border-color:var(--bad)}
+.cp-quick{display:flex;gap:6px;flex-wrap:wrap;margin:-2px 0 4px}
+button.chip{cursor:pointer;font-family:inherit;line-height:1.2}
+.cp-used{margin:2px 0 8px;font-size:14px}
+.cp-lead{margin:0 0 16px}
+.cp-del-hint{margin:0 0 12px}
+
+/* выбор категорий / брендов / товаров; карточка с подсказками не обрезает выпадающий список (в admin.css у .card с .card-hd overflow:hidden) */
+.card:has(.cp-pick){overflow:visible}
+.cp-pick{margin-bottom:18px}
+.cp-pick:last-child{margin-bottom:0}
+.cp-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cp-chips:empty{display:none}
+.cp-chips .chip{max-width:100%;padding:5px 6px 5px 12px;line-height:1.35}
+.cp-x{flex:none;display:grid;place-items:center;width:20px;height:20px;border:0;border-radius:50%;background:rgba(0,0,0,.14);
+  color:inherit;font:600 15px/1 var(--font);cursor:pointer;padding:0}
+.cp-x:hover,.cp-x:focus-visible{background:rgba(0,0,0,.3)}
+.cp-search{position:relative}
+.cp-drop{position:absolute;z-index:25;left:0;right:0;top:calc(100% + 4px);margin:0;padding:4px;list-style:none;background:var(--card);
+  border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px -14px rgba(11,18,32,.35);max-height:320px;overflow-y:auto}
+.cp-drop li{padding:8px 10px;border-radius:7px;cursor:pointer;font-size:14px;line-height:1.35}
+.cp-drop li small{display:block;color:var(--steel);font-size:12px;margin-top:1px}
+.cp-drop li.on,.cp-drop li:hover{background:var(--brand-l)}
+.cp-drop li[aria-disabled=true]{opacity:.5;cursor:default;background:none}
+.cp-drop li.cp-none{color:var(--steel);cursor:default;background:none}
+
+/* сводка в правой колонке */
+.cp-summary{margin-top:14px;padding-top:4px;border-top:1px solid var(--line)}
+.cp-summary:empty{display:none}
+.cp-summary .detail > div{grid-template-columns:92px minmax(0,1fr)}
+.cp-summary .detail dd{font-size:14px}
+
+/* ---------- применения ---------- */
+.subtabs a i.cp-cnt{font-style:normal;opacity:.65;margin-left:3px}
+.cp-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:-6px 0 18px}
+.cp-head b{font-size:17px}
+.stat span small.cp-of{font-size:1rem;font-weight:700;color:var(--steel)}
+
+@media(max-width:640px){
+  .cp-found{margin-left:0}
+  .fld > span.cp-codebox:not(.hint){flex-wrap:wrap}
+  .cp-codebox .btn{width:100%}
+  .cp-summary .detail > div{grid-template-columns:1fr}
+}

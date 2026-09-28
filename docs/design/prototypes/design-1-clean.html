@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Том Обувь — оптом от производителя | Дизайн 1</title>
+<meta name="description" content="Оптовый интернет-магазин детской, подростковой, мужской и женской обуви в Одессе. Работаем с 2011 года.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --blue:#0b7fc1; --blue-d:#075e90; --blue-l:#e8f4fb; --orange:#ff7a1a; --orange-d:#e5630a;
+  --ink:#14212b; --muted:#5d6b76; --line:#e3e8ec; --bg:#f5f7f9; --white:#fff; --green:#1a9d5b;
+  --r:14px; --shadow:0 6px 24px rgba(20,33,43,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Manrope,system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:15px;line-height:1.5}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+img{max-width:100%;display:block}
+.wrap{max-width:1320px;margin:0 auto;padding:0 20px}
+svg.i{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* topbar */
+.topbar{background:var(--ink);color:#c9d3da;font-size:13px}
+.topbar .wrap{display:flex;align-items:center;gap:22px;height:40px}
+.topbar nav{display:flex;gap:20px;flex:1}
+.topbar a:hover{color:#fff}
+.topbar .cur{display:flex;gap:2px;background:#24333f;border-radius:8px;padding:2px}
+.topbar .cur button{padding:3px 8px;border-radius:6px;font-size:12px;font-weight:600}
+.topbar .cur button.on{background:var(--blue);color:#fff}
+.topbar .cb{color:#fff;font-weight:600;display:flex;gap:6px;align-items:center}
+
+/* header */
+header.main{background:#fff;position:sticky;top:0;z-index:50;border-bottom:1px solid var(--line)}
+header.main .wrap{display:flex;align-items:center;gap:20px;height:78px}
+.logo img{height:44px;width:auto}
+.catbtn{display:flex;align-items:center;gap:10px;background:var(--blue);color:#fff;font-weight:700;padding:0 20px;height:48px;border-radius:12px;white-space:nowrap}
+.catbtn:hover{background:var(--blue-d)}
+.search{flex:1;position:relative}
+.search input{width:100%;height:48px;border:2px solid var(--line);border-radius:12px;padding:0 50px 0 16px;font:inherit;background:var(--bg)}
+.search input:focus{outline:none;border-color:var(--blue);background:#fff}
+.search .go{position:absolute;right:6px;top:6px;width:36px;height:36px;border-radius:9px;background:var(--blue);color:#fff;display:grid;place-items:center}
+.search .go svg{width:18px;height:18px}
+.suggest{position:absolute;left:0;right:0;top:54px;background:#fff;border-radius:12px;box-shadow:var(--shadow);border:1px solid var(--line);display:none;overflow:hidden}
+.suggest.show{display:block}
+.suggest a{display:flex;gap:12px;align-items:center;padding:8px 12px}
+.suggest a:hover{background:var(--bg)}
+.suggest img{width:44px;height:44px;object-fit:contain;background:#fff;border-radius:6px}
+.suggest .all{justify-content:center;color:var(--blue);font-weight:700;border-top:1px solid var(--line)}
+.hicons{display:flex;gap:6px}
+.hicon{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--muted);padding:6px 10px;border-radius:10px}
+.hicon:hover{background:var(--bg);color:var(--ink)}
+.hicon .n{position:absolute;top:0;right:8px;min-width:18px;height:18px;padding:0 5px;background:var(--orange);color:#fff;border-radius:9px;font-size:11px;font-weight:700;display:grid;place-items:center}
+.hicon .n:empty,.hicon .n[data-z]{display:none}
+.cartbtn{display:flex;align-items:center;gap:10px;padding:6px 14px 6px 10px;border-radius:12px;background:var(--blue-l);color:var(--blue-d);position:relative}
+.cartbtn b{display:block;font-size:15px}
+.cartbtn small{display:block;font-size:12px;color:var(--muted)}
+.cartbtn .n{position:absolute;top:0;left:26px;min-width:18px;height:18px;padding:0 5px;background:var(--orange);color:#fff;border-radius:9px;font-size:11px;font-weight:700;display:grid;place-items:center}
+.burger{display:none}
+
+/* nav row */
+.navrow{background:#fff;border-bottom:1px solid var(--line)}
+.navrow .wrap{display:flex;gap:4px;height:50px;align-items:center;overflow-x:auto;scrollbar-width:none}
+.navrow a{padding:8px 14px;border-radius:9px;font-weight:600;white-space:nowrap;font-size:14px}
+.navrow a:hover{background:var(--bg);color:var(--blue)}
+.navrow a.hot{color:#fff;background:var(--orange)}
+
+/* mega */
+.mega{position:absolute;left:0;right:0;top:100%;background:#fff;box-shadow:0 20px 40px rgba(20,33,43,.15);display:none;border-top:1px solid var(--line)}
+.mega.show{display:block}
+.mega .wrap{display:grid;grid-template-columns:260px 1fr;min-height:420px;padding:0 20px}
+.mega .l{border-right:1px solid var(--line);padding:16px 0}
+.mega .l a{display:flex;justify-content:space-between;align-items:center;padding:11px 16px;border-radius:10px;font-weight:600;margin-right:14px}
+.mega .l a.on,.mega .l a:hover{background:var(--blue-l);color:var(--blue-d)}
+.mega .l a.hot{color:var(--orange)}
+.mega .r{padding:22px 28px;columns:3;column-gap:28px}
+.mega .r .g{break-inside:avoid;margin-bottom:16px}
+.mega .r .g>a{font-weight:700;display:block;margin-bottom:6px}
+.mega .r .g>a:hover{color:var(--blue)}
+.mega .chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.chip:hover{border-color:var(--blue);color:var(--blue)}
+
+/* alphabet */
+.alpha{background:#fff;border-bottom:1px solid var(--line);font-size:13px}
+.alpha .wrap{display:flex;gap:4px;align-items:center;height:42px;overflow-x:auto;scrollbar-width:none}
+.alpha span{color:var(--muted);margin-right:8px;font-weight:600;white-space:nowrap}
+.alpha a{min-width:24px;height:24px;display:grid;place-items:center;border-radius:6px;font-weight:600;color:var(--muted)}
+.alpha a:hover{background:var(--blue);color:#fff}
+.alpha .all{margin-left:auto;color:var(--blue);white-space:nowrap;font-weight:700;width:auto;padding:0 6px}
+
+/* hero */
+.hero{padding:24px 0}
+.hero .wrap{display:grid;grid-template-columns:1.6fr 1fr;gap:20px}
+.slider{position:relative;border-radius:22px;overflow:hidden;background:linear-gradient(120deg,#0b7fc1,#0a5d8f);color:#fff;min-height:380px;display:flex}
+.slide{position:absolute;inset:0;display:grid;grid-template-columns:1.1fr 1fr;align-items:center;opacity:0;transition:opacity .6s}
+.slide.on{opacity:1;position:relative}
+.slide .txt{padding:44px}
+.slide .tag{display:inline-block;background:rgba(255,255,255,.18);padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:16px}
+.slide h1{font-size:40px;line-height:1.1;font-weight:800;margin-bottom:14px;letter-spacing:-.5px}
+.slide p{opacity:.9;margin-bottom:24px;max-width:420px}
+.slide .pic{height:100%;display:flex;align-items:center;justify-content:center;padding:20px}
+.slide .pic img{border-radius:16px;max-height:300px;object-fit:cover;box-shadow:0 20px 40px rgba(0,0,0,.25)}
+.btn{display:inline-flex;align-items:center;gap:8px;height:48px;padding:0 24px;border-radius:12px;font-weight:700}
+.btn-o{background:var(--orange);color:#fff}.btn-o:hover{background:var(--orange-d)}
+.btn-w{background:#fff;color:var(--blue-d)}
+.btn-b{background:var(--blue);color:#fff}.btn-b:hover{background:var(--blue-d)}
+.dots{position:absolute;bottom:20px;left:44px;display:flex;gap:8px;z-index:2}
+.dots button{width:28px;height:6px;border-radius:3px;background:rgba(255,255,255,.35)}
+.dots button.on{background:#fff;width:44px}
+.side{display:grid;grid-template-rows:1fr 1fr;gap:20px}
+.side .card{border-radius:22px;padding:28px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between}
+.side .c1{background:#fff3e8}
+.side .c2{background:#fff;border:1px solid var(--line)}
+.side h3{font-size:22px;line-height:1.2;font-weight:800;max-width:220px}
+.side .big{font-size:48px;font-weight:800;color:var(--orange);line-height:1}
+.side .c1 img{position:absolute;right:-10px;bottom:-10px;width:170px;transform:rotate(-12deg);mix-blend-mode:multiply}
+.stats{display:flex;gap:26px}
+.stats b{font-size:26px;font-weight:800;color:var(--blue);display:block;line-height:1.1}
+.stats small{color:var(--muted);font-size:12px}
+
+/* features */
+.features .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.feat{background:#fff;border-radius:var(--r);padding:20px;display:flex;gap:14px;align-items:flex-start;border:1px solid var(--line)}
+.feat:hover{border-color:var(--blue)}
+.feat .ic{width:46px;height:46px;border-radius:12px;background:var(--blue-l);color:var(--blue);display:grid;place-items:center;flex:none}
+.feat b{display:block;margin-bottom:2px}
+.feat p{font-size:13px;color:var(--muted);line-height:1.4}
+
+section.sec{padding:40px 0 10px}
+.sh{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:20px;flex-wrap:wrap}
+.sh h2{font-size:28px;font-weight:800;letter-spacing:-.3px}
+.sh .more{color:var(--blue);font-weight:700;display:flex;align-items:center;gap:4px}
+.tabs{display:flex;gap:6px;background:#fff;padding:4px;border-radius:12px;border:1px solid var(--line)}
+.tabs button{padding:8px 16px;border-radius:9px;font-weight:700;color:var(--muted);font-size:14px}
+.tabs button.on{background:var(--blue);color:#fff}
+
+/* categories */
+.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.cat{background:#fff;border-radius:18px;overflow:hidden;border:1px solid var(--line);transition:.2s;display:flex;flex-direction:column}
+.cat:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.cat .ph{aspect-ratio:4/3;background:var(--blue-l);display:grid;place-items:center;overflow:hidden}
+.cat .ph img{width:100%;height:100%;object-fit:cover}
+.cat .b{padding:16px}
+.cat h3{font-size:18px;font-weight:800;margin-bottom:8px}
+.cat .chips{display:flex;flex-wrap:wrap;gap:6px}
+
+/* products */
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+.pc{background:#fff;border-radius:16px;border:1px solid var(--line);display:flex;flex-direction:column;position:relative;transition:.2s}
+.pc:hover{box-shadow:var(--shadow);border-color:transparent}
+.pc .ph{aspect-ratio:1;padding:14px;display:grid;place-items:center;position:relative}
+.pc .ph img{max-height:100%;object-fit:contain}
+.pc .badge{position:absolute;top:12px;left:12px;background:var(--orange);color:#fff;font-weight:800;font-size:12px;padding:3px 8px;border-radius:7px}
+.pc .badge.nw{background:var(--green)}
+.pc .acts{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px}
+.pc .acts button{width:34px;height:34px;border-radius:10px;background:#fff;border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
+.pc .acts button svg{width:18px;height:18px}
+.pc .acts button:hover{color:var(--blue);border-color:var(--blue)}
+.pc .acts button.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.pc .acts button.on.fav{background:#e8445a;border-color:#e8445a}
+.pc .b{padding:0 14px 14px;display:flex;flex-direction:column;flex:1}
+.pc .nm{font-weight:700;line-height:1.3;margin-bottom:6px;min-height:2.6em}
+.pc .nm:hover{color:var(--blue)}
+.pc .meta{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+.pc .meta span{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--bg);color:var(--muted)}
+.pc .stock{font-size:12px;color:var(--green);font-weight:700;display:flex;align-items:center;gap:5px;margin-bottom:6px}
+.pc .stock::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green)}
+.pc .pr{margin-top:auto}
+.pc .pr .box{font-size:20px;font-weight:800}
+.pc .pr .old{font-size:13px;color:var(--muted);text-decoration:line-through;margin-left:6px;font-weight:600}
+.pc .pr .pair{font-size:12px;color:var(--muted)}
+.pc .buy{display:flex;gap:6px;margin-top:12px}
+.qty{display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;height:40px}
+.qty button{width:28px;height:100%;font-weight:800;color:var(--muted)}
+.qty input{width:28px;border:0;text-align:center;font:inherit;font-weight:700}
+.pc .buy .btn{flex:1;height:40px;padding:0 10px;justify-content:center;font-size:14px}
+
+/* women block */
+.split{display:grid;grid-template-columns:300px 1fr;gap:20px}
+.promo-col{border-radius:20px;background:linear-gradient(160deg,#ffe3d1,#ffc7a6);padding:28px;display:flex;flex-direction:column;justify-content:space-between;min-height:360px;overflow:hidden;position:relative}
+.promo-col h3{font-size:26px;font-weight:800;line-height:1.15}
+.promo-col .subl{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0}
+.promo-col .subl a{background:rgba(255,255,255,.7);padding:5px 11px;border-radius:20px;font-size:13px;font-weight:600}
+.promo-col .subl a:hover{background:#fff}
+.split .grid{grid-template-columns:repeat(4,1fr)}
+
+/* banners */
+.banners{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.bnr{border-radius:20px;overflow:hidden;position:relative;min-height:180px;display:flex;align-items:center;padding:30px;color:#fff}
+.bnr img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(.55)}
+.bnr div{position:relative}
+.bnr h3{font-size:24px;font-weight:800;margin-bottom:10px}
+
+/* brands */
+.brands{display:grid;grid-template-columns:repeat(8,1fr);gap:12px}
+.brands a{background:#fff;border:1px solid var(--line);border-radius:12px;height:64px;display:grid;place-items:center;font-weight:800;color:var(--muted);font-size:14px}
+.brands a:hover{color:var(--blue);border-color:var(--blue)}
+
+/* articles + subscribe */
+.two{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.art{background:#fff;border-radius:18px;padding:24px;border:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.art small{color:var(--blue);font-weight:700}
+.art h3{font-size:18px;line-height:1.3}
+.art p{color:var(--muted);font-size:14px;flex:1}
+.art a.more{color:var(--blue);font-weight:700}
+.sub{background:var(--blue);color:#fff;border-radius:18px;padding:28px;display:flex;flex-direction:column;gap:12px}
+.sub h3{font-size:22px;line-height:1.2}
+.sub p{opacity:.85;font-size:14px}
+.sub form{display:flex;flex-direction:column;gap:8px;margin-top:auto}
+.sub input{height:46px;border-radius:10px;border:0;padding:0 14px;font:inherit}
+
+/* seo */
+.seo{background:#fff;border-radius:18px;padding:28px;border:1px solid var(--line);color:var(--muted);font-size:14px}
+.seo h2{color:var(--ink);font-size:20px;margin-bottom:8px}
+
+/* footer */
+footer{background:var(--ink);color:#b8c4cc;margin-top:50px;padding:50px 0 24px;font-size:14px}
+footer .cols{display:grid;grid-template-columns:1.4fr 1fr 1fr 1.2fr;gap:30px}
+footer h4{color:#fff;font-size:14px;letter-spacing:.5px;text-transform:uppercase;margin-bottom:14px}
+footer li{list-style:none;margin-bottom:8px}
+footer a:hover{color:#fff}
+footer .ph{font-size:20px;color:#fff;font-weight:800;display:block}
+footer .logo img{height:40px;filter:brightness(0) invert(1);margin-bottom:14px}
+footer .soc{display:flex;gap:8px;margin-top:14px}
+footer .soc a{width:38px;height:38px;border-radius:10px;background:#24333f;display:grid;place-items:center}
+footer .soc a:hover{background:var(--blue)}
+footer .bottom{border-top:1px solid #2b3a46;margin-top:36px;padding-top:20px;display:flex;justify-content:space-between;font-size:13px}
+
+/* drawer & modal */
+.ov{position:fixed;inset:0;background:rgba(10,20,28,.5);z-index:90;opacity:0;pointer-events:none;transition:.25s}
+.ov.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:100%;background:#fff;z-index:100;transform:translateX(100%);transition:.3s;display:flex;flex-direction:column}
+.drawer.show{transform:none}
+.drawer.left{left:0;right:auto;transform:translateX(-100%)}
+.drawer.left.show{transform:none}
+.drawer .hd{display:flex;justify-content:space-between;align-items:center;padding:20px;border-bottom:1px solid var(--line)}
+.drawer .hd h3{font-size:20px}
+.drawer .bd{flex:1;overflow:auto;padding:12px 20px}
+.drawer .ft{padding:20px;border-top:1px solid var(--line)}
+.ci{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);align-items:center}
+.ci img{width:64px;height:64px;object-fit:contain;border:1px solid var(--line);border-radius:10px}
+.ci .t{flex:1;font-size:14px}
+.ci .t b{display:block}
+.ci .t small{color:var(--muted)}
+.empty{text-align:center;color:var(--muted);padding:60px 0}
+.tot{display:flex;justify-content:space-between;font-size:18px;font-weight:800;margin-bottom:14px}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-46%);background:#fff;border-radius:20px;padding:30px;width:420px;max-width:calc(100% - 32px);z-index:100;opacity:0;pointer-events:none;transition:.25s}
+.modal.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%)}
+.modal h3{font-size:22px;margin-bottom:6px}
+.modal p{color:var(--muted);margin-bottom:16px;font-size:14px}
+.modal input{width:100%;height:48px;border:2px solid var(--line);border-radius:12px;padding:0 14px;font:inherit;margin-bottom:10px}
+.modal .x{position:absolute;right:16px;top:16px}
+.mnav a{display:block;padding:12px 0;border-bottom:1px solid var(--line);font-weight:600}
+.mnav details summary{padding:12px 0;border-bottom:1px solid var(--line);font-weight:700;list-style:none;display:flex;justify-content:space-between}
+.mnav details a{padding-left:14px;font-weight:500}
+#toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-weight:600;z-index:200;opacity:0;transition:.25s;pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+.totop{position:fixed;right:20px;bottom:20px;width:48px;height:48px;border-radius:14px;background:var(--blue);color:#fff;display:grid;place-items:center;z-index:40;opacity:0;pointer-events:none;transition:.25s}
+.totop.show{opacity:1;pointer-events:auto}
+
+@media (max-width:1180px){.grid{grid-template-columns:repeat(4,1fr)}.split .grid{grid-template-columns:repeat(3,1fr)}.brands{grid-template-columns:repeat(4,1fr)}}
+@media (max-width:980px){
+  .topbar nav{display:none}.hero .wrap{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr;grid-template-rows:auto}
+  .features .wrap{grid-template-columns:1fr 1fr}.cats{grid-template-columns:1fr 1fr}.grid{grid-template-columns:repeat(3,1fr)}
+  .split{grid-template-columns:1fr}.two{grid-template-columns:1fr}footer .cols{grid-template-columns:1fr 1fr}
+  .hicon span.l,.cartbtn .t{display:none}.catbtn span{display:none}.catbtn{padding:0 14px}
+}
+@media (max-width:680px){
+  .wrap{padding:0 16px}
+  header.main .wrap{flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px;gap:10px}
+  .burger{display:grid;place-items:center;width:44px;height:44px}
+  .catbtn{display:none}.logo{flex:1}.logo img{height:34px}
+  .search{order:5;flex-basis:100%}
+  .hicon.cmp{display:none}
+  .slide{grid-template-columns:1fr}.slide .pic{display:none}.slide .txt{padding:28px}.slide h1{font-size:28px}
+  .dots{left:28px}.side{grid-template-columns:1fr}
+  .features .wrap{grid-template-columns:1fr}.grid,.split .grid{grid-template-columns:1fr 1fr;gap:10px}
+  .pc .b{padding:0 10px 10px}.pc .buy{flex-direction:column}.qty{justify-content:space-between}
+  .banners{grid-template-columns:1fr}.brands{grid-template-columns:repeat(3,1fr)}
+  footer .cols{grid-template-columns:1fr}footer .bottom{flex-direction:column;gap:6px}
+  .sh h2{font-size:22px}.topbar .wrap{justify-content:space-between}
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-9-9a4.8 4.8 0 0 1 9-3 4.8 4.8 0 0 1 9 3c-2 4.6-9 9-9 9z"/></symbol>
+  <symbol id="i-cmp" viewBox="0 0 24 24"><path d="M6 20V10M12 20V4M18 20v-7"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2l2.5 11h11L21 7H6.2"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-tg" viewBox="0 0 24 24"><path d="m21 4-18 7 6 2 2 6 3-4 5 4z"/></symbol>
+  <symbol id="i-ig" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-fb" viewBox="0 0 24 24"><path d="M14 8h3V4h-3a4 4 0 0 0-4 4v3H7v4h3v6h4v-6h3l1-4h-4V8z"/></symbol>
+</svg>
+
+<div class="topbar"><div class="wrap">
+  <nav id="topnav"></nav>
+  <a class="cb" href="#" data-open="callback"><svg class="i" style="width:16px;height:16px"><use href="#i-phone"/></svg>Обратный звонок</a>
+  <a id="topphone" href="#"></a>
+  <div class="cur" id="cur"></div>
+</div></div>
+
+<header class="main">
+  <div class="wrap">
+    <button class="burger" data-open="mnav" aria-label="Меню"><svg class="i"><use href="#i-menu"/></svg></button>
+    <a class="logo" href="#"><img id="logo" alt="Tomobuv"></a>
+    <button class="catbtn" id="catbtn"><svg class="i"><use href="#i-menu"/></svg><span>Каталог</span></button>
+    <form class="search" id="search" role="search">
+      <input type="search" placeholder="Поиск: артикул, бренд, размер…" autocomplete="off" aria-label="Поиск товаров">
+      <button class="go" aria-label="Найти"><svg class="i"><use href="#i-search"/></svg></button>
+      <div class="suggest"></div>
+    </form>
+    <div class="hicons">
+      <a class="hicon" id="acc" href="#"><svg class="i"><use href="#i-user"/></svg><span class="l">Кабинет</span></a>
+      <a class="hicon cmp" href="#" data-list="cmp"><svg class="i"><use href="#i-cmp"/></svg><span class="l">Сравнение</span><span class="n" data-count="cmp"></span></a>
+      <a class="hicon" href="#" data-list="fav"><svg class="i"><use href="#i-heart"/></svg><span class="l">Избранное</span><span class="n" data-count="fav"></span></a>
+    </div>
+    <button class="cartbtn" data-open="cart"><svg class="i"><use href="#i-cart"/></svg><span class="n" data-count="cart"></span><span class="t"><b data-total></b><small>Корзина</small></span></button>
+  </div>
+  <div class="mega" id="mega"><div class="wrap"><div class="l"></div><div class="r"></div></div></div>
+</header>
+
+<div class="navrow"><div class="wrap" id="navrow"></div></div>
+<div class="alpha"><div class="wrap" id="alpha"><span>Бренды:</span></div></div>
+
+<section class="hero"><div class="wrap">
+  <div class="slider" id="slider"><div class="dots"></div></div>
+  <div class="side">
+    <div class="card c1">
+      <div><div class="big">0 ₴</div><h3>Доставка от 20 ящиков бесплатно</h3></div>
+      <a href="#" class="more" style="color:var(--orange-d);font-weight:700" id="dellink">Условия доставки →</a>
+      <img id="sideimg" alt="">
+    </div>
+    <div class="card c2">
+      <h3>Опт обуви в Одессе с 2011 года</h3>
+      <div class="stats"><div><b>15+</b><small>лет на рынке</small></div><div><b>300+</b><small>брендов</small></div><div><b>8 пар</b><small>в ящике</small></div></div>
+    </div>
+  </div>
+</div></section>
+
+<section class="features"><div class="wrap" id="features"></div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2>Популярные категории</h2><a class="more" href="#" id="allcats">Весь каталог <svg class="i" style="width:18px"><use href="#i-arrow"/></svg></a></div>
+  <div class="cats" id="cats"></div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2>Товары</h2><div class="tabs" id="ptabs"><button class="on" data-g="new">Новинки</button><button data-g="promo">Промо</button></div></div>
+  <div class="grid" id="pgrid"></div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2>Женская обувь</h2><a class="more" id="womenall" href="#">Все товары <svg class="i" style="width:18px"><use href="#i-arrow"/></svg></a></div>
+  <div class="split">
+    <div class="promo-col"><div><h3>Женская обувь оптом</h3><div class="subl" id="womensub"></div></div><a class="btn btn-o" id="womenbtn" href="#">Смотреть все <svg class="i" style="width:18px"><use href="#i-arrow"/></svg></a></div>
+    <div class="grid" id="wgrid"></div>
+  </div>
+</div></section>
+
+<section class="sec"><div class="wrap banners" id="banners"></div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2>Популярные бренды</h2><a class="more" id="brandsall" href="#">Все бренды <svg class="i" style="width:18px"><use href="#i-arrow"/></svg></a></div>
+  <div class="brands" id="brands"></div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2>Статьи</h2><a class="more" id="artall" href="#">Все записи <svg class="i" style="width:18px"><use href="#i-arrow"/></svg></a></div>
+  <div class="two" id="arts">
+    <div class="sub"><h3>Горячие скидки только для особых</h3><p>Все подписчики первыми получают информацию о закрытых скидках и распродажах</p>
+      <form id="subform"><input type="email" required placeholder="Ваш e-mail"><button class="btn btn-o" style="justify-content:center">Получать рассылку</button></form></div>
+  </div>
+</div></section>
+
+<section class="sec"><div class="wrap"><div class="seo">
+  <h2>Оптовый интернет-магазин обуви «Том Обувь»</h2>
+  <p>Продаём детскую, подростковую, мужскую и женскую обувь оптом ящиками от производителей. Склад — Одесса, Промрынок 7 км. Отправляем по всей Украине всеми почтовыми службами, от 20 ящиков — доставка бесплатно. Работаем с 2011 года: большой ассортимент, отличное качество, приятные цены.</p>
+</div></div></section>
+
+<footer><div class="wrap">
+  <div class="cols">
+    <div><a class="logo" href="#"><img id="flogo" alt="Tomobuv"></a><p>Работаем с 2011 года. Большой ассортимент, отличное качество, приятные цены.</p>
+      <div class="soc"><a href="#" aria-label="Telegram"><svg class="i" style="width:18px"><use href="#i-tg"/></svg></a><a href="#" aria-label="Instagram"><svg class="i" style="width:18px"><use href="#i-ig"/></svg></a><a href="#" aria-label="Facebook"><svg class="i" style="width:18px"><use href="#i-fb"/></svg></a></div></div>
+    <div><h4>Компания</h4><ul id="fpages"></ul></div>
+    <div><h4>Каталог</h4><ul id="fcats"></ul></div>
+    <div><h4>Контакты</h4><ul id="fcont"></ul></div>
+  </div>
+  <div class="bottom"><span>© Tomobuv.com.ua, 2011–2026</span><span>Оптовый интернет-магазин обуви в Одессе</span></div>
+</div></footer>
+
+<div class="ov" id="ov"></div>
+<aside class="drawer" id="cart" aria-label="Корзина"><div class="hd"><h3>Корзина</h3><button data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div><div class="bd"></div><div class="ft"><div data-ship style="--ship:var(--green)"></div><div class="tot"><span>Итого:</span><span data-total></span></div><a class="btn btn-o" style="width:100%;justify-content:center" id="checkout" href="#">Оформить заказ</a></div></aside>
+<aside class="drawer left" id="mnav" aria-label="Меню"><div class="hd"><h3>Меню</h3><button data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div><div class="bd mnav" id="mnavbd"></div></aside>
+<div class="modal" id="callback" role="dialog" aria-label="Обратный звонок"><button class="x" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button><h3>Обратный звонок</h3><p>Оставьте номер — менеджер перезвонит в рабочее время (06:00—18:00)</p><form id="cbform"><input placeholder="Ваше имя"><input type="tel" required placeholder="+38 (0__) ___-__-__"><button class="btn btn-o" style="width:100%;justify-content:center">Жду звонка</button></form></div>
+<button class="totop" id="totop" aria-label="Наверх"><svg class="i"><use href="#i-up"/></svg></button>
+
+<script src="assets/data.js?v=2"></script>
+<script src="assets/store.js?v=2"></script>
+<script>
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const T = TOM, C = T.contacts;
+const ic = (n, st = '') => `<svg class="i" style="${st}"><use href="#i-${n}"/></svg>`;
+
+$('#logo').src = $('#flogo').src = T.images.logo;
+$('#topnav').innerHTML = T.pages.map(p => `<a href="${p.h}">${p.t}</a>`).join('');
+$('#topphone').href = 'tel:' + C.tel[0]; $('#topphone').textContent = C.phones[0];
+$('#acc').href = T.links.login;
+$('#dellink').href = T.pages[1].h; $('#allcats').href = T.catalog[2].h; $('#brandsall').href = T.links.brands; $('#artall').href = T.links.articles;
+$('#checkout').href = T.links.checkout;
+$('#sideimg').src = T.products[27].img;
+
+// currency
+function renderCur() { $('#cur').innerHTML = ['UAH', 'USD', 'EUR'].map(c => `<button class="${Store.state.cur === c ? 'on' : ''}" data-cur="${c}">${c}</button>`).join(''); }
+$('#cur').onclick = e => { const c = e.target.dataset.cur; if (c) { Store.setCur(c); renderCur(); } };
+renderCur();
+
+// nav row & mega
+$('#navrow').innerHTML = T.catalog.map(c => `<a class="${c.hot ? 'hot' : ''}" href="${c.h}">${c.t}</a>`).join('') + T.pages.slice(1, 3).map(p => `<a href="${p.h}">${p.t}</a>`).join('');
+const megaL = $('#mega .l'), megaR = $('#mega .r');
+megaL.innerHTML = T.catalog.map((c, i) => `<a href="${c.h}" data-i="${i}" class="${c.hot ? 'hot' : ''}">${c.t}${c.children ? ic('chev', 'width:16px') : ''}</a>`).join('');
+function megaShow(i) {
+  $$('a', megaL).forEach(a => a.classList.toggle('on', a.dataset.i == i));
+  const c = T.catalog[i];
+  megaR.innerHTML = c.children ? `<div class="g"><a href="${c.h}" style="color:var(--blue)">Все товары раздела →</a></div>` + c.children.map(s => `<div class="g"><a href="${s.h}">${s.t}</a>${s.sizes ? `<div class="chips">${s.sizes.map(z => `<a class="chip" href="${z.h}">${z.t}</a>`).join('')}</div>` : ''}</div>`).join('') : `<div class="g"><a href="${c.h}">Перейти в «${c.t}» →</a></div>`;
+}
+megaL.addEventListener('mouseover', e => { const a = e.target.closest('a'); if (a) megaShow(a.dataset.i); });
+megaShow(2);
+$('#catbtn').onclick = () => $('#mega').classList.toggle('show');
+document.addEventListener('click', e => { if (!e.target.closest('#mega,#catbtn')) $('#mega').classList.remove('show'); });
+
+// alphabet
+$('#alpha').innerHTML += T.letters.map(l => `<a href="${T.links.brands}?letter=${encodeURIComponent(l)}">${l}</a>`).join('') + `<a class="all" href="${T.links.brands}">Все бренды</a>`;
+
+// slider
+const slides = [
+  { tag: 'Новый сезон', h: 'Детская обувь оптом от производителя', p: 'Ящиками по 8 пар. Размерные ряды 12-26, 26-32, 32-38, 36-41.', img: T.images.slides[0], link: T.catalog[2].h },
+  { tag: 'Акция', h: 'Скидки до −23% на Jong•Golf', p: 'Кроссовки и босоножки по сниженным ценам — пока есть в наличии.', img: T.images.slides[1], link: T.catalog[0].h },
+  { tag: 'Украинское', h: 'Обувь украинских производителей', p: 'Поддерживаем отечественные фабрики — качественно и доступно.', img: T.images.slides[2], link: T.catalog[1].h }
+];
+const sl = $('#slider');
+sl.insertAdjacentHTML('afterbegin', slides.map((s, i) => `<div class="slide ${i ? '' : 'on'}"><div class="txt"><span class="tag">${s.tag}</span><h1>${s.h}</h1><p>${s.p}</p><a class="btn btn-o" href="${s.link}">Смотреть ${ic('arrow', 'width:18px')}</a></div><div class="pic"><img src="${s.img}" alt=""></div></div>`).join(''));
+$('.dots', sl).innerHTML = slides.map((_, i) => `<button class="${i ? '' : 'on'}" data-i="${i}" aria-label="Слайд ${i + 1}"></button>`).join('');
+let cur = 0; const go = i => { cur = i; $$('.slide', sl).forEach((s, k) => s.classList.toggle('on', k === i)); $$('.dots button', sl).forEach((s, k) => s.classList.toggle('on', k === i)); };
+$('.dots', sl).onclick = e => { if (e.target.dataset.i) go(+e.target.dataset.i); };
+setInterval(() => go((cur + 1) % slides.length), 6000);
+
+// features
+const fic = ['card', 'truck', 'star'];
+$('#features').innerHTML = T.features.map((f, i) => `<a class="feat" href="${f.h}"><span class="ic">${ic(fic[i])}</span><span><b>${f.t}</b><p>${f.d}</p></span></a>`).join('') + `<a class="feat" href="${T.pages[2].h}"><span class="ic">${ic('box')}</span><span><b>Продажа ящиками</b><p>Цена за пару и за ящик — видно сразу в карточке</p></span></a>`;
+
+// categories
+$('#cats').innerHTML = T.catalog.filter(c => c.img).map(c => `<div class="cat"><a class="ph" href="${c.h}"><img src="${c.img}" alt="${c.t}" loading="lazy"></a><div class="b"><h3><a href="${c.h}">${c.t}</a></h3><div class="chips">${c.children.slice(0, 5).map(s => `<a class="chip" href="${s.h}">${s.t}</a>`).join('')}<a class="chip" href="${c.h}">ещё ${c.children.length - 5}</a></div></div></div>`).join('');
+
+// products
+function card(p) {
+  return `<article class="pc" data-id="${p.id}">
+    <a class="ph" href="${p.url}"><img src="${p.img}" alt="${p.name}" loading="lazy">${p.off ? `<span class="badge">−${p.off}%</span>` : p.group === 'new' ? '<span class="badge nw">Новинка</span>' : ''}</a>
+    <div class="acts"><button class="fav ${Store.has('fav', p.id) ? 'on' : ''}" data-act="fav" aria-label="В избранное">${ic('heart')}</button><button class="${Store.has('cmp', p.id) ? 'on' : ''}" data-act="cmp" aria-label="К сравнению">${ic('cmp')}</button></div>
+    <div class="b">
+      <a class="nm" href="${p.url}">${p.name}</a>
+      <div class="meta"><span>р. ${p.size}</span><span>${p.box} пар</span><span>${p.brand}</span></div>
+      <div class="stock">В наличии</div>
+      <div class="pr"><div class="box" data-uah="${p.boxPrice}">${Store.money(p.boxPrice)}</div><div class="pair">за ящик · <span data-uah="${p.price}">${Store.money(p.price)}</span> / пара${p.oldPrice ? ` <s data-uah="${p.oldPrice}">${Store.money(p.oldPrice)}</s>` : ''}</div></div>
+      <div class="buy"><div class="qty"><button data-q="-1" aria-label="Меньше">−</button><input value="1" inputmode="numeric" aria-label="Ящиков"><button data-q="1" aria-label="Больше">+</button></div><button class="btn btn-b" data-act="cart">${ic('cart', 'width:18px')}В корзину</button></div>
+    </div></article>`;
+}
+function renderGrid(el, list) { el.innerHTML = list.map(card).join(''); }
+renderGrid($('#pgrid'), T.products.filter(p => p.group === 'new').slice(0, 10));
+$('#ptabs').onclick = e => { const g = e.target.dataset.g; if (!g) return; $$('#ptabs button').forEach(b => b.classList.toggle('on', b === e.target)); renderGrid($('#pgrid'), T.products.filter(p => p.group === g).slice(0, 10)); };
+const W = T.catalog[4];
+$('#womenall').href = $('#womenbtn').href = W.h;
+$('#womensub').innerHTML = W.children.slice(0, 10).map(s => `<a href="${s.h}">${s.t}</a>`).join('');
+renderGrid($('#wgrid'), T.products.filter(p => p.group === 'women').slice(0, 4).concat(T.products.slice(5, 9)).slice(0, 8));
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act],[data-q]'); if (!b) return;
+  const pc = b.closest('.pc'); const id = pc.dataset.id; const inp = $('.qty input', pc);
+  if (b.dataset.q) { inp.value = Math.max(1, (+inp.value || 1) + +b.dataset.q); return; }
+  const a = b.dataset.act;
+  if (a === 'cart') Store.addToCart(id, Math.max(1, +inp.value || 1));
+  else { const on = Store.toggle(a, id); $$(`.pc[data-id="${id}"] [data-act="${a}"]`).forEach(x => x.classList.toggle('on', on)); }
+});
+
+// banners, brands, articles
+$('#banners').innerHTML = [
+  { img: T.images.banners[1], h: 'Украинская обувь', l: T.catalog[1].h },
+  { img: T.images.banners[2], h: 'Подростковая обувь', l: T.catalog[5].h }
+].map(b => `<a class="bnr" href="${b.l}"><img src="${b.img}" alt=""><div><h3>${b.h}</h3><span class="btn btn-w">Перейти ${ic('arrow', 'width:18px')}</span></div></a>`).join('');
+$('#brands').innerHTML = T.brands.map(b => `<a href="${b.h}">${b.t}</a>`).join('');
+$('#arts').insertAdjacentHTML('afterbegin', T.articles.map(a => `<article class="art"><small>Tomobuv · Статья</small><h3>${a.t}</h3><p>${a.d}</p><a class="more" href="${a.h}">Читать далее →</a></article>`).join(''));
+
+// footer
+$('#fpages').innerHTML = T.pages.map(p => `<li><a href="${p.h}">${p.t}</a></li>`).join('');
+$('#fcats').innerHTML = T.catalog.map(c => `<li><a href="${c.h}">${c.t}</a></li>`).join('');
+$('#fcont').innerHTML = C.phones.map((p, i) => `<li><a class="ph" href="tel:${C.tel[i]}">${p}</a></li>`).join('') + `<li>${C.hours}</li><li><a href="mailto:${C.email}">${C.email}</a></li><li>${C.address}</li><li><a href="${T.pages[3].h}" style="color:#6fc2f0">Карта проезда →</a></li>`;
+
+// mobile nav
+$('#mnavbd').innerHTML = T.catalog.map(c => c.children ? `<details><summary>${c.t}${ic('chev', 'width:16px')}</summary><a href="${c.h}">Все товары</a>${c.children.map(s => `<a href="${s.h}">${s.t}</a>`).join('')}</details>` : `<a href="${c.h}">${c.t}</a>`).join('') + T.pages.map(p => `<a href="${p.h}">${p.t}</a>`).join('') + `<a href="${T.links.login}">Личный кабинет</a><a href="${T.links.viewed}">Просмотренные товары</a>`;
+
+// search
+const sf = $('#search'), si = $('input', sf), sg = $('.suggest', sf);
+si.oninput = () => { const r = Store.search(si.value); sg.innerHTML = r.map(p => `<a href="${p.url}"><img src="${p.img}" alt=""><span><b>${p.name}</b><br><small>${p.brand} · р. ${p.size} · ${Store.money(p.price)}/пара</small></span></a>`).join('') + (si.value.trim() ? `<a class="all" href="${T.links.search}${encodeURIComponent(si.value)}">Посмотреть все результаты</a>` : ''); sg.classList.toggle('show', !!si.value.trim()); };
+sf.onsubmit = e => { e.preventDefault(); location.href = T.links.search + encodeURIComponent(si.value); };
+document.addEventListener('click', e => { if (!e.target.closest('#search')) sg.classList.remove('show'); });
+
+// cart drawer & counters
+function renderCart() {
+  const items = Store.cartItems();
+  $('#cart .bd').innerHTML = items.length ? items.map(({ p, q }) => `<div class="ci"><img src="${p.img}" alt=""><div class="t"><b>${p.name}</b><small>${q} ящ. × ${p.box} пар · ${Store.money(p.boxPrice)}</small></div><div class="qty" data-id="${p.id}"><button data-cq="-1">−</button><input value="${q}" readonly><button data-cq="1">+</button></div></div>`).join('') : '<div class="empty">Корзина пуста</div>';
+}
+$('#cart .bd').onclick = e => { const b = e.target.closest('[data-cq]'); if (!b) return; const id = b.parentElement.dataset.id; Store.setQty(id, Store.state.cart[id] + +b.dataset.cq); };
+Store.on(s => {
+  const n = { cart: Store.cartCount(), fav: s.fav.length, cmp: s.cmp.length };
+  $$('[data-count]').forEach(el => { const v = n[el.dataset.count]; el.textContent = v || ''; v ? el.removeAttribute('data-z') : el.setAttribute('data-z', ''); });
+  $$('[data-total]').forEach(el => el.textContent = Store.money(Store.cartTotal()));
+  $$('[data-uah]').forEach(el => el.textContent = Store.money(+el.dataset.uah));
+  renderCart();
+});
+
+// overlays
+const ov = $('#ov');
+const open = id => { $('#' + id).classList.add('show'); ov.classList.add('show'); };
+const close = () => { $$('.drawer.show,.modal.show').forEach(x => x.classList.remove('show')); ov.classList.remove('show'); };
+document.addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o) { e.preventDefault(); open(o.dataset.open); } if (e.target.closest('[data-close]') || e.target === ov) close(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+$('#cbform').onsubmit = e => { e.preventDefault(); close(); Store.toast('Спасибо! Мы перезвоним вам'); };
+$('#subform').onsubmit = e => { e.preventDefault(); e.target.reset(); Store.toast('Вы подписаны на рассылку'); };
+$$('[data-list]').forEach(a => a.onclick = e => { e.preventDefault(); const l = a.dataset.list; if (l === 'fav') location.href = T.links.favorites; else Store.toast(`В сравнении: ${Store.state.cmp.length} товаров`); });
+
+const tt = $('#totop'); addEventListener('scroll', () => tt.classList.toggle('show', scrollY > 600)); tt.onclick = () => scrollTo({ top: 0, behavior: 'smooth' });
+</script>
+</body>
+</html>

@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Том Обувь — детская обувь оптом | Дизайн 2</title>
+<meta name="description" content="Оптовый интернет-магазин детской обуви в Одессе. Ящиками от производителя, с 2011 года.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cream:#fff8ef; --coral:#ff6b5b; --coral-d:#e8503f; --mint:#23b3a1; --mint-l:#dcf5f1; --sun:#ffc94a; --sun-l:#fff1c9;
+  --lilac:#9a7bff; --lilac-l:#ece6ff; --sky:#4aa8ff; --sky-l:#e0f0ff; --pink-l:#ffe4e0;
+  --ink:#2b2340; --muted:#7a7290; --line:#f0e6d8; --r:24px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Nunito,system-ui,sans-serif;color:var(--ink);background:var(--cream);font-size:16px;line-height:1.5;font-weight:600}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+img{max-width:100%;display:block}
+.wrap{max-width:1280px;margin:0 auto;padding:0 20px}
+svg.i{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+.strip{background:var(--mint);color:#fff;font-size:14px;font-weight:700}
+.strip .wrap{display:flex;gap:18px;align-items:center;height:38px}
+.strip .msg{flex:1;display:flex;gap:8px;align-items:center}
+.strip a:hover{text-decoration:underline}
+.strip .cur{display:flex;gap:3px}
+.strip .cur button{padding:1px 9px;border-radius:20px;font-size:12px;font-weight:800}
+.strip .cur button.on{background:#fff;color:var(--mint)}
+
+header{position:sticky;top:0;z-index:50;padding:12px 0;background:var(--cream)}
+header .bar{background:#fff;border-radius:999px;box-shadow:0 8px 30px rgba(43,35,64,.08);display:flex;align-items:center;gap:14px;padding:8px 10px 8px 22px}
+.logo img{height:40px}
+.catbtn{display:flex;gap:8px;align-items:center;background:var(--coral);color:#fff;border-radius:999px;height:48px;padding:0 22px;font-weight:800}
+.catbtn:hover{background:var(--coral-d)}
+.search{flex:1;position:relative}
+.search input{width:100%;height:48px;border-radius:999px;border:2px solid var(--line);background:var(--cream);padding:0 20px 0 48px;font:inherit}
+.search input:focus{outline:none;border-color:var(--sun);background:#fff}
+.search>svg{position:absolute;left:16px;top:13px;color:var(--muted)}
+.suggest{position:absolute;left:0;right:0;top:56px;background:#fff;border-radius:20px;box-shadow:0 16px 40px rgba(43,35,64,.15);display:none;overflow:hidden;padding:6px}
+.suggest.show{display:block}
+.suggest a{display:flex;gap:12px;align-items:center;padding:8px;border-radius:14px}
+.suggest a:hover{background:var(--cream)}
+.suggest img{width:44px;height:44px;object-fit:contain;border-radius:10px;background:#fff}
+.suggest .all{justify-content:center;color:var(--coral);font-weight:800}
+.hb{position:relative;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--cream)}
+.hb:hover{background:var(--sun-l)}
+.hb .n{position:absolute;top:-2px;right:-2px;min-width:20px;height:20px;border-radius:10px;background:var(--coral);color:#fff;font-size:11px;font-weight:900;display:grid;place-items:center;padding:0 5px;border:2px solid #fff}
+.hb .n[data-z]{display:none}
+.cartpill{display:flex;align-items:center;gap:8px;background:var(--ink);color:#fff;height:48px;border-radius:999px;padding:0 18px 0 14px;position:relative;font-weight:800}
+.cartpill .n{background:var(--sun);color:var(--ink);min-width:22px;height:22px;border-radius:11px;display:grid;place-items:center;font-size:12px;padding:0 5px}
+.burger{display:none}
+
+.mega{position:absolute;left:20px;right:20px;top:calc(100% - 4px);background:#fff;border-radius:28px;box-shadow:0 24px 60px rgba(43,35,64,.18);padding:24px;display:none;max-width:1240px;margin:0 auto}
+.mega.show{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.mega .col h4{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:900;margin-bottom:10px}
+.mega .col h4 img{width:44px;height:44px;border-radius:50%;object-fit:cover}
+.mega .col a.s{display:block;padding:4px 0;color:var(--muted)}
+.mega .col a.s:hover{color:var(--coral)}
+.mega .quick{grid-column:1/-1;display:flex;gap:10px;border-top:2px dashed var(--line);padding-top:16px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;font-weight:800;font-size:14px}
+
+.alpha{margin:4px 0 0}
+.alpha .wrap{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;align-items:center;font-size:13px}
+.alpha span{color:var(--muted);margin-right:6px;white-space:nowrap}
+.alpha a{min-width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:var(--muted)}
+.alpha a:hover{background:var(--sun);color:var(--ink)}
+
+/* hero */
+.hero{padding:22px 0 10px}
+.hero .wrap{display:grid;grid-template-columns:1.25fr 1fr;gap:22px}
+.hbox{background:var(--sun);border-radius:40px;padding:48px;position:relative;overflow:hidden;min-height:440px}
+.hbox::before{content:"";position:absolute;width:420px;height:420px;border-radius:50%;background:#ffd976;right:-120px;bottom:-160px}
+.hbox::after{content:"";position:absolute;width:120px;height:120px;border-radius:50%;background:var(--coral);right:260px;top:-40px;opacity:.9}
+.hbox .in{position:relative;z-index:2;max-width:430px}
+.hbox .tag{background:#fff;display:inline-flex;gap:6px;padding:6px 14px;border-radius:999px;font-weight:800;font-size:14px;margin-bottom:18px}
+.hbox h1{font-size:52px;line-height:1.02;font-weight:900;letter-spacing:-1px;margin-bottom:16px}
+.hbox h1 em{font-style:normal;color:var(--coral)}
+.hbox p{font-size:17px;margin-bottom:26px;max-width:360px}
+.hbox .shoe{position:absolute;right:10px;bottom:30px;width:300px;z-index:1;transform:rotate(-10deg);filter:drop-shadow(0 20px 20px rgba(0,0,0,.15));mix-blend-mode:multiply}
+.btn{display:inline-flex;align-items:center;gap:8px;height:52px;padding:0 26px;border-radius:999px;font-weight:900}
+.btn-c{background:var(--coral);color:#fff}.btn-c:hover{background:var(--coral-d)}
+.btn-i{background:var(--ink);color:#fff}
+.btn-w{background:#fff;color:var(--ink)}
+
+.finder{background:#fff;border-radius:40px;padding:34px;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(43,35,64,.06)}
+.finder h2{font-size:26px;font-weight:900;line-height:1.15;margin-bottom:4px}
+.finder>p{color:var(--muted);margin-bottom:20px;font-size:15px}
+.finder label{font-size:13px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:block}
+.opts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.opts button{padding:9px 16px;border-radius:999px;background:var(--cream);font-weight:800;font-size:14px;border:2px solid transparent}
+.opts button:hover{border-color:var(--sun)}
+.opts button.on{background:var(--ink);color:#fff}
+.sizes button{min-width:86px}
+.sizes button small{display:block;font-size:11px;font-weight:700;opacity:.7;line-height:1}
+.finder .go{margin-top:auto;justify-content:center;width:100%}
+
+/* stickers */
+.stickers .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.st{border-radius:var(--r);padding:22px;display:flex;gap:14px;align-items:center;transition:.2s}
+.st:hover{transform:rotate(-1deg) scale(1.02)}
+.st .ic{width:54px;height:54px;border-radius:18px;background:#fff;display:grid;place-items:center;flex:none}
+.st b{display:block;font-size:17px;font-weight:900;line-height:1.2}
+.st p{font-size:13px;color:var(--muted);line-height:1.35}
+
+section.sec{padding:46px 0 0}
+.sh{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+.sh h2{font-size:34px;font-weight:900;letter-spacing:-.5px;display:flex;align-items:center;gap:12px}
+.sh h2 .dot{width:14px;height:14px;border-radius:50%;background:var(--coral)}
+.sh .more{font-weight:900;color:var(--coral);display:flex;gap:4px;align-items:center}
+.seg{display:flex;background:#fff;border-radius:999px;padding:5px;gap:4px}
+.seg button{padding:9px 20px;border-radius:999px;font-weight:900;color:var(--muted)}
+.seg button.on{background:var(--coral);color:#fff}
+.arrows{display:flex;gap:8px}
+.arrows button{width:48px;height:48px;border-radius:50%;background:#fff;display:grid;place-items:center}
+.arrows button:hover{background:var(--sun)}
+
+/* category bubbles */
+.bubbles{display:grid;grid-template-columns:repeat(6,1fr);gap:18px}
+.bub{text-align:center}
+.bub .c{aspect-ratio:1;border-radius:50%;overflow:hidden;margin-bottom:12px;border:6px solid #fff;box-shadow:0 10px 30px rgba(43,35,64,.08);transition:.25s;display:grid;place-items:center;font-size:40px}
+.bub:hover .c{transform:translateY(-6px) rotate(-3deg)}
+.bub .c img{width:100%;height:100%;object-fit:cover}
+.bub b{font-weight:900;font-size:17px}
+.bub small{display:block;color:var(--muted);font-size:13px}
+
+/* product cards */
+.rail{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 4*18px)/5);gap:18px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;padding:6px 2px 16px}
+.rail::-webkit-scrollbar{display:none}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.pc{scroll-snap-align:start;background:#fff;border-radius:28px;padding:10px;display:flex;flex-direction:column;transition:.2s}
+.pc:hover{box-shadow:0 16px 40px rgba(43,35,64,.1)}
+.pc .ph{border-radius:22px;aspect-ratio:1;display:grid;place-items:center;padding:16px;position:relative}
+.pc .ph>a{display:grid;place-items:center;width:100%;height:100%}
+.pc .ph img{max-height:100%;object-fit:contain;mix-blend-mode:multiply}
+.pc:nth-child(5n+1) .ph{background:var(--sky-l)}.pc:nth-child(5n+2) .ph{background:var(--pink-l)}.pc:nth-child(5n+3) .ph{background:var(--mint-l)}.pc:nth-child(5n+4) .ph{background:var(--sun-l)}.pc:nth-child(5n+5) .ph{background:var(--lilac-l)}
+.pc .badge{position:absolute;left:12px;top:12px;background:var(--coral);color:#fff;border-radius:999px;padding:3px 10px;font-weight:900;font-size:13px}
+.pc .badge.nw{background:var(--mint)}
+.pc .acts{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
+.pc .acts button{width:36px;height:36px;border-radius:50%;background:#fff;display:grid;place-items:center;color:var(--muted)}
+.pc .acts button svg{width:18px;height:18px}
+.pc .acts button.on{color:#fff;background:var(--coral)}
+.pc .acts button.on[data-act=cmp]{background:var(--lilac)}
+.pc .b{padding:12px 8px 6px;display:flex;flex-direction:column;flex:1}
+.pc .nm{font-weight:900;font-size:17px;line-height:1.25}
+.pc .meta{color:var(--muted);font-size:13px;margin:4px 0 10px}
+.pc .meta b{color:var(--mint)}
+.pc .row{display:flex;align-items:end;justify-content:space-between;margin-top:auto;gap:8px}
+.pc .pr .box{font-size:21px;font-weight:900;line-height:1.1}
+.pc .pr small{display:block;color:var(--muted);font-size:12px}
+.pc .pr s{color:var(--coral)}
+.pc .add{width:48px;height:48px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;flex:none;transition:.2s}
+.pc .add:hover{background:var(--coral);transform:scale(1.08)}
+
+/* women */
+.women{background:var(--lilac-l);border-radius:40px;padding:36px}
+.women .top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.women h2{font-size:32px;font-weight:900}
+.subs{display:flex;gap:8px;flex-wrap:wrap}
+.subs a{background:#fff;padding:7px 15px;border-radius:999px;font-weight:800;font-size:14px}
+.subs a:hover{background:var(--lilac);color:#fff}
+
+/* banners */
+.bnrs{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.bnr{border-radius:34px;overflow:hidden;position:relative;min-height:200px;padding:34px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;color:#fff}
+.bnr img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.bnr::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(43,35,64,.85),rgba(43,35,64,.1));z-index:1}
+.bnr>*{position:relative;z-index:2}
+.bnr h3{font-size:28px;font-weight:900;margin-bottom:12px;line-height:1.1}
+
+/* brands marquee */
+.marq{overflow:hidden;background:#fff;border-radius:999px;padding:16px 0}
+.marq .t{display:flex;gap:40px;width:max-content;animation:m 40s linear infinite}
+.marq:hover .t{animation-play-state:paused}
+.marq a{font-weight:900;font-size:20px;color:var(--muted);white-space:nowrap}
+.marq a:hover{color:var(--coral)}
+.marq a::after{content:"★";color:var(--sun);margin-left:40px}
+@keyframes m{to{transform:translateX(-50%)}}
+
+.arts{display:grid;grid-template-columns:1fr 1fr 1.1fr;gap:20px}
+.art{background:#fff;border-radius:30px;padding:28px;display:flex;flex-direction:column;gap:10px}
+.art .em{width:60px;height:60px;border-radius:20px;display:grid;place-items:center;font-size:30px}
+.art h3{font-size:20px;font-weight:900;line-height:1.25}
+.art p{color:var(--muted);font-size:15px;flex:1;font-weight:500}
+.art a{color:var(--coral);font-weight:900}
+.sub{background:var(--coral);color:#fff;border-radius:30px;padding:30px;position:relative;overflow:hidden}
+.sub::after{content:"%";position:absolute;right:-10px;bottom:-60px;font-size:220px;font-weight:900;opacity:.15;line-height:1}
+.sub h3{font-size:26px;font-weight:900;line-height:1.15;margin-bottom:8px}
+.sub p{opacity:.9;margin-bottom:18px;font-size:15px}
+.sub form{display:flex;flex-direction:column;gap:10px;position:relative;z-index:2}
+.sub input{height:52px;border-radius:999px;border:0;padding:0 20px;font:inherit}
+
+.about{background:#fff;border-radius:40px;padding:40px;display:grid;grid-template-columns:1fr 1.4fr;gap:40px;align-items:center}
+.about h2{font-size:32px;font-weight:900;line-height:1.1}
+.about p{color:var(--muted);font-weight:500}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}
+.nums div{background:var(--cream);border-radius:22px;padding:16px;text-align:center}
+.nums b{display:block;font-size:30px;font-weight:900;color:var(--coral);line-height:1}
+.nums small{color:var(--muted);font-size:13px}
+
+footer{margin-top:60px;background:var(--ink);color:#c9c2dd;padding:0 0 26px;position:relative}
+footer .wave{display:block;width:100%;height:50px;margin-top:-49px;color:var(--ink)}
+footer .cols{display:grid;grid-template-columns:1.3fr 1fr 1fr 1.2fr;gap:30px;padding-top:30px}
+footer h4{color:#fff;font-weight:900;font-size:18px;margin-bottom:12px}
+footer li{list-style:none;margin-bottom:8px}
+footer a:hover{color:var(--sun)}
+footer .big{font-size:22px;font-weight:900;color:#fff;display:block}
+footer .logo img{height:40px;filter:brightness(0) invert(1);margin-bottom:12px}
+footer .soc{display:flex;gap:10px;margin-top:14px}
+footer .soc a{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:#3d3456}
+footer .soc a:hover{background:var(--coral);color:#fff}
+footer .bottom{margin-top:30px;padding-top:20px;border-top:1px solid #3d3456;display:flex;justify-content:space-between;font-size:14px;flex-wrap:wrap;gap:8px}
+
+.ov{position:fixed;inset:0;background:rgba(43,35,64,.5);z-index:90;opacity:0;pointer-events:none;transition:.25s}
+.ov.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:12px;right:12px;bottom:12px;width:420px;max-width:calc(100% - 24px);background:#fff;border-radius:30px;z-index:100;transform:translateX(110%);transition:.35s cubic-bezier(.3,1.3,.5,1);display:flex;flex-direction:column}
+.drawer.show{transform:none}
+.drawer.left{left:12px;right:auto;transform:translateX(-110%)}
+.drawer.left.show{transform:none}
+.drawer .hd{display:flex;justify-content:space-between;align-items:center;padding:22px 24px}
+.drawer .hd h3{font-size:24px;font-weight:900}
+.drawer .bd{flex:1;overflow:auto;padding:0 24px}
+.drawer .ft{padding:22px 24px}
+.ci{display:flex;gap:12px;align-items:center;background:var(--cream);border-radius:20px;padding:10px;margin-bottom:10px}
+.ci img{width:60px;height:60px;border-radius:14px;background:#fff;object-fit:contain}
+.ci .t{flex:1;font-size:14px}.ci .t b{display:block}.ci .t small{color:var(--muted)}
+.qty{display:flex;align-items:center;background:#fff;border-radius:999px}
+.qty button{width:30px;height:32px;font-weight:900}
+.qty span{min-width:18px;text-align:center;font-weight:900}
+.empty{text-align:center;padding:60px 0;color:var(--muted)}
+.empty div{font-size:60px}
+.tot{display:flex;justify-content:space-between;font-size:20px;font-weight:900;margin-bottom:14px}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-45%) scale(.95);background:#fff;border-radius:34px;padding:34px;width:440px;max-width:calc(100% - 32px);z-index:100;opacity:0;pointer-events:none;transition:.25s}
+.modal.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%)}
+.modal h3{font-size:26px;font-weight:900}
+.modal p{color:var(--muted);margin:4px 0 18px;font-size:15px}
+.modal input{width:100%;height:52px;border-radius:999px;border:2px solid var(--line);padding:0 20px;font:inherit;margin-bottom:10px}
+.modal .x{position:absolute;right:18px;top:18px}
+.mnav a{display:block;padding:10px 0;font-weight:800;border-bottom:2px dashed var(--line)}
+.mnav details summary{padding:10px 0;font-weight:900;list-style:none;border-bottom:2px dashed var(--line)}
+.mnav details a{padding-left:14px;font-weight:600}
+#toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,30px);background:var(--ink);color:#fff;padding:14px 24px;border-radius:999px;font-weight:800;z-index:200;opacity:0;transition:.3s cubic-bezier(.3,1.4,.5,1);pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+.totop{position:fixed;right:20px;bottom:20px;width:54px;height:54px;border-radius:50%;background:var(--sun);display:grid;place-items:center;z-index:40;opacity:0;pointer-events:none;transition:.25s;box-shadow:0 8px 20px rgba(0,0,0,.15)}
+.totop.show{opacity:1;pointer-events:auto}
+
+.strip .wrap>*{white-space:nowrap}
+@media (max-width:1240px){.strip .links{display:none!important}}
+@media (max-width:1100px){.rail{grid-auto-columns:calc((100% - 3*18px)/4)}.bubbles{grid-template-columns:repeat(3,1fr)}.hbox .shoe{width:220px}}
+@media (max-width:960px){
+  .hero .wrap{grid-template-columns:1fr}.stickers .wrap{grid-template-columns:1fr 1fr}.grid{grid-template-columns:repeat(3,1fr)}
+  .arts{grid-template-columns:1fr}.about{grid-template-columns:1fr}footer .cols{grid-template-columns:1fr 1fr}
+  .hb.cmp,.hb.acc{display:none}.catbtn span{display:none}.catbtn{padding:0 14px}.mega.show{grid-template-columns:1fr 1fr}
+  .rail{grid-auto-columns:calc((100% - 2*18px)/3)}.strip .links{display:none}
+}
+@media (max-width:640px){
+  .wrap{padding:0 16px}
+  header .bar{border-radius:26px;flex-wrap:wrap;padding:10px}
+  .burger{display:grid;place-items:center;width:44px;height:44px}
+  .catbtn{display:none}.logo{flex:1}.logo img{height:32px}
+  .search{order:5;flex-basis:100%}.cartpill .t{display:none}
+  .hbox{padding:30px;min-height:auto;border-radius:30px}.hbox h1{font-size:36px}.hbox .shoe{position:relative;width:200px;margin:10px auto 0;right:auto;bottom:auto}
+  .finder{padding:24px;border-radius:30px}
+  .stickers .wrap{grid-template-columns:1fr}.bubbles{grid-template-columns:repeat(3,1fr);gap:10px}.bub b{font-size:14px}
+  .rail{grid-auto-columns:72%}.grid{grid-template-columns:1fr 1fr;gap:10px}
+  .pc{border-radius:22px;padding:8px}.pc .nm{font-size:15px}.pc .pr .box{font-size:17px}.pc .add{width:40px;height:40px}
+  .women{padding:22px;border-radius:30px}.bnrs{grid-template-columns:1fr}.sh h2{font-size:26px}
+  footer .cols{grid-template-columns:1fr}.nums b{font-size:22px}.about{padding:24px;border-radius:30px}
+  .strip .msg span.long{display:none}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-9-9a4.8 4.8 0 0 1 9-3 4.8 4.8 0 0 1 9 3c-2 4.6-9 9-9 9z"/></symbol>
+  <symbol id="i-cmp" viewBox="0 0 24 24"><path d="M6 20V10M12 20V4M18 20v-7"/></symbol>
+  <symbol id="i-bag" viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-tg" viewBox="0 0 24 24"><path d="m21 4-18 7 6 2 2 6 3-4 5 4z"/></symbol>
+  <symbol id="i-ig" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-fb" viewBox="0 0 24 24"><path d="M14 8h3V4h-3a4 4 0 0 0-4 4v3H7v4h3v6h4v-6h3l1-4h-4V8z"/></symbol>
+</svg>
+
+<div class="strip"><div class="wrap">
+  <div class="msg">🚚 <span>Бесплатная доставка от 20 ящиков</span><span class="long">· по всей Украине</span></div>
+  <span class="links" id="links" style="display:flex;gap:16px"></span>
+  <a href="#" data-open="callback">📞 Перезвоните мне</a>
+  <div class="cur" id="cur"></div>
+</div></div>
+
+<header><div class="wrap" style="position:relative">
+  <div class="bar">
+    <button class="burger" data-open="mnav" aria-label="Меню"><svg class="i"><use href="#i-menu"/></svg></button>
+    <a class="logo" href="#"><img id="logo" alt="Tomobuv"></a>
+    <button class="catbtn" id="catbtn"><svg class="i"><use href="#i-menu"/></svg><span>Каталог</span></button>
+    <form class="search" id="search" role="search"><svg class="i"><use href="#i-search"/></svg><input type="search" placeholder="Найти ботиночки, кроссовки, артикул…" autocomplete="off" aria-label="Поиск"><div class="suggest"></div></form>
+    <a class="hb acc" id="acc" href="#" aria-label="Личный кабинет"><svg class="i"><use href="#i-user"/></svg></a>
+    <a class="hb cmp" href="#" data-list="cmp" aria-label="Сравнение"><svg class="i"><use href="#i-cmp"/></svg><span class="n" data-count="cmp"></span></a>
+    <a class="hb" href="#" data-list="fav" aria-label="Избранное"><svg class="i"><use href="#i-heart"/></svg><span class="n" data-count="fav"></span></a>
+    <button class="cartpill" data-open="cart"><svg class="i"><use href="#i-bag"/></svg><span class="t" data-total></span><span class="n" data-count="cart">0</span></button>
+  </div>
+  <div class="mega" id="mega"></div>
+</div></header>
+
+<div class="alpha"><div class="wrap" id="alpha"><span>Бренды от А до Я:</span></div></div>
+
+<section class="hero"><div class="wrap">
+  <div class="hbox">
+    <div class="in">
+      <span class="tag">⭐ С 2011 года в Одессе</span>
+      <h1>Маленькие шаги — <em>большой опт</em></h1>
+      <p>Детская, подростковая и взрослая обувь ящиками от производителя. Цена за пару и за ящик — сразу в карточке.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn btn-c" id="herocta" href="#">В каталог <svg class="i"><use href="#i-arrow"/></svg></a><a class="btn btn-w" id="herocta2" href="#">🔥 Акции</a></div>
+    </div>
+    <img class="shoe" id="heroshoe" alt="">
+  </div>
+  <div class="finder">
+    <h2>Подбор по размеру</h2>
+    <p>Выберите, что ищете, и размерный ряд — покажем подходящие ящики</p>
+    <label>Что ищем</label>
+    <div class="opts" id="ftype"></div>
+    <label>Размерный ряд</label>
+    <div class="opts sizes" id="fsize"></div>
+    <a class="btn btn-i go" id="fgo" href="#">Показать товары <svg class="i"><use href="#i-arrow"/></svg></a>
+  </div>
+</div></section>
+
+<section class="stickers" style="padding-top:12px"><div class="wrap" id="stickers"></div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2><span class="dot"></span>Популярные категории</h2></div>
+  <div class="bubbles" id="bubbles"></div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2><span class="dot" style="background:var(--mint)"></span>Свежие поступления</h2>
+    <div style="display:flex;gap:12px;align-items:center"><div class="seg" id="ptabs"><button class="on" data-g="new">Новинки</button><button data-g="promo">Промо</button></div><div class="arrows"><button data-dir="-1" aria-label="Назад"><svg class="i"><use href="#i-left"/></svg></button><button data-dir="1" aria-label="Вперёд"><svg class="i"><use href="#i-right"/></svg></button></div></div></div>
+  <div class="rail" id="rail"></div>
+</div></section>
+
+<section class="sec"><div class="wrap"><div class="women">
+  <div class="top"><h2>👠 Женская обувь</h2><a class="btn btn-i" id="wall" href="#" style="height:44px">Все товары</a></div>
+  <div class="subs" id="wsubs" style="margin-bottom:22px"></div>
+  <div class="grid" id="wgrid"></div>
+</div></div></section>
+
+<section class="sec"><div class="wrap bnrs" id="bnrs"></div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2><span class="dot" style="background:var(--sun)"></span>Популярные бренды</h2><a class="more" id="ball" href="#">Все бренды <svg class="i"><use href="#i-arrow"/></svg></a></div>
+  <div class="marq"><div class="t" id="marq"></div></div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sh"><h2><span class="dot" style="background:var(--lilac)"></span>Полезно почитать</h2><a class="more" id="aall" href="#">Все записи <svg class="i"><use href="#i-arrow"/></svg></a></div>
+  <div class="arts" id="arts"><div class="sub"><h3>Горячие скидки только для своих</h3><p>Подписчики первыми узнают о закрытых скидках и распродажах</p><form id="subform"><input type="email" required placeholder="Ваш e-mail"><button class="btn btn-i" style="justify-content:center">Получать рассылку</button></form></div></div>
+</div></section>
+
+<section class="sec"><div class="wrap"><div class="about">
+  <div><h2>Оптовый магазин обуви «Том Обувь»</h2></div>
+  <div><p>Продаём детскую, подростковую, мужскую и женскую обувь оптом — ящиками от производителей. Склад в Одессе на Промрынке 7 км. Отправляем по всей Украине всеми почтовыми службами, от 20 ящиков — доставка бесплатно.</p>
+  <div class="nums"><div><b>2011</b><small>год основания</small></div><div><b>300+</b><small>брендов</small></div><div><b>20</b><small>ящиков — доставка 0 ₴</small></div></div></div>
+</div></div></section>
+
+<footer>
+  <svg class="wave" viewBox="0 0 1440 50" preserveAspectRatio="none"><path fill="currentColor" d="M0 50V20c120 20 240 30 360 20S600 0 720 0s240 30 360 30 240-20 360-20v40z"/></svg>
+  <div class="wrap">
+    <div class="cols">
+      <div><a class="logo" href="#"><img id="flogo" alt="Tomobuv"></a><p>Работаем с 2011 года. Большой ассортимент, отличное качество, приятные цены.</p><div class="soc"><a href="#" aria-label="Telegram"><svg class="i"><use href="#i-tg"/></svg></a><a href="#" aria-label="Instagram"><svg class="i"><use href="#i-ig"/></svg></a><a href="#" aria-label="Facebook"><svg class="i"><use href="#i-fb"/></svg></a></div></div>
+      <div><h4>Компания</h4><ul id="fpages"></ul></div>
+      <div><h4>Каталог</h4><ul id="fcats"></ul></div>
+      <div><h4>Контакты</h4><ul id="fcont"></ul></div>
+    </div>
+    <div class="bottom"><span>© Tomobuv.com.ua</span><span>Сделано с любовью к маленьким ножкам 👣</span></div>
+  </div>
+</footer>
+
+<div class="ov" id="ov"></div>
+<aside class="drawer" id="cart"><div class="hd"><h3>Корзина 🛍️</h3><button data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div><div class="bd"></div><div class="ft"><div data-ship style="--ship:var(--mint)"></div><div class="tot"><span>Итого</span><span data-total></span></div><a class="btn btn-c" id="checkout" style="width:100%;justify-content:center" href="#">Оформить заказ</a></div></aside>
+<aside class="drawer left" id="mnav"><div class="hd"><h3>Меню</h3><button data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div><div class="bd mnav" id="mnavbd"></div></aside>
+<div class="modal" id="callback" role="dialog"><button class="x" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button><h3>Перезвоним! 📞</h3><p>Оставьте номер — менеджер свяжется с вами с 06:00 до 18:00</p><form id="cbform"><input placeholder="Как вас зовут?"><input type="tel" required placeholder="+38 (0__) ___-__-__"><button class="btn btn-c" style="width:100%;justify-content:center">Жду звонка</button></form></div>
+<button class="totop" id="totop" aria-label="Наверх"><svg class="i"><use href="#i-up"/></svg></button>
+
+<script src="assets/data.js?v=2"></script>
+<script src="assets/store.js?v=2"></script>
+<script>
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const T = TOM, C = T.contacts;
+const ic = n => `<svg class="i"><use href="#i-${n}"/></svg>`;
+
+$('#logo').src = $('#flogo').src = T.images.logo;
+$('#links').innerHTML = T.pages.map(p => `<a href="${p.h}">${p.t}</a>`).join('');
+$('#acc').href = T.links.login; $('#checkout').href = T.links.checkout;
+$('#herocta').href = T.catalog[2].h; $('#herocta2').href = T.catalog[0].h;
+$('#heroshoe').src = T.products[0].img;
+$('#ball').href = T.links.brands; $('#aall').href = T.links.articles;
+
+function renderCur() { $('#cur').innerHTML = ['UAH', 'USD', 'EUR'].map(c => `<button class="${Store.state.cur === c ? 'on' : ''}" data-cur="${c}">${c}</button>`).join(''); }
+$('#cur').onclick = e => { if (e.target.dataset.cur) { Store.setCur(e.target.dataset.cur); renderCur(); } };
+renderCur();
+
+// mega
+const emo = { 'Детская обувь': '🧒', 'Мужская обувь': '👞', 'Женская обувь': '👠', 'Подростковая обувь': '👟' };
+$('#mega').innerHTML = T.catalog.filter(c => c.children).map(c => `<div class="col"><h4><img src="${c.img}" alt="">${c.t}</h4>${c.children.slice(0, 11).map(s => `<a class="s" href="${s.h}">${s.t}</a>`).join('')}<a class="s" href="${c.h}" style="color:var(--coral);font-weight:900">Все товары →</a></div>`).join('') + `<div class="quick"><a class="pill" style="background:var(--coral);color:#fff" href="${T.catalog[0].h}">🔥 Акция</a><a class="pill" style="background:var(--sun-l)" href="${T.catalog[1].h}">💙💛 Украинская обувь</a>${T.pages.slice(1, 3).map(p => `<a class="pill" style="background:var(--cream)" href="${p.h}">${p.t}</a>`).join('')}</div>`;
+$('#catbtn').onclick = () => $('#mega').classList.toggle('show');
+document.addEventListener('click', e => { if (!e.target.closest('#mega,#catbtn')) $('#mega').classList.remove('show'); });
+
+$('#alpha').innerHTML += T.letters.map(l => `<a href="${T.links.brands}?letter=${encodeURIComponent(l)}">${l}</a>`).join('');
+
+// size finder (из реальных подкатегорий детской обуви с размерными рядами)
+const kids = T.catalog[2].children.filter(c => c.sizes);
+let ft = 1, fs = 0;
+const ages = { '12-26': 'малыши', '11-25': 'малыши', '26-32': 'дошкольники', '25-30': 'дошкольники', '32-38': 'школьники', '30-35': 'школьники', '36-41': 'подростки' };
+function renderFinder() {
+  $('#ftype').innerHTML = kids.map((k, i) => `<button class="${i === ft ? 'on' : ''}" data-t="${i}">${k.t}</button>`).join('');
+  const sz = kids[ft].sizes; if (fs >= sz.length) fs = 0;
+  $('#fsize').innerHTML = sz.map((z, i) => `<button class="${i === fs ? 'on' : ''}" data-s="${i}">${z.t}<small>${ages[z.t] || ''}</small></button>`).join('');
+  $('#fgo').href = sz[fs].h;
+  $('#fgo').innerHTML = `Показать: ${kids[ft].t.toLowerCase()} ${sz[fs].t} ${ic('arrow')}`;
+}
+$('#ftype').onclick = e => { const b = e.target.closest('[data-t]'); if (b) { ft = +b.dataset.t; renderFinder(); } };
+$('#fsize').onclick = e => { const b = e.target.closest('[data-s]'); if (b) { fs = +b.dataset.s; renderFinder(); } };
+renderFinder();
+
+// stickers
+const sc = ['var(--sky-l)', 'var(--mint-l)', 'var(--pink-l)', 'var(--sun-l)'], se = ['💳', '🚚', '💬', '📦'];
+$('#stickers').innerHTML = [...T.features, { t: 'Ящиками по 8 пар', d: 'Честная цена за пару и за ящик', h: T.pages[2].h }].map((f, i) => `<a class="st" href="${f.h}" style="background:${sc[i]}"><span class="ic" style="font-size:26px">${se[i]}</span><span><b>${f.t}</b><p>${f.d}</p></span></a>`).join('');
+
+// bubbles
+const bubs = T.catalog.filter(c => c.img).map(c => ({ t: c.t, h: c.h, img: c.img, s: c.children.length + ' разделов' }))
+  .concat([{ t: 'Акция', h: T.catalog[0].h, e: '🔥', bg: 'var(--coral)', s: 'скидки до −23%' }, { t: 'Украинская', h: T.catalog[1].h, e: '💙💛', bg: 'var(--sun)', s: 'обувь' }]);
+$('#bubbles').innerHTML = bubs.map(b => `<a class="bub" href="${b.h}"><div class="c" style="background:${b.bg || '#fff'}">${b.img ? `<img src="${b.img}" alt="${b.t}" loading="lazy">` : b.e}</div><b>${b.t}</b><small>${b.s}</small></a>`).join('');
+
+// cards
+function card(p) {
+  return `<article class="pc" data-id="${p.id}">
+    <div class="ph"><a href="${p.url}"><img src="${p.img}" alt="${p.name}" loading="lazy"></a>${p.off ? `<span class="badge">−${p.off}%</span>` : p.group === 'new' ? '<span class="badge nw">new</span>' : ''}
+      <div class="acts"><button data-act="fav" class="${Store.has('fav', p.id) ? 'on' : ''}" aria-label="В избранное">${ic('heart')}</button><button data-act="cmp" class="${Store.has('cmp', p.id) ? 'on' : ''}" aria-label="Сравнить">${ic('cmp')}</button></div></div>
+    <div class="b">
+      <a class="nm" href="${p.url}">${p.name}</a>
+      <div class="meta">р. ${p.size} · ${p.box} пар · ${p.brand} · <b>в наличии</b></div>
+      <div class="row"><div class="pr"><div class="box" data-uah="${p.boxPrice}">${Store.money(p.boxPrice)}</div><small>за ящик · <span data-uah="${p.price}">${Store.money(p.price)}</span>/пара ${p.oldPrice ? `<s data-uah="${p.oldPrice}">${Store.money(p.oldPrice)}</s>` : ''}</small></div>
+      <button class="add" data-act="cart" aria-label="Добавить ящик" title="Добавить ящик (8 пар)">${ic('plus')}</button></div>
+    </div></article>`;
+}
+function fill(el, list) { el.innerHTML = list.map(card).join(''); }
+fill($('#rail'), T.products.filter(p => p.group === 'new'));
+$('#ptabs').onclick = e => { const g = e.target.dataset.g; if (!g) return; $$('#ptabs button').forEach(b => b.classList.toggle('on', b === e.target)); fill($('#rail'), T.products.filter(p => p.group === g)); $('#rail').scrollLeft = 0; };
+$('.arrows').onclick = e => { const b = e.target.closest('[data-dir]'); if (b) $('#rail').scrollBy({ left: b.dataset.dir * $('#rail').clientWidth * .8, behavior: 'smooth' }); };
+const W = T.catalog[4];
+$('#wall').href = W.h;
+$('#wsubs').innerHTML = W.children.slice(0, 12).map(s => `<a href="${s.h}">${s.t}</a>`).join('');
+fill($('#wgrid'), T.products.filter(p => p.group === 'women').slice(0, 4));
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('.pc [data-act]'); if (!b) return;
+  e.preventDefault();
+  const id = b.closest('.pc').dataset.id, a = b.dataset.act;
+  if (a === 'cart') Store.addToCart(id, 1);
+  else { const on = Store.toggle(a, id); $$(`.pc[data-id="${id}"] [data-act="${a}"]`).forEach(x => x.classList.toggle('on', on)); }
+});
+
+// banners, brands, articles
+$('#bnrs').innerHTML = [{ img: T.images.banners[1], h: 'Украинская обувь — поддерживаем своих', l: T.catalog[1].h }, { img: T.images.banners[2], h: 'Подростковая обувь на новый сезон', l: T.catalog[5].h }]
+  .map(b => `<a class="bnr" href="${b.l}"><img src="${b.img}" alt=""><h3>${b.h}</h3><span class="btn btn-w" style="height:44px">Смотреть ${ic('arrow')}</span></a>`).join('');
+const bl = T.brands.map(b => `<a href="${b.h}">${b.t}</a>`).join('');
+$('#marq').innerHTML = bl + bl;
+const ae = [['☀️', 'var(--sun-l)'], ['👟', 'var(--mint-l)']];
+$('#arts').insertAdjacentHTML('afterbegin', T.articles.map((a, i) => `<article class="art"><div class="em" style="background:${ae[i][1]}">${ae[i][0]}</div><h3>${a.t}</h3><p>${a.d}</p><a href="${a.h}">Читать далее →</a></article>`).join(''));
+
+$('#fpages').innerHTML = T.pages.map(p => `<li><a href="${p.h}">${p.t}</a></li>`).join('');
+$('#fcats').innerHTML = T.catalog.map(c => `<li><a href="${c.h}">${c.t}</a></li>`).join('');
+$('#fcont').innerHTML = C.phones.map((p, i) => `<li><a class="big" href="tel:${C.tel[i]}">${p}</a></li>`).join('') + `<li>🕕 ${C.hours}</li><li>✉️ <a href="mailto:${C.email}">${C.email}</a></li><li>📍 ${C.address}</li><li><a href="${T.pages[3].h}" style="color:var(--sun)">Карта проезда →</a></li>`;
+$('#mnavbd').innerHTML = T.catalog.map(c => c.children ? `<details><summary>${emo[c.t] || ''} ${c.t}</summary><a href="${c.h}">Все товары</a>${c.children.map(s => `<a href="${s.h}">${s.t}</a>`).join('')}</details>` : `<a href="${c.h}">${c.t}</a>`).join('') + T.pages.map(p => `<a href="${p.h}">${p.t}</a>`).join('') + `<a href="${T.links.login}">Личный кабинет</a><a href="${T.links.viewed}">Просмотренные товары</a><a href="tel:${C.tel[0]}">${C.phones[0]}</a>`;
+
+// search
+const sf = $('#search'), si = $('input', sf), sg = $('.suggest', sf);
+si.oninput = () => { const r = Store.search(si.value); sg.innerHTML = r.map(p => `<a href="${p.url}"><img src="${p.img}" alt=""><span><b>${p.name}</b><br><small>${p.brand} · р. ${p.size}</small></span></a>`).join('') + (si.value.trim() ? `<a class="all" href="${T.links.search}${encodeURIComponent(si.value)}">Все результаты →</a>` : ''); sg.classList.toggle('show', !!si.value.trim()); };
+sf.onsubmit = e => { e.preventDefault(); location.href = T.links.search + encodeURIComponent(si.value); };
+document.addEventListener('click', e => { if (!e.target.closest('#search')) sg.classList.remove('show'); });
+
+function renderCart() {
+  const it = Store.cartItems();
+  $('#cart .bd').innerHTML = it.length ? it.map(({ p, q }) => `<div class="ci"><img src="${p.img}" alt=""><div class="t"><b>${p.name}</b><small>${p.box} пар · ${Store.money(p.boxPrice)}/ящ.</small></div><div class="qty" data-id="${p.id}"><button data-cq="-1">−</button><span>${q}</span><button data-cq="1">+</button></div></div>`).join('') : '<div class="empty"><div>👟</div>Пока пусто — добавьте что-нибудь</div>';
+}
+$('#cart .bd').onclick = e => { const b = e.target.closest('[data-cq]'); if (!b) return; const id = b.parentElement.dataset.id; Store.setQty(id, Store.state.cart[id] + +b.dataset.cq); };
+Store.on(s => {
+  const n = { cart: Store.cartCount(), fav: s.fav.length, cmp: s.cmp.length };
+  $$('[data-count]').forEach(el => { const v = n[el.dataset.count]; el.textContent = v || (el.dataset.count === 'cart' ? '0' : ''); v || el.dataset.count === 'cart' ? el.removeAttribute('data-z') : el.setAttribute('data-z', ''); });
+  $$('[data-total]').forEach(el => el.textContent = Store.money(Store.cartTotal()));
+  $$('[data-uah]').forEach(el => el.textContent = Store.money(+el.dataset.uah));
+  renderCart();
+});
+
+const ov = $('#ov');
+const open = id => { $('#' + id).classList.add('show'); ov.classList.add('show'); };
+const close = () => { $$('.drawer.show,.modal.show').forEach(x => x.classList.remove('show')); ov.classList.remove('show'); };
+document.addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o) { e.preventDefault(); open(o.dataset.open); } if (e.target.closest('[data-close]') || e.target === ov) close(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+$('#cbform').onsubmit = e => { e.preventDefault(); close(); Store.toast('Спасибо! Скоро перезвоним 📞'); };
+$('#subform').onsubmit = e => { e.preventDefault(); e.target.reset(); Store.toast('Ура! Вы подписаны 🎉'); };
+$$('[data-list]').forEach(a => a.onclick = e => { e.preventDefault(); if (a.dataset.list === 'fav') location.href = T.links.favorites; else Store.toast(`В сравнении: ${Store.state.cmp.length}`); });
+const tt = $('#totop'); addEventListener('scroll', () => tt.classList.toggle('show', scrollY > 600)); tt.onclick = () => scrollTo({ top: 0, behavior: 'smooth' });
+</script>
+</body>
+</html>

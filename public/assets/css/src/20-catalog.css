@@ -1,0 +1,177 @@
+/* ==========================================================================
+   Каталог: категории, бренды, поиск, избранное и просмотренные
+   ========================================================================== */
+.catalog{min-width:0}
+.page-head .ph-note{color:var(--muted);margin-top:4px;font-size:15px}
+.cat-one{padding:10px 0 20px}
+.cat-main{min-width:0}
+
+/* сетка карточек: колонки не шире контейнера (minmax 0), число колонок — чтобы влезала кнопка «В корзину» */
+.catalog .grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+.catalog .grid.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.catalog .grid.g4 .pc .buy .btn svg{display:none}
+@media (max-width:1320px){.catalog .grid.g4{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:1180px){.catalog .grid{grid-template-columns:repeat(4,minmax(0,1fr))}.catalog .grid.g4{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:1100px) and (min-width:981px){.catalog .grid.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:980px){.catalog .grid,.catalog .grid.g4{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:800px){.catalog .grid,.catalog .grid.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:680px){.catalog .grid,.catalog .grid.g4{gap:10px}}
+
+/* подкатегории и размерные ряды */
+.cat-subs{align-items:center;margin-top:2px}
+.cat-subs a{display:inline-flex;align-items:center;gap:6px}
+.cat-subs a small{font-size:12px;font-weight:600;color:var(--muted)}
+.cat-subs a.on small,.cat-subs a:hover small{color:var(--blue)}
+.cat-subs .subs-t{font-weight:700;color:var(--muted);font-size:14px;margin-right:2px}
+
+/* тулбар списка */
+.ltb{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.ltb-l,.ltb-r{display:flex;align-items:center;gap:10px;min-width:0}
+.ltb .count b{color:var(--ink)}
+.ltb .select{max-width:230px;padding-right:32px}
+.fbtn{display:none;align-items:center;gap:8px}
+.fcnt{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--orange);color:#fff;font-size:11px;font-weight:800;line-height:1}
+.viewtg a{width:42px;height:42px;border:1px solid var(--line);border-radius:10px;display:grid;place-items:center;background:#fff;color:var(--muted)}
+.viewtg a:hover{border-color:var(--blue);color:var(--blue)}
+.viewtg a.on{border-color:var(--blue);color:var(--blue);background:var(--blue-l)}
+
+/* выбранные фильтры */
+.active-filters{align-items:center}
+.active-filters a{display:inline-flex;align-items:center;gap:6px;background:var(--blue-l);color:var(--blue-d);font-weight:700;font-size:13px;padding:5px 10px;border-radius:20px;max-width:100%}
+.active-filters a svg{width:14px;height:14px}
+.active-filters a:hover{background:#d5eaf7}
+.active-filters .af-reset{background:none;color:var(--orange-d);padding:5px 4px}
+.active-filters .af-reset:hover{background:none;text-decoration:underline}
+
+/* панель фильтров */
+.filters .fh{gap:10px}
+.filters .fh-t{display:flex;align-items:center;gap:8px;margin-right:auto}
+.filters .fh-reset{font-size:13px}
+.filters .fh-x{display:none;width:40px;height:40px;border-radius:10px;place-items:center;color:var(--muted)}
+.filters .fh-x:hover{background:var(--bg)}
+.fgroup summary .fcnt{margin-left:6px;margin-right:auto}
+.fgroup .fb .check{align-items:center;gap:8px;line-height:1.3}
+.fgroup .fb .check input{margin-top:0}
+.fgroup .fb .fn{flex:1;min-width:0;overflow-wrap:anywhere}
+.fgroup .fb .cnt{flex:none}
+.fv.x{display:none}
+.fgroup.fall .fv.x{display:flex}
+.fv.fhide,.fgroup.fall .fv.fhide{display:none}
+.fmore{justify-self:start;color:var(--blue);font-weight:700;font-size:14px;padding:2px 0}
+.fmore:hover{text-decoration:underline}
+.fsearch{height:38px;font-size:14px}
+.sw{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.15);flex:none}
+.flinks a{display:flex;gap:8px;align-items:center;font-size:14px;padding:2px 0}
+.flinks a:hover .fn{color:var(--blue)}
+.flinks .cnt{margin-left:auto}
+.fprice-go{margin-top:8px}
+.fact{display:grid;gap:8px;padding:14px 18px;border-top:1px solid var(--line)}
+@media (min-width:981px){.filters.auto .fact .btn-o{display:none}.filters.auto .fact:not(:has(.btn-g)){display:none}}
+
+/* табличный вид (опт); position — чтобы скрытые подписи колонок не расширяли страницу */
+.catalog .tblwrap{position:relative}
+.ltbl td .qty{height:36px;width:max-content}
+.ltbl td:nth-child(2){min-width:180px}
+/* на телефоне строка таблицы — компактная карточка: фото | название, размер, цена за ящик | ящики и «В корзину»
+   (без горизонтальной прокрутки таблицы; колонки .hide-m скрыты базовыми стилями) */
+@media (max-width:680px){
+  .catalog .ltbl thead{display:none}
+  .catalog .ltbl,.catalog .ltbl tbody{display:block}
+  .catalog .ltbl tr{display:grid;grid-template-columns:56px minmax(0,1fr) auto;grid-template-areas:"img name name" "img size sum" "qty qty cart";gap:6px 12px;align-items:center;padding:12px;border-bottom:1px solid var(--line)}
+  .catalog .ltbl tr:last-child{border-bottom:0}
+  .catalog .ltbl td{display:block;padding:0;border:0;min-width:0}
+  .catalog .ltbl td:nth-child(1){grid-area:img;align-self:start}
+  .catalog .ltbl td:nth-child(2){grid-area:name;min-width:0}
+  .catalog .ltbl td:nth-child(3){grid-area:size;color:var(--muted);font-size:13px}
+  .catalog .ltbl td:nth-child(6){grid-area:sum;text-align:right}
+  .catalog .ltbl td:nth-child(6)::before{content:var(--lt-box,"");display:block;font-size:11px;font-weight:600;color:var(--muted)}
+  .catalog .ltbl td:nth-child(7){grid-area:qty}
+  .catalog .ltbl td:nth-child(8){grid-area:cart;justify-self:end}
+  .catalog .ltbl td.hide-m{display:none}
+  .catalog .ltbl td .qty{height:40px}
+}
+
+/* «Показать ещё» и описание */
+.more-btn .btn[aria-busy=true]{opacity:.6;pointer-events:none}
+.more-btn .btn[aria-busy=true] svg{animation:cat-spin 1s linear infinite}
+@keyframes cat-spin{to{transform:rotate(360deg)}}
+.cat-text{margin-top:30px}
+.cat-text .prose{max-width:none;font-size:15px;color:var(--ink)}
+
+/* поиск, избранное, просмотренные */
+.srch-form{display:flex;gap:10px;max-width:640px;margin:4px 0 16px}
+.srch-form .input{flex:1;min-width:0}
+.srch-form .btn{height:46px;flex:none}
+.bal-bar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.bal-bar .tabline{margin-bottom:0;flex:1;min-width:0}
+.bal-tabs a{display:inline-flex;align-items:center;gap:8px}
+.bal-bar .btn{margin-bottom:8px}
+
+/* бренды: список */
+.br-tools{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:6px 0 20px}
+.br-letters{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.br-letters a{min-width:36px;height:36px;padding:0 10px;display:grid;place-items:center;border-radius:10px;background:#fff;border:1px solid var(--line);font-weight:700;font-size:14px}
+.br-letters a:hover{border-color:var(--blue);color:var(--blue)}
+.br-letters a.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.br-find{position:relative;flex:0 1 300px;min-width:200px}
+.br-find svg{position:absolute;left:14px;top:14px;color:var(--muted)}
+.br-find .input{padding-left:42px}
+.br-h{font-size:22px;font-weight:800;margin:0 0 12px}
+.br-top{margin-bottom:28px}
+.br-tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.br-tile{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;transition:.2s}
+.br-tile:hover{border-color:var(--blue);box-shadow:var(--shadow)}
+.br-tile b{font-size:15px;line-height:1.25;overflow-wrap:anywhere}
+.br-tile small{color:var(--muted);font-size:12px}
+.br-logo{width:100%;height:60px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:4px}
+.br-logo img{max-height:60px;max-width:120px;width:auto;height:auto;object-fit:contain}
+.br-logo span{width:52px;height:52px;border-radius:14px;background:var(--blue-l);color:var(--blue);display:grid;place-items:center;font-weight:800;font-size:18px}
+.br-group{margin-bottom:22px;scroll-margin-top:100px}
+.br-list{list-style:none;columns:4;column-gap:16px;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.br-list li{break-inside:avoid}
+.br-list a{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 8px;border-radius:8px;font-weight:600}
+.br-list a span{min-width:0;overflow-wrap:anywhere}
+.br-list a small{color:var(--muted);font-size:12px;font-weight:600;flex:none}
+.br-list a:hover{background:var(--blue-l);color:var(--blue-d)}
+
+/* бренд: шапка */
+.bh{display:flex;align-items:center;gap:18px}
+.bh-logo{width:120px;height:72px;flex:none;background:#fff;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px}
+.bh-logo img{max-width:106px;max-height:58px;width:auto;height:auto;object-fit:contain}
+
+@media (max-width:1180px){.br-tiles{grid-template-columns:repeat(4,1fr)}.br-list{columns:3}}
+@media (max-width:980px){
+  .fbtn{display:inline-flex}
+  .filters-wrap.show{box-shadow:0 0 40px rgba(10,20,28,.25)}   /* у закрытой панели тень заходила серой полосой на левый край экрана */
+  .filters-wrap .filters{border:0;border-radius:0;min-height:100%;display:flex;flex-direction:column;overflow:visible}
+  .filters .fh{position:sticky;top:0;background:#fff;z-index:2}
+  .filters .fh-x{display:grid}
+  .fgroup .fb{max-height:none}
+  .fact{position:sticky;bottom:0;margin-top:auto;background:#fff;box-shadow:0 -6px 16px rgba(20,33,43,.06)}
+  .fprice-go{display:none}
+  .br-list{columns:2}
+}
+@media (max-width:680px){
+  .ltb{padding:8px 10px}
+  .ltb-l{flex:1 1 100%;justify-content:space-between}
+  .ltb-r{flex:1 1 100%}
+  .ltb-r .select{flex:1;max-width:none;min-width:0}
+  .cat-subs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-16px;margin-right:-16px;padding:0 16px 4px}
+  .cat-subs a,.cat-subs .subs-t{flex:none;white-space:nowrap}
+  .srch-form .btn{padding:0 16px}
+  .br-letters{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px 4px;flex:1 1 100%}
+  .br-letters a{flex:none}
+  .br-tiles{grid-template-columns:repeat(2,1fr);gap:10px}
+  .br-list{columns:1}
+  .br-find{flex:1 1 100%}
+  .bh{gap:12px}
+  .bh-logo{width:84px;height:56px}
+  .bh-logo img{max-width:70px;max-height:42px}
+  .bal-bar .btn{margin-bottom:0}
+  /* «Избранное / Просмотренные / Сравнение» — во всю ширину без иконок, «Очистить» — строкой ниже справа:
+     иначе на 375px текущая вкладка обрезалась кнопкой */
+  .bal-bar .tabline{flex:1 1 100%}
+  .bal-bar .btn{margin-left:auto}
+  .bal-tabs a{padding:10px;font-size:14px}
+  .bal-tabs a svg{display:none}
+}

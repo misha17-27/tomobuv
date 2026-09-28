@@ -1,0 +1,86 @@
+/* Админка → «Отчёты». Только то, чего нет в admin.css: строка периода, подписи к показателям,
+   SVG-график (столбики + линия заказов + всплывашка), узкие таблицы разбивок в боковой колонке. */
+
+/* ---------- период ---------- */
+.rp-period{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;margin-bottom:12px}
+.rp-period .tabs{margin:0}
+.rp-custom{margin:0;gap:6px;flex-wrap:nowrap;padding:3px 3px 3px 10px;border:1px solid var(--line);border-radius:99px;background:var(--card)}
+.rp-custom.on{border-color:var(--brand)}
+.rp-custom input[type=date]{width:auto;min-height:32px;padding:4px 6px;border:0;border-radius:6px;font-size:13.5px;background:transparent}
+.rp-custom input[type=date]:focus{box-shadow:0 0 0 2px rgba(255,90,31,.25)}
+.rp-custom .btn{border-radius:99px}
+.rp-when{font-size:13.5px;margin:0 0 16px}
+.rp-refresh{display:inline;margin:0}
+.rp-refresh button{background:none;border:0;padding:0;font:600 13.5px var(--font);color:var(--brand);cursor:pointer}
+.rp-refresh button:hover{text-decoration:underline}
+
+/* ---------- показатели: 4 в ряд, подписи и изменение к прошлому периоду ---------- */
+.rp-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+.rp-stats .stat span{font-size:1.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp-sub{display:block;font-size:12px;font-weight:500;color:var(--steel);margin-top:3px;line-height:1.35}
+.rp-delta{display:inline-block;font-size:12px;font-weight:700;color:var(--steel);white-space:nowrap}
+.rp-delta.up{color:var(--ok)}
+.rp-delta.down{color:var(--bad)}
+
+/* ---------- график ---------- */
+.rp-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;font-weight:600;color:var(--steel)}
+.rp-legend span{display:inline-flex;align-items:center;gap:6px}
+.rp-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--brand)}
+.rp-legend i.lg-line{height:3px;border-radius:2px;background:var(--info)}
+.rp-chart{position:relative;overflow-x:auto}
+.rp-svg{min-width:600px}
+.rp-svg rect.b{fill:var(--brand)}
+.rp-svg .col.on rect.b,.rp-svg .col:hover rect.b{fill:var(--ink)}
+.rp-svg rect.hit,.rp-svg rect.hit:hover{fill:transparent;cursor:default}
+.rp-svg .gl{stroke:var(--line-2);stroke-width:1}
+.rp-svg .ax-n{fill:var(--info)}
+.rp-svg .ax-cap{font-size:10.5px;letter-spacing:.04em}
+.rp-svg .ln{fill:none;stroke:var(--info);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;pointer-events:none}
+.rp-svg .dt{fill:#fff;stroke:var(--info);stroke-width:1.6;pointer-events:none}
+.rp-tip{position:absolute;z-index:3;pointer-events:none;background:var(--ink);color:#fff;border-radius:8px;padding:7px 10px;
+  font-size:12.5px;line-height:1.4;white-space:nowrap;box-shadow:0 8px 20px -8px rgba(11,18,32,.5);transform:translate(-50%,-100%)}
+.rp-tip b{display:block;font-size:13px}
+.rp-tip span{color:#c7d0e0}
+
+/* ---------- таблицы ---------- */
+.rp-switch{display:flex;gap:6px;flex-wrap:wrap}
+.grid .rp-n{width:40px;color:var(--steel);font-variant-numeric:tabular-nums}
+.grid .rp-m{width:130px}
+.rp-foot{border-top:1px solid var(--line);padding-top:12px;padding-bottom:14px}
+.rp-foot .hint{margin:0}
+.rp-facts dt{align-self:center}
+.rp-facts dd small{display:inline;margin-left:8px;color:var(--steel);font-size:12.5px}
+.rp-mini td{padding:10px 20px;vertical-align:top}
+.rp-mini td:first-child{width:100%}
+.rp-mini .meter{margin:6px 0 2px;min-width:0}
+.rp-export{display:grid;gap:8px;margin-top:12px}
+
+/* колонки не растягиваются по ширине широкой таблицы — таблицы прокручиваются внутри .table-scroll
+   (в admin.css у .two-col на узком экране 1fr, а не minmax(0,1fr)) */
+.rp-cols > *{min-width:0}
+
+@media(max-width:1200px){
+  .rp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:1000px){
+  .rp-cols{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:640px){
+  .rp-period{align-items:stretch}
+  .rp-custom{width:100%;justify-content:space-between}
+  .rp-custom{padding-left:6px;gap:2px}
+  .rp-custom > span{display:none}
+  .rp-custom input[type=date]{flex:1;min-width:0;padding:4px 2px;font-size:13px}
+  .rp-stats{gap:10px}
+  .rp-stats .stat{padding:14px}
+  .rp-stats .stat span{font-size:1.3rem}
+  /* график шире экрана и прокручивается; подписи крупнее — иначе при уменьшении 900 → 720px они ~7px */
+  .rp-svg{min-width:720px}
+  .rp-svg .ax{font-size:13px}
+  .rp-svg .ax-cap{font-size:12px}
+  .grid .rp-n{width:28px;padding-right:0}
+  .rp-cols .table-scroll .grid{min-width:520px}                  /* название не сжимается в столбик — таблица прокручивается */
+  .rp-cols .card-hd{flex-wrap:wrap}
+  .rp-switch{flex-wrap:nowrap}
+  .rp-mini td{padding:10px 16px}
+}

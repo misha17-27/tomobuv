@@ -1,0 +1,120 @@
+/* Админка → «Импорт / экспорт». Базовые компоненты — admin.css, здесь только своё (префикс im-). */
+[hidden]{display:none!important}   /* .btn, .flash и .im-upbar задают display — атрибут hidden должен побеждать */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.im-m0{margin:0}
+.im-pad{padding:0 20px 16px;margin:12px 0 0}
+.im-pb0{padding-bottom:0}
+.im-bad{color:var(--bad)}
+.im-plus{color:var(--ok)}
+.im-url{display:block;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--steel);font-size:12.5px}
+
+/* ---------- загрузка ---------- */
+.im-top{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px;align-items:start}
+.im-upload h2,.im-howto h2,.im-export h2{font-size:1.02rem;margin-bottom:14px}
+.im-drop{position:relative;display:grid;justify-items:center;gap:6px;text-align:center;padding:26px 16px;margin-bottom:16px;
+  border:2px dashed #c9d2e0;border-radius:var(--r);background:var(--bg);color:var(--steel);cursor:pointer;transition:border-color .15s,background .15s}
+.im-drop:hover,.im-drop.over{border-color:var(--brand);background:var(--brand-l)}
+.im-drop.has-file{border-style:solid;border-color:var(--ok);background:#effaf4}
+.im-drop b{color:var(--ink);font-size:15px;word-break:break-word}
+.im-drop .hint{margin:0;max-width:460px}
+.im-drop input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;min-height:0;padding:0;border:0}
+.im-drop:focus-within{outline:2px solid var(--brand);outline-offset:2px}
+.im-upbar{display:grid;gap:6px;margin:0 0 14px}
+.im-upbar .meter{height:9px}
+.im-upbar .meter i{transition:width .3s}
+.im-upacts{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.im-upacts .hint{margin:0;flex:1 1 240px}
+.im-steps{margin:0 0 14px;padding-left:20px;display:grid;gap:8px;font-size:14px}
+.im-steps b{color:var(--ink)}
+.im-jobs .im-fname{max-width:280px}
+.im-jobs .im-fname a{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- задание: файл и сопоставление ---------- */
+.im-file{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:6px 20px}
+.im-file form{flex:none}
+.im-facts{flex:1 1 420px}
+.im-facts > div{grid-template-columns:150px minmax(0,1fr)}
+.im-maptable td{vertical-align:middle}
+.im-maptable td:first-child{width:28%;max-width:260px}
+.im-maptable td:last-child{width:300px;min-width:230px}
+.im-maptable tr.im-on td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+.im-col{word-break:break-word}
+.im-ex{max-width:360px}
+.im-ex span{display:inline-block;max-width:100%;margin:2px 6px 2px 0;padding:2px 8px;border-radius:6px;background:var(--line-2);
+  font:12.5px/1.5 var(--mono);color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+.im-ex span.muted{background:none;padding:0;font-family:var(--font)}
+select.im-dup,input.im-dup{border-color:var(--bad);background-color:#fef6f6}
+.im-modes{border:0;padding:0;margin:4px 0 12px;display:flex;flex-wrap:wrap;gap:4px 22px}
+.im-modes legend{margin-bottom:6px}
+.im-checks{max-height:none;margin-top:6px}
+.im-hdr{align-self:center;margin-top:18px}
+.im-badcats{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.im-badcats .lbl{width:100%}
+.im-addcat{cursor:pointer}
+.im-addcat[disabled]{opacity:.45;cursor:default}
+.im-problems ul{margin:6px 0 0;padding-left:20px;font-weight:500}
+.im-savebar{gap:10px}
+.im-prof{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto}
+.im-prof select{width:auto;min-width:150px}
+.im-prof input{width:200px}
+
+/* ---------- предпросмотр ---------- */
+.im-sum{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.im-preview td{vertical-align:top}
+.im-pname{min-width:200px;max-width:300px}
+.im-preview small{display:block}
+.im-cat{min-width:140px;max-width:220px}
+.im-changes{min-width:200px;max-width:380px;font-size:13px}
+.im-changes b{display:block;font-weight:600;color:var(--ink-2)}
+.im-warn{display:block;color:#8a5a00 !important}
+.im-preview tr.im-a-error td{background:#fff7f7}
+.im-preview tr.im-a-same td,.im-preview tr.im-a-skip td{color:var(--steel)}
+.st.im-err{background:#fde8e8;color:#a01b1f}
+.im-raw{padding:0}
+.im-raw summary{padding:16px 20px;cursor:pointer;list-style-position:inside}
+.im-raw[open] summary{border-bottom:1px solid var(--line)}
+
+/* ---------- ход задания ---------- */
+.im-bar{position:relative;height:30px;border-radius:99px;background:var(--line-2);overflow:hidden;margin-bottom:10px}
+.im-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),#ff8a3d);border-radius:99px;transition:width .4s ease}
+.im-bar b{position:absolute;inset:0;display:grid;place-items:center;font-size:13.5px;color:var(--ink);text-shadow:0 0 3px #fff}
+.im-sub{font-size:14.5px;margin:0 0 16px}
+.im-counters{margin:0 0 14px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.im-counters .stat{cursor:default}
+.im-counters .stat:hover{transform:none}
+.im-runacts{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.im-del{margin-bottom:20px}
+
+/* ---------- итог ---------- */
+.im-logacts{display:grid;gap:12px;justify-items:start}
+.im-profrow{display:flex;gap:8px;flex-wrap:wrap;width:100%}
+.im-profrow input{flex:1 1 180px;width:auto}
+.im-logtable td:first-child{width:90px}
+
+/* ---------- экспорт ---------- */
+.im-colsets{border:0;padding:0;margin:4px 0 8px;display:grid;gap:2px}
+.im-colsets legend{margin-bottom:6px}
+.im-exbar .hint{margin:0}
+.im-exbar .btn-sm{margin-left:auto}
+
+@media (max-width:1100px){
+  .im-top{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .im-facts > div{grid-template-columns:1fr;gap:2px}
+  .im-settings .card-hd,#preview .card-hd{flex-wrap:wrap;gap:4px 12px}
+  .im-savebar,.im-exbar{position:static}   /* липкая панель на телефоне закрывает треть экрана */
+  /* сопоставление на телефоне — карточками: колонка, примеры, поле */
+  .im-maptable thead{display:none}
+  .im-maptable tr{display:grid;padding:10px 0;border-bottom:1px solid var(--line)}
+  .im-maptable tr:last-child{border-bottom:0}
+  .im-maptable td{display:block;border:0;padding:3px 16px;width:auto !important;min-width:0 !important;max-width:none}
+  .im-maptable tr.im-on{box-shadow:inset 3px 0 0 var(--ok)}
+  .im-maptable tr.im-on td:first-child{box-shadow:none}
+  .im-prof{margin-left:0;width:100%}
+  .im-prof select,.im-prof input{flex:1 1 140px;width:auto;min-width:0}
+  .im-sum{justify-content:flex-start}
+  .im-file{padding:6px 16px 16px}
+  .im-exbar .btn-sm{margin-left:0}
+  .im-url{max-width:220px}
+}

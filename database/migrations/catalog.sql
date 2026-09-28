@@ -1,0 +1,7 @@
+-- Каталог: категории, бренды, поиск, избранное, просмотренные. Идемпотентно: можно запускать повторно.
+-- Новых таблиц и колонок раздел не требует — всё уже есть в schema.sql и i18n.sql:
+--   catalog_index (by_new, by_price, by_name, by_sort)  — списки категорий и сортировки;
+--   product_features (filter: feature_id, value_id, product_id) и category_facets — фильтры ?{код}[]=id;
+--   products: brand (brand_id, status, created_at) — страница бренда, ft_search FULLTEXT(name, sku) — поиск;
+--   categories.filter / sort_products / meta_* / seo_*, brands.title / h1 / meta_* и их *_uk — SEO.
+-- Проверено EXPLAIN на категориях 18–57 тыс. товаров: дополнительных индексов не нужно.

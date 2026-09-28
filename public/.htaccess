@@ -1,0 +1,63 @@
+# Tomobuv — Apache (cPanel / ISPmanager)
+Options -Indexes -MultiViews
+AddDefaultCharset UTF-8
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Принудительно HTTPS и без www (раскомментируйте на боевом сервере после подключения SSL)
+    # RewriteCond %{HTTPS} off [OR]
+    # RewriteCond %{HTTP_HOST} ^www\. [NC]
+    # RewriteRule ^ https://tomobuv.com.ua%{REQUEST_URI} [L,R=301]
+
+    # Служебные файлы не отдаём
+    RewriteRule (^|/)\.(?!well-known) - [F]
+
+    # PHP в папках с фото и загрузками не исполняется (до правила «готовые файлы» — иначе оно отдало бы файл раньше)
+    RewriteRule ^wa-data/.*\.(php\d*|phtml|pht|phar)$ - [F,NC]
+    RewriteRule ^uploads/.*\.(php\d*|phtml|pht|phar|cgi|pl|sh)$ - [F,NC]
+    # Оригиналы фото (wa-data/protected) — только через миниатюры
+    RewriteRule ^wa-data/protected/ - [F]
+
+    # Готовые файлы (css, js, картинки, миниатюры фото) — напрямую веб-сервером, без PHP
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
+    # Всё остальное — в index.php (в т.ч. создание недостающих миниатюр фото)
+    RewriteRule ^ index.php [L,QSA]
+</IfModule>
+
+# Сжатие
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml application/xml application/javascript application/json image/svg+xml
+</IfModule>
+
+# Долгий кэш статики в браузере (у css/js в ссылке есть ?v=… — при изменении файла ссылка меняется)
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/webp "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+<IfModule mod_headers.c>
+    <FilesMatch "\.(css|js|jpe?g|png|webp|svg|woff2)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
+
+# PHP в папках с фото и загрузками не исполняется ни при каких условиях — и во вложенных папках
+# со своими .htaccess (например, wa-data/public/shop/products/.htaccess и thumb.php, скопированные со старого сайта:
+# их правила mod_rewrite заменили бы правила этого файла, а запрет доступа наследуется всегда)
+<IfModule mod_authz_core.c>
+    <If "%{REQUEST_URI} =~ m#^(/public)?/(wa-data|uploads)/.*\.(php\d*|phtml|pht|phar)(/|$)#i">
+        Require all denied
+    </If>
+</IfModule>
