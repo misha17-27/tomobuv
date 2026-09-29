@@ -67,19 +67,22 @@ final class PageController
     /**
      * SEO как на старом сайте: title = pages.title, иначе шаблон seo.page_meta_title
      * («{$page.name} | интернет-магазин {$store_info.name}»; на /ua/ — seo.page_meta_title.uk);
-     * description — свой, иначе seo.page_meta_description; keywords — свои, иначе seo.page_meta_keywords.
+     * description — свой, иначе отрывок текста страницы (Seo::excerpt: первые связные абзацы, 120–160 символов),
+     * иначе seo.page_meta_description (страница-список без связного текста — /stati/); keywords — свои, иначе seo.page_meta_keywords.
      */
     private static function seo(array $page, string $path): Seo
     {
-        $vars = ['page' => ['name' => (string) $page['name'], 'title' => (string) $page['title']]];
+        $vars = ['page' => ['name' => (string) $page['name'], 'title' => '']];
         $tpl = (string) Settings::get('seo.page_is_enabled', '1') !== '0';   // шаблоны SEO для страниц включены
         $pick = static function ($own, string $key) use ($tpl, $vars): string {
             $own = trim((string) $own);
             return $own !== '' || !$tpl ? $own : Seo::pick('', $key, $vars);
         };
         $title = $pick($page['title'], 'seo.page_meta_title');
+        $desc = trim((string) $page['meta_description']);
+        if ($desc === '') $desc = Seo::excerpt((string) $page['content']);
         $seo = Seo::make($title !== '' ? $title : (string) $page['name'],
-            $pick($page['meta_description'], 'seo.page_meta_description'),
+            $desc !== '' ? $desc : $pick('', 'seo.page_meta_description'),
             $pick($page['meta_keywords'], 'seo.page_meta_keywords'));
         // canonical: заданный в админке (например, дубль /pages/… → основная страница), иначе сама страница.
         // На старом сайте canonical не было — это улучшение; для /ua/ layout сам подставит украинский адрес.
@@ -205,7 +208,9 @@ final class PageController
     /** HTML-карта сайта: инфо-страницы, каталог, бренды, статьи — всё из кэша справочников */
     private function htmlMap(): Response
     {
-        $seo = Seo::make(t('Карта сайта') . ' — ' . Settings::get('store_name', 'Tomobuv'));
+        // title/description — настройки seo.sitemap_meta_* (на /ua/ — «.uk»), пусто — «Карта сайта — Tomobuv» без описания
+        $seo = Seo::make(Seo::pick('', 'seo.sitemap_meta_title', []) ?: t('Карта сайта') . ' — ' . Settings::get('store_name', 'Tomobuv'),
+            Seo::pick('', 'seo.sitemap_meta_description', []));
         $seo->canonical = url('/sitemap/');
         $brands = array_values(array_filter(Catalog::brands(), static fn($b) => !(int) $b['hidden'] && (int) $b['product_count'] > 0));
         usort($brands, static fn($a, $b) => strnatcasecmp((string) $a['name'], (string) $b['name']));

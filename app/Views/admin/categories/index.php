@@ -2,8 +2,10 @@
 /**
  * Дерево категорий.
  * @var array $cats [id => row] в порядке дерева (lft) @var array $direct [category_id => прямых товаров]
+ * @var string $seoFilter фильтр «SEO» (?seo=) @var array $seoCounts счётчики чипов @var array $seoCells [id => ячейки Title/Description]
  */
 use App\Controllers\Admin\BaseController;
+use App\Services\SeoAudit;
 
 $token = BaseController::tokenField();
 // соседи по родителю — чтобы не показывать «вверх» у первой и «вниз» у последней
@@ -30,21 +32,25 @@ $visible = count(array_filter($cats, static fn($c) => (int) $c['status'] === 1))
   <div class="stat"><span><?= $fmt(count(array_filter($cats, static fn($c) => (string) ($c['name_uk'] ?? '') === ''))) ?></span>Без перевода на украинский</div>
 </div>
 
+<?php if ($cats): ?><?= $view->partial('admin/partials/seo-filter') ?><?php endif; ?>
 <div class="card flush">
   <div class="card-hd">
-    <h2>Дерево категорий</h2>
+    <h2>Дерево категорий<?= $seoFilter !== '' ? ': ' . e(mb_strtolower(SeoAudit::LIST_FILTERS[$seoFilter])) : '' ?></h2>
     <label class="sr-only" for="cat-q">Найти категорию</label>
     <input type="search" id="cat-q" class="ac-treeq" placeholder="Найти категорию…" autocomplete="off">
   </div>
   <?php if (!$cats): ?>
     <div class="empty-card"><h2>Категорий пока нет</h2><p>Создайте первую — товары привязываются к категориям.</p><a class="btn btn-p" href="/admin/categories/new/">Добавить категорию</a></div>
+  <?php elseif ($seoFilter !== '' && !$seoCounts[$seoFilter]): ?>
+    <div class="empty-card"><h2>Таких категорий нет</h2><p>Под фильтр «<?= e(SeoAudit::LIST_FILTERS[$seoFilter]) ?>» не попала ни одна категория.</p><a class="btn" href="/admin/categories/">Все категории</a></div>
   <?php else: ?>
   <div class="table-scroll">
     <table class="tbl ac-tree" id="cat-tree-table">
-      <thead><tr><th>Категория</th><th>Тип</th><th class="num" title="Активных товаров на сайте с учётом подкатегорий">На сайте</th><th class="num" title="Товаров, привязанных прямо к категории (любой статус)">Привязано</th><th>Статус</th><th>Порядок</th><th></th></tr></thead>
+      <thead><tr><th>Категория</th><th>Тип</th><th class="num" title="Активных товаров на сайте с учётом подкатегорий">На сайте</th><th class="num" title="Товаров, привязанных прямо к категории (любой статус)">Привязано</th><th class="seo-col">Title</th><th class="seo-col">Description</th><th>Статус</th><th>Порядок</th><th></th></tr></thead>
       <tbody>
       <?php foreach ($cats as $c):
         $cid = (int) $c['id'];
+        if ($seoFilter !== '' && !SeoAudit::listMatches($seoCells[$cid], $seoFilter)) continue;   // фильтр «SEO»: остальные строки пропускаются, отступ уровня остаётся
         $sib = $siblings[(int) $c['parent_id']] ?? [];
         $pos = array_search($cid, $sib, true);
         $dyn = (int) $c['type'] === 1; ?>
@@ -58,6 +64,7 @@ $visible = count(array_filter($cats, static fn($c) => (int) $c['status'] === 1))
           <td class="ac-small"><?= $dyn ? '<span class="pill new">по условию</span><small><code>' . e(mb_strimwidth((string) $c['conditions'], 0, 40, '…')) . '</code></small>' : 'обычная' . ((int) $c['include_sub'] ? '' : '<small>без подкатегорий</small>') ?></td>
           <td class="num"><a href="/category/<?= e(rawurlencode((string) $c['url'])) ?>/" target="_blank" rel="noopener" title="Открыть на сайте"><?= $fmt($c['product_count']) ?></a></td>
           <td class="num"><?php if ($dyn): ?><span class="muted">—</span><?php else: ?><a href="/admin/products/?category=<?= $cid ?>&amp;direct=1"><?= $fmt($direct[$cid] ?? 0) ?></a><?php endif; ?></td>
+          <?= $view->partial('admin/partials/seo-cells', ['seoCell' => $seoCells[$cid] ?? null, 'seoEdit' => '/admin/categories/' . $cid . '/#h-seo']) ?>
           <td><?= (int) $c['status'] ? '<span class="pill ok">на сайте</span>' : '<span class="pill">скрыта</span>' ?></td>
           <td class="nowrap">
             <div class="ac-move">
@@ -76,6 +83,7 @@ $visible = count(array_filter($cats, static fn($c) => (int) $c['status'] === 1))
   <p class="empty-card" id="cat-q-empty" hidden>Ничего не найдено.</p>
   <?php endif; ?>
 </div>
+<?php if ($cats): ?><?= $view->partial('admin/partials/seo-legend', ['seoType' => 'category']) ?><?php endif; ?>
 
 <?php if ($cats): ?>
 <form method="post" action="/admin/categories/move/" class="card">

@@ -89,7 +89,7 @@ $noUk = array_values(array_filter($templates, static fn($t) => $t['used'] && $t[
       <p class="muted">В <a href="/sitemap.xml" target="_blank" rel="noopener">sitemap.xml</a> — <b><?= $fmt($sitemap['total']) ?></b>
         <?= plural((int) $sitemap['total'], 'адрес', 'адреса', 'адресов') ?> русской версии (и столько же украинской, /ua/…), у каждого поисковик берёт title (заголовок в выдаче) и description (текст под ним).
         Пустое поле — не всегда ошибка: если своего нет, сайт строит его из SEO-шаблона — это <b>По шаблону</b>, исправлять не нужно.
-        <b>Нет</b> — пусто, и шаблона тоже нет; <b>Длина</b> — своё значение короче или длиннее, чем покажет Google
+        <b>Нет</b> — пусто, и шаблона тоже нет; <b>Длина</b> — своё значение (или результат шаблона) короче или длиннее, чем покажет Google
         (title <?= SeoAudit::TITLE_MIN ?>–<?= SeoAudit::TITLE_MAX ?>, description <?= SeoAudit::DESC_MIN ?>–<?= SeoAudit::DESC_MAX ?> символов).</p>
 
       <div class="seo-map">
@@ -230,7 +230,7 @@ $noUk = array_values(array_filter($templates, static fn($t) => $t['used'] && $t[
       $cur = null; foreach ($templates as $t): ?>
         <?php if ($t['where'] !== $cur): $cur = $t['where']; ?><tr class="seo-group"><td colspan="3"><?= e($cur) ?></td></tr><?php endif; ?>
         <tr class="<?= $t['used'] ? '' : 'is-draft' ?>">
-          <td class="seo-fld"><b><?= e($t['field']) ?></b><?php if (!$t['used']): ?><small><?= $t['where'] === 'Бренд' ? 'не применяется: у бренда — свой title или имя' : ($t['field'] === 'H1' ? 'не применяется: H1 = название' : 'выключен в настройках') ?></small><?php endif; ?></td>
+          <td class="seo-fld"><b><?= e($t['field']) ?></b><?php if (!$t['used']): ?><small><?= $t['field'] === 'H1' ? 'не применяется: H1 = название' : 'выключен в настройках' ?></small><?php endif; ?></td>
           <td class="seo-code">
             <?= $t['tpl'] !== '' ? '<code>' . e($t['tpl']) . '</code>' : '<span class="muted">пусто</span>' ?>
             <?php if ($t['tpl_uk'] !== ''): ?><div class="seo-uk-tpl"><span class="seo-lang">UA</span><code><?= e($t['tpl_uk']) ?></code></div>

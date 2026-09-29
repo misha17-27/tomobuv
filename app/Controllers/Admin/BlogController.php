@@ -12,6 +12,7 @@ use App\Core\Settings;
 use App\Core\Str;
 use App\Services\AdminCatalog;
 use App\Services\HtmlSanitizer;
+use App\Services\SeoAudit;
 
 /**
  * Блог: статьи /blog/{url}/ — список, создание, редактирование, удаление.
@@ -38,14 +39,21 @@ final class BlogController extends BaseController
         }
         if ($status !== '') { $where[] = 'status = ?'; $params[] = $status; }
         $w = implode(' AND ', $where);
-        $total = (int) $db->value("SELECT COUNT(*) FROM blog_posts WHERE $w", $params);
+        // фильтр «SEO» (?seo=) — те же условия, что у точек (SeoAudit); счётчики чипов — под статус и поиск
+        $seo = array_key_exists(Request::get('seo'), SeoAudit::LIST_FILTERS) ? Request::get('seo') : '';
+        $sc = $db->row('SELECT COUNT(*) AS n, ' . SeoAudit::listCountSql('meta_title', 'meta_description') . " FROM blog_posts WHERE $w", $params);
+        $seoCounts = ['' => (int) $sc['n'], 'notitle' => (int) $sc['notitle'], 'nodesc' => (int) $sc['nodesc'], 'len' => (int) $sc['len']];
+        if ($seo !== '') $w .= ' AND ' . SeoAudit::listWhere($seo, 'meta_title', 'meta_description');
+        $total = $seo !== '' ? $seoCounts[$seo] : $seoCounts[''];
         $pg = new Paginator($total, self::PER_PAGE, Request::page());
         $rows = $db->all("SELECT id, url, title, title_uk, image, status, published_at, updated_at,
+                meta_title, meta_title_uk, meta_description, meta_description_uk,
                 (text_uk IS NOT NULL AND text_uk <> '') AS has_uk FROM blog_posts WHERE $w
             ORDER BY published_at DESC, id DESC LIMIT " . self::PER_PAGE . ' OFFSET ' . $pg->offset, $params);
         $counts = $db->pairs('SELECT status, COUNT(*) FROM blog_posts GROUP BY status');
         return $this->render('admin/blog/index', [
             'title' => 'Блог', 'rows' => $rows, 'pg' => $pg, 'q' => $q, 'status' => $status, 'total' => $total, 'counts' => $counts,
+            'seoFilter' => $seo, 'seoCounts' => $seoCounts, 'seoCells' => SeoAudit::listCells('blog', $rows),
             'actions' => '<a class="btn btn-p" href="/admin/blog/new/">+ Новая статья</a>',
             'styles' => ['admin/content.css'], 'scripts' => ['admin/content.js'],
         ]);

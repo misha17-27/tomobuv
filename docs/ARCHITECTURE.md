@@ -19,7 +19,7 @@ app/
   Services/          ← бизнес-логика: Catalog (справочники из кэша), Products (карточки), CatalogIndexer, …
   Controllers/Front/ ← витрина;  Controllers/Admin/ ← админка (наследуют BaseController)
   Views/layouts/     ← front.php, admin.php;  Views/front/, Views/admin/, Views/errors/, Views/emails/
-bin/                 ← CLI: install, import-webasyst, reindex, cache-clear, cron, create-admin, build-assets
+bin/                 ← CLI: install, import-webasyst, reindex, cache-clear, cron, create-admin, build-assets, product-names, supplier-jonggolf, seo-autofix
 config/              ← config.php (секреты, не в git) и config.example.php
 database/schema.sql  ← схема БД
 storage/             ← кэш, логи, сессии, загрузки (не в git, закрыта от веба)
@@ -97,6 +97,9 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
 - детали: `<dl class="detail"><div><dt>Телефон</dt><dd>…</dd></div></dl>`, история — `<ul class="events"><li><b>…</b><span>дата</span><em>текст</em></li>`
 - пусто: `<div class="empty-card"><h2>…</h2><p>…</p><a class="btn btn-p">…</a></div>`; превью Google — `.serp > .serp-url/.serp-title/.serp-desc`;
   точки SEO — `.seo-dot ok|warn|auto|none`; медиа-сетка — `.media-grid > figure`; график — `.bars > .bar` или SVG `.chart`
+- колонки «Title»/«Description» в списках (товары, статьи, страницы, категории): `SeoAudit::listCells($type, $rows)` — пакетно, та же логика,
+  что SEO-обзор и витрина; ячейки — партиал `admin/partials/seo-cells`, чипы `?seo=notitle|nodesc|len` — `seo-filter`
+  (SQL — `SeoAudit::listWhere()`, в PHP — `listMatches()`), легенда со ссылкой на обзор — `seo-legend`
 - сообщения: `$this->flash('Сохранено')` → зелёная плашка, `$this->flash('…', true)` → красная.
 - картинки для контента: `public/uploads/ГГГГ/ММ/` через `App\Services\Media::store($file)`; выбор картинки на любом экране — `<button type="button" class="btn" data-media-pick="#поле" data-media-preview="#превью">Выбрать из медиатеки</button>` + `'scripts' => ['admin/media.js']` (для textarea вставляет `<img>` в позицию курсора; из JS — `MediaPicker.open({onSelect(file){…}})`).
 - редакторы (товар, категория, бренд, характеристика, страница, статья, баннер) — один вид: над формой переключатель «RU | UA» со счётчиком
@@ -111,16 +114,102 @@ tools/check.mjs      ← автопроверка страниц в headless Chr
 | Страница | Адрес | Title / Description |
 |---|---|---|
 | Главная | `/` | настройки `seo.home_page_meta_*` |
-| Категория | `/category/{url}/`, `?page=N` | свои meta_* категории, иначе шаблоны `seo.category_meta_*` ({$category.seo_name} = seo_name или name) |
+| Категория | `/category/{url}/`, `?page=N` | свои meta_* категории, иначе шаблоны `seo.category_meta_*` |
 | Пагинация | `?page=N` | к title и description добавляется « \| Страница N», canonical → первая страница |
 | Товар | `/product/{url}/` | свои meta_*, иначе `seo.product_meta_*`; H1 = `seo.product_h1` («{name} оптом в Украине») |
-| Бренд | `/brand/{urlencode(name)}/` (`/brand/Mona+Lisa/`) | title = brands.title, иначе имя бренда; description = brands.meta_description |
-| Инфо-страница | `/o-kompanii/` и т.п., а также `/pages/o-kompanii/` | pages.title, иначе `seo.page_meta_title` («{name} \| интернет-магазин Tomobuv») |
-| Блог | `/blog/`, `/blog/{url}/` | meta_title, иначе заголовок |
+| Бренд | `/brand/{urlencode(name)}/` (`/brand/Mona+Lisa/`) | свои brands.title / meta_description, иначе шаблоны `seo.brand_meta_*` (если `seo.brand_is_enabled`), иначе имя бренда |
+| Инфо-страница | `/o-kompanii/` и т.п., а также `/pages/o-kompanii/` | pages.title, иначе `seo.page_meta_title`; description — свой, иначе отрывок текста (`Seo::excerpt`), иначе `seo.page_meta_description` |
+| Блог | `/blog/`, `/blog/{url}/` | список — `blog.meta_title` / `blog.meta_description`; статья — meta_title, иначе «Tomobuv » Заголовок», description — свой, иначе отрывок текста |
+| Отзывы, HTML-карта | `/reviews/`, `/sitemap/` | `seo.reviews_meta_*`, `seo.sitemap_meta_*`; пусто — «Отзывы» / «Карта сайта — Tomobuv» без описания |
 | Поиск | `/search/?query=…` | «{запрос} — {site_title}», noindex |
 
-`App\Core\Seo::pick($own, 'seo.product_meta_title', ['product' => …, 'category' => …])` — выбор своего значения или шаблона.
+`App\Core\Seo::pick($own, 'seo.product_meta_title', $vars)` — своё значение (как есть), иначе шаблон; на /ua/ — «<ключ>.uk» и колонки *_uk.
+Переменные шаблонов — одни для витрины, SEO-обзора, превью админки и автоисправления: `App\Services\SeoVars`
+(`product.name/seo_name/sku/price/format_price/box_qty/sizes`, `category.name/seo_name/full_name/product_count`, `brand.name/product_count`,
+`page.name`, `store_info.name/phone`). `category.full_name` — «Детская обувь: кеды 26-32» (корень в регистре предложения, у размерной
+подкатегории — ближайший предок со словом; на /ua/ — name_uk). `product.sizes` — только «чистый» диапазон вида 36-41, `format_price` пуст при цене ≤ 0.
 Sitemap: `/sitemap.xml` → `sitemap-shop-N.xml` (по 10 000 адресов), `sitemap-blog.xml`, `sitemap-site.xml`.
+
+### Норма и движок шаблонов
+
+Норма — как в SEO-обзоре и точках админки: **title 30–70, description 70–170 символов** (`Seo::TITLE_MIN…DESC_MAX`, `SeoAudit::TITLE_MIN…`)
+по тому, что выводит витрина (своё значение или результат шаблона); страницы пагинации не считаются. `SeoAudit::state()`: своего нет —
+«По шаблону», но результат шаблона вне нормы — «Длина».
+`Seo::build($tpl, $vars, 'title'|'description')` (его вызывает `pick`, поле — по ключу настройки):
+- `[[…]]` — необязательная часть: пропадает, если в ней пустая переменная («» или «0»); текст длиннее нормы — такие части убираются
+  справа налево (последней пишется наименее важная). В шаблоне с `[[` пустая переменная обязательной части (нет названия) — результата нет;
+- `{$x|plural:пара,пары,пар}` — «8 пар» (UA — «пара,пари,пар»), прочие модификаторы старых шаблонов игнорируются;
+- схлопываются пробелы и пробелы перед знаками препинания, края без « — | , ; :» (регуляркой /u — `trim()` с «—» режет UTF-8);
+- всё ещё длиннее — `Seo::fit`: title по слову без «…» (без висячих знаков, предлогов и союзов), description — по концу предложения,
+  если остаётся ≥ 70, иначе по слову + «…». Старые шаблоны Webasyst (`{$product.name} купить…`) работают как раньше.
+`Seo::excerpt($html)` — description из текста страницы/статьи: первые связные абзацы (от 8 слов, не «…:», не перечень через запятую),
+без скрытых блоков микроразметки (display:none) и заголовков, 120–160 символов по предложению, иначе по слову + «…».
+
+Стандартные шаблоны (RU / UA — `App\Services\SeoFix::TEMPLATES`, тексты служебных страниц — `SeoFix::SERVICE`):
+- товар: `{$product.name} оптом[[ — купить в Одессе]][[ | {$store_info.name}]]`; description — название, цена за пару, пар в ящике,
+  «купить в Одессе на 7 км или с доставкой по Украине», размеры, магазин;
+- категория: `{$category.full_name} оптом[[ — купить в Одессе]][[ | {$store_info.name}]]`; description — «купить ящиками…», число моделей;
+- бренд: `{$brand.name} — обувь оптом[[, купить в Одессе]][[ | {$store_info.name}]]`; description — «Обувь X оптом: N моделей в каталоге…»;
+- инфо-страница без своего description и без связного текста (`/stati/`): `{$page.name} — оптовый интернет-магазин обуви {$store_info.name}: …`.
+
+### Автоисправление (`App\Services\SeoFix`, `php bin/seo-autofix.php`, «SEO → Исправить автоматически»)
+
+Одно поле объекта, RU и UA решаются вместе:
+- своё значение **в норме не меняется никогда**;
+- «машинное» своё (title = название или прежнее название, description «купить … в Одессе» / «купити … в Одесі» — выгрузка Forsage
+  в Webasyst) и длинный title — набор ключевых слов вне нормы **очищаются** (NULL) — дальше работает шаблон; но если русское своё остаётся,
+  а украинское машинное вне нормы, в *_uk пишется результат украинского шаблона (пустой *_uk показал бы на /ua/ русский текст);
+- своё «человеческое» вне нормы **исправляется**: повторы слов подряд, заглавная буква, пробел после точки, «Одесса/Украина» с заглавной;
+  короткий title — хвост из недостающих частей (« оптом», « — купить в Одессе», « | Tomobuv»), короткий description — фраза про опт
+  и доставку, длинное — `Seo::fit`; нет перевода — UA по исправленному русскому с украинским хвостом;
+- шаблон группы заменяется стандартным, только если он пуст, это шаблон Webasyst (его возвращает перенос — `SeoFix::LEGACY`)
+  или по нему в норме < 98% объектов группы; удачный шаблон владельца не трогается. Служебные страницы — если текста нет или он вне нормы.
+
+Каждое применение — **пакет**: `seo_fix_batches` + `seo_fix_log` (объект, id, поле, язык, правило, было, стало, время;
+database/migrations/seo-autofix.sql). `--revert=N` / кнопка «Откатить» возвращает «было» только там, где сейчас всё ещё «стало» —
+значения, изменённые после пакета, пропускаются и перечисляются. Повторный запуск ничего не меняет (пустой пакет не сохраняется).
+Товары — пачками по 5000 id в транзакции (`SELECT … FOR UPDATE`, решение в PHP, `UPDATE … IN` / `CASE`), без REGEXP_REPLACE;
+~10 с проверка, ~20 с применение на 107 тыс. товаров. Предпросмотр в админке (только администратор) — итоги «в норме сейчас → после»
+по группам и языкам, шаблоны, 50 примеров, что останется не в норме; «Применить» считает заново на свежих данных.
+Перенос не откатывает тексты: последний шаг `bin/import-webasyst.php` и `bin/i18n-seed-uk.php` — тот же SeoFix (отдельный шаг — своя часть,
+«seo» — только он); украинские шаблоны в `database/i18n/uk/settings.php` и `migrations/product.sql` — стандартные.
+Новые товары, категории, статьи без своих мета получают результат шаблона в норме сами; своё значение вне нормы, сохранённое в админке,
+не правится — только точка и подсказка в превью Google (`admin/partials/serp`).
+
+## Автоназвание товара
+
+Обычное название — «Тип Бренд Артикул» («Кроссовки Baas L1873-1»). Товар, заведённый одним кодом («60189A», «B31127-3»,
+«68188С» с кириллической С — в названии нет слова из 3+ кириллических букв), получает название «{Категория} {Бренд} {Код}»:
+«Зимняя обувь Tom.m 60189A», на /ua/ — «Зимове взуття Tom.m 60189A» (name_uk категории и бренда). Категория — основная; без слова
+в имени («32-38») — ближайший предок со словом; нет категории — без неё; нет бренда или «Не указано» — без бренда.
+UA-название заполняется, только если пустое или тоже код; пустой артикул получает код («Артикул: 60189A»). Адрес (url) не меняется.
+Всё — в `App\Services\ProductName` (`isBare`, `build`, `fix`), вызовы: сохранение товара в админке (сообщение «Название дополнено: …»;
+у товара, уже названного правилом, снова введённый код пересобирает вместе с русским и UA-название с артикулом, если их не правили — `fix($d, $old)`),
+импорт прайсов (новый товар; у найденного — если файл меняет название на код: собранное правилом пересобирается, своё полное
+название с тем же кодом остаётся; при ключе «Название» код из файла находит товар по артикулу), перенос с Webasyst (после шага products),
+`php bin/product-names.php [--dry-run]` — для уже заведённых. Массовые действия названий не трогают.
+`bin/i18n-seed-uk.php` для таких товаров (`ProductName::generated`) берёт UA-название из той же сборки, а не из словаря.
+
+## Автозагрузка поставщиков (Jong•Golf)
+
+Замена `wa_loader_jonggolf.php` старого сайта: `App\Services\Suppliers\JongGolf` — настройки (`settings` «jonggolf.*», по умолчанию выключено),
+расписание (окно часов + период, `bin/cron.php`), запуски `supplier_runs` с отчётом `supplier_run_log` и машиной шагов
+(dict → page → items → confirm → finish, продолжение после обрыва); `JongGolfSync` — порция товаров; `JongGolfApi` — 3 метода API;
+`JongGolfMap` — таблица соответствия `supplier_category_map` (XLS читает `BiffReader`). Админка — `SuppliersController`
+(`/admin/suppliers/jonggolf/`, только администратор), CLI — `bin/supplier-jonggolf.php`, установка и переключение — docs/INSTALL.md.
+- Товар поставщика (id_product) × цвет (images[].aid) = товар сайта: `products.supplier = 'jonggolf'`, `supplier_code` = id_product
+  (общий для цветов), связь `supplier_links (supplier, code → product_id, hidden)`. Поиск: связь → название старого загрузчика
+  «{категория поставщика} {бренд} {код}» → код в артикуле и конце названия у товаров без поставщика (заведённые вручную;
+  без настройки «брать под загрузчик» не меняются и не дублируются). Кириллические С/А/В… в кодах = латинские.
+- `clean_export` и подтверждение страницы (`export_product_callback`) — только боевой клиент (`new JongGolfApi($key, true)`)
+  при включённой загрузке и `debug = false`; проверка — в `JongGolfApi`. Подтверждение — после записи всей страницы.
+- Порция (20 товаров) — одна транзакция под `CatalogIndexer::locked` (до транзакции) со снимком и `CatalogIndexer::products`,
+  как импорт; в конце запуска `Cache::flush()`. Фото — `Importer::fetchMany` (защита от SSRF), вписывание в холст через GD,
+  путь как у Webasyst (`Image::originalPath`); новый товар без скачанного фото не создаётся.
+- «Полное обновление» скрывает (а не удаляет) товары, которых нет в выгрузке, с защитой «больше 50 % активных — отмена»;
+  скрытые загрузчиком (`supplier_links.hidden`) показываются снова, когда цвет вернулся.
+- Новые товары: название — `ProductName::build` («Категория Бренд Код», RU и UA) или как старый загрузчик (настройка),
+  адрес — `JongGolf::translit` (1-в-1 со старым), SEO — шаблоны сайта, если в настройках пусто.
 
 ## Опт
 

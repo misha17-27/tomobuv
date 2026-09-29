@@ -4,9 +4,11 @@
  * @var array $f @var array $rows @var int $total @var App\Core\Paginator $pg @var array $cats @var array $brands
  * @var array $sorts @var array $bulk @var string $query @var ?array $fvLabel
  * @var int $capped поиск упёрся в лимит (сколько показано) или 0
+ * @var array $seoCells [id => ячейки Title/Description] (SeoAudit::listCells)
  */
 use App\Controllers\Admin\BaseController;
 use App\Services\AdminCatalog;
+use App\Services\SeoAudit;
 
 $catOptions = static function (array $cats, $selected): string {
     $h = '';
@@ -17,7 +19,7 @@ $catOptions = static function (array $cats, $selected): string {
     return $h;
 };
 $paths = AdminCatalog::paths($cats);
-$hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['status'] !== '' || $f['stock'] !== '' || $f['sale'] || $f['nophoto'] || $f['nouk'] || $f['ff'];
+$hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['status'] !== '' || $f['stock'] !== '' || $f['sale'] || $f['nophoto'] || $f['nouk'] || $f['ff'] || $f['seo'] !== '';
 ?>
 <form class="card ac-filters" method="get" action="/admin/products/" role="search">
   <div class="ac-frow">
@@ -31,6 +33,8 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
   <div class="ac-frow">
     <label class="fld"><span>Статус</span><select name="status"><option value="">Любой</option><option value="1"<?= $f['status'] === '1' ? ' selected' : '' ?>>На сайте</option><option value="0"<?= $f['status'] === '0' ? ' selected' : '' ?>>Скрытые</option></select></label>
     <label class="fld"><span>Наличие</span><select name="stock"><option value="">Любое</option><option value="1"<?= $f['stock'] === '1' ? ' selected' : '' ?>>В наличии</option><option value="0"<?= $f['stock'] === '0' ? ' selected' : '' ?>>Нет в наличии</option></select></label>
+    <label class="fld" title="Свои title и description товара — как точки в колонках Title и Description"><span>SEO</span><select name="seo">
+      <?php foreach (SeoAudit::LIST_FILTERS as $k => $label): ?><option value="<?= e($k) ?>"<?= $f['seo'] === $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
     <label class="fld"><span>Сортировка</span><select name="sort"><?php foreach ($sorts as $k => $label): ?><option value="<?= e($k) ?>"<?= $f['sort'] === $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
     <div class="ac-checks">
       <label class="chk"><input type="checkbox" name="sale" value="1"<?= $f['sale'] ? ' checked' : '' ?>> Со скидкой</label>
@@ -71,7 +75,7 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
     <table class="tbl ac-ptable">
       <thead><tr>
         <th class="tick"><input type="checkbox" id="check-all" aria-label="Выбрать все на странице"></th>
-        <th>Фото</th><th>Товар</th><th>Категория · бренд</th><th class="num">Цена/пара</th><th class="num">Ящик</th><th class="num">Пар</th><th>Размеры</th><th>Наличие</th><th>Статус</th>
+        <th>Фото</th><th>Товар</th><th>Категория · бренд</th><th class="num">Цена/пара</th><th class="num">Ящик</th><th class="num">Пар</th><th>Размеры</th><th>Наличие</th><th class="seo-col">Title</th><th class="seo-col">Description</th><th>Статус</th>
       </tr></thead>
       <tbody>
       <?php foreach ($rows as $r):
@@ -94,6 +98,7 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
           <td class="nowrap"><?= e($r['size']) ?></td>
           <td class="nowrap"><?= (int) $r['in_stock'] ? '<span class="in-stock">в наличии</span>' : '<span class="out-stock">нет</span>' ?>
             <?php if ($r['stock'] !== null): ?><small>остаток: <?= (int) $r['stock'] ?></small><?php endif; ?></td>
+          <?= $view->partial('admin/partials/seo-cells', ['seoCell' => $seoCells[$id] ?? null, 'seoEdit' => '/admin/products/' . $id . '/#h-seo']) ?>
           <td><?= (int) $r['status'] ? '<span class="pill ok">на сайте</span>' : '<span class="pill">скрыт</span>' ?></td>
         </tr>
       <?php endforeach; ?>
@@ -103,3 +108,4 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
   <?php endif; ?>
 </form>
 <?= $pg->html() ?>
+<?php if ($rows): ?><?= $view->partial('admin/partials/seo-legend', ['seoType' => 'product', 'seoFilter' => $f['seo']]) ?><?php endif; ?>

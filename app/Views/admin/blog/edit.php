@@ -94,7 +94,7 @@ $ua = AdminCatalog::langTag('uk');
         <p class="hint"><?= e(AdminCatalog::SEO_INTRO) ?></p>
         <div class="l-ru"><?= $view->partial('admin/partials/serp', ['serp' => ['type' => 'blog', 'row' => $post]]) ?></div>
         <div class="l-uk"><?= $view->partial('admin/partials/serp', ['serp' => AdminCatalog::serpUk($v('url') !== '' ? '/ua/blog/' . $v('url') . '/' : '', $post,
-          ['meta_title' => $autoUk, 'meta_description' => $v('meta_description')])]) ?></div>
+          ['meta_title' => $autoUk, 'meta_description' => $v('meta_description') ?: AdminCatalog::seoAuto('blog', $post, 'uk')['desc']])]) ?></div>
         <?= AdminCatalog::seoField('meta_title', 'meta_title', $post, ['placeholder' => $autoRu, 'tpl_uk' => $autoUk,
           'empty' => 'Пусто — «' . ($blogName['ru'] ?? 'Tomobuv') . ' » заголовок», как на старом сайте.']) ?>
         <?= AdminCatalog::seoField('meta_description', 'meta_description', $post, ['tpl_uk' => $v('meta_description')]) ?>

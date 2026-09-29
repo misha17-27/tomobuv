@@ -7,6 +7,7 @@
  *   2) php bin/install.php
  *   3) php bin/import-webasyst.php            — полный перенос (новые таблицы очищаются!)
  *      php bin/import-webasyst.php orders     — только отдельный шаг (см. список $steps внизу)
+ *      В конце — SEO-стандарт title/description (App\Services\SeoFix, как php bin/seo-autofix.php; «seo» — только он).
  *
  * Сохраняются: id товаров/категорий/фото/клиентов/заказов, адреса страниц (url), мета-теги,
  * SEO-шаблоны, характеристики, бренды, статьи, страницы, заказы с историей, отзывы о магазине.
@@ -18,6 +19,7 @@ require __DIR__ . '/../app/bootstrap.php';
 use App\Core\App;
 use App\Core\DB;
 use App\Services\CatalogIndexer;
+use App\Services\ProductName;
 
 ini_set('memory_limit', '1024M');
 if (function_exists('set_time_limit')) set_time_limit(0);
@@ -275,6 +277,18 @@ $steps['products'] = function () use ($old, $new) {
     $new->insertMany('product_set_items', array_map(static fn($r) => ['set_id' => $r['set_id'], 'product_id' => (int) $r['product_id'], 'sort' => (int) $r['sort']],
         $old->all('SELECT set_id, product_id, sort FROM shop_set_products')), true);
     say('Связанные товары: ' . count($rel));
+
+    // Товары, заведённые одним кодом («60189A»), → «Зимняя обувь Tom.m 60189A» (как bin/product-names.php; url не меняется).
+    // На старом сайте такие товары добавляют до самого переключения. Украинское название — здесь, если у категорий уже
+    // есть name_uk, иначе его заполнит bin/i18n-seed-uk.php (ProductName::generated) после сида категорий.
+    ProductName::reset();
+    $named = ProductName::scan(true);
+    say('Названия-коды дополнены категорией и брендом: ' . count(array_filter($named, static fn($x) => isset($x['set']['name'])))
+        . ' (изменено товаров: ' . count($named) . ')');
+
+    // Автозагрузка Jong•Golf: связи «код цвета → товар» (supplier_links) заново по перенесённым товарам (supplier = 'jonggolf',
+    // название старого загрузчика «… {код цвета}»), чтобы после переключения существующие товары обновлялись, а не дублировались
+    say('Jong•Golf: связей «код цвета → товар» — ' . \App\Services\Suppliers\JongGolf::relink());
 };
 
 $steps['content'] = function () use ($old, $new) {
@@ -533,5 +547,22 @@ foreach ($steps as $name => $fn) {
     if ($only && $only !== $name) continue;
     say("== $name");
     $fn();
+}
+
+// SEO-стандарт (App\Services\SeoFix, docs/ARCHITECTURE.md → «SEO»): перенос вернул шаблоны Webasyst и «машинные» мета товаров
+// и категорий («= название», «купить … в Одессе») — сразу приводим title/description к норме, одним пакетом в журнале
+// (откат: php bin/seo-autofix.php --revert=N). Отдельный шаг — только его часть; «seo» — только это. После этого скрипта
+// bin/i18n-seed-uk.php заполняет *_uk и в конце делает то же для украинской версии.
+$seoParts = ['settings' => ['settings'], 'categories' => ['categories'], 'brands' => ['brands'], 'products' => ['products'],
+    'content' => ['pages', 'blog'], 'seo' => array_keys(\App\Services\SeoFix::PARTS)];
+if (!$only || isset($seoParts[$only])) {
+    say('== seo');
+    if (!\App\Services\SeoFix::hasTables()) {
+        say('SEO: нет таблиц журнала — выполните php bin/install.php, затем php bin/seo-autofix.php');
+    } else {
+        $r = \App\Services\SeoFix::run(true, ['parts' => $only ? $seoParts[$only] : array_keys(\App\Services\SeoFix::PARTS), 'source' => 'import']);
+        say('SEO title/description приведены к норме: изменено ' . $r['changes'] . ($r['batch'] ? ' (пакет №' . $r['batch'] . ')' : '')
+            . ', не в норме осталось ' . count($r['left']));
+    }
 }
 say('Готово.');

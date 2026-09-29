@@ -13,11 +13,12 @@ use App\Services\Catalog;
 use App\Services\Content;
 use App\Services\Listing;
 use App\Services\Products;
+use App\Services\SeoVars;
 
 /**
  * Бренды: /brand/ — все бренды с товарами (буквы ?letter=), /brand/{имя}/ — товары бренда.
  * Адрес бренда как в плагине брендов Webasyst: urlencode(имя) — /brand/Mona+Lisa/, /brand/JH-%D0%AF%D0%9D/,
- * либо собственный адрес (/brand/lepard/). SEO: title = brands.title или имя, description = brands.meta_description.
+ * либо собственный адрес (/brand/lepard/). SEO: свои brands.title / meta_description, иначе шаблоны seo.brand_meta_* (см. seo()).
  */
 final class BrandController
 {
@@ -162,12 +163,20 @@ final class BrandController
                 summary, summary_uk, description, description_uk, seo_description, seo_description_uk FROM brands WHERE id = ?', [$id]) ?? []);
     }
 
-    /** SEO как на старом сайте: свои значения бренда без шаблонов */
+    /**
+     * SEO: свои значения бренда, иначе шаблоны seo.brand_meta_title / seo.brand_meta_description
+     * («{$brand.name} — обувь оптом…», переменные — App\Services\SeoVars::brand), если seo.brand_is_enabled; без шаблона —
+     * title = имя бренда, description пуст (как на старом сайте). Keywords и H1 — только свои.
+     */
     private static function seo(array $brand, array $full, Listing $L): Seo
     {
-        $own = static fn($v) => ($v !== null && trim((string) $v) !== '') ? (string) $v : '';
+        $own = static fn($v) => ($v !== null && trim((string) $v) !== '') ? trim((string) $v) : '';
         $name = (string) $brand['name'];
-        $seo = Seo::make($own($full['title'] ?? null) ?: $name, $own($full['meta_description'] ?? null), $own($full['meta_keywords'] ?? null));
+        $tpl = (string) Settings::get('seo.brand_is_enabled', '1') !== '0';
+        $vars = SeoVars::brand($brand);
+        $pick = static fn($v, string $key): string => $tpl ? Seo::pick($v, $key, $vars) : $own($v);
+        $seo = Seo::make($pick($full['title'] ?? null, 'seo.brand_meta_title') ?: $name, $pick($full['meta_description'] ?? null, 'seo.brand_meta_description'),
+            $own($full['meta_keywords'] ?? null));
         $seo->h1 = trim($own($full['h1'] ?? null)) ?: $name;
         $L->applySeo($seo, false);  // как на старом сайте: без « | Страница N»; canonical → первая страница; фильтры/сортировка — noindex
         if (!empty($brand['image'])) $seo->ogImage = media((string) $brand['image']);

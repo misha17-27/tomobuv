@@ -17,7 +17,8 @@ use App\Services\Catalog;
 /**
  * Блог: /blog/ (список, ?page=N по 10), /blog/{url}/ (статья), /blog/rss/ (RSS-лента, была на старом сайте).
  * SEO как на старом сайте (приложение «Блог» Webasyst): список — название блога («Tomobuv»),
- * статья — meta_title, иначе «Tomobuv » Заголовок»; description/keywords — свои поля статьи.
+ * статья — meta_title, иначе «Tomobuv » Заголовок»; description — свой, иначе отрывок текста (Seo::excerpt); keywords — свои поля статьи.
+ * Список /blog/ — настройки blog.meta_title / blog.meta_description (на /ua/ — «.uk»).
  * Украинская версия: title/text/meta… из колонок *_uk (DB::$localize), если заполнены.
  */
 final class BlogController
@@ -61,8 +62,10 @@ final class BlogController
 
         $t = self::teaser($post);
         $own = trim((string) $post['meta_title']);
-        $seo = Seo::make($own !== '' ? $own : self::blogName() . ' » ' . $post['title'],
-            trim((string) $post['meta_description']), trim((string) $post['meta_keywords']));
+        // description — свой, иначе отрывок текста статьи (Seo::excerpt: первые связные абзацы, 120–160 символов)
+        $desc = trim((string) $post['meta_description']);
+        if ($desc === '') $desc = Seo::excerpt(self::excerptSource($post));
+        $seo = Seo::make($own !== '' ? $own : self::blogName() . ' » ' . $post['title'], $desc, trim((string) $post['meta_keywords']));
         $seo->canonical = url('/blog/' . $post['url'] . '/');
         $seo->ogType = 'article';
         $seo->ogTitle = (string) $post['title'];
@@ -137,6 +140,17 @@ final class BlogController
     public static function blogName(): string
     {
         return (string) Settings::get('blog.name', Settings::get('store_name', 'Tomobuv'));
+    }
+
+    /**
+     * Текст для анонса и description статьи: до ката, иначе весь текст. $r — строка глазами текущей версии (на /ua/ — с *_uk):
+     * есть украинский текст, но нет украинского анонса — берётся украинский текст, а не русский «кат».
+     */
+    public static function excerptSource(array $r): string
+    {
+        $cut = (string) ($r['text_before_cut'] ?? '');
+        if (Lang::isUk() && trim((string) ($r['text_uk'] ?? '')) !== '' && trim((string) ($r['text_before_cut_uk'] ?? '')) === '') $cut = '';
+        return trim(strip_tags($cut)) !== '' ? $cut : (string) ($r['text'] ?? '');
     }
 
     /** Анонс статьи: дата, текст до ката (или начало текста), первая картинка */

@@ -14,8 +14,9 @@ $name = (string) $b['name'];
 $ruTitle = trim((string) ($b['title'] ?? '')) ?: $name;
 $ruH1 = trim((string) ($b['h1'] ?? '')) ?: $name;
 $img = (string) ($b['image'] ?? '');
-// что покажет /ua/ при пустом украинском поле — своё русское значение, иначе название бренда
-$ukFb = ['title' => $ruTitle, 'meta_description' => trim((string) ($b['meta_description'] ?? '')), 'h1' => $ruH1];
+// что покажет /ua/ при пустом украинском поле — своё русское значение, иначе украинский шаблон бренда (или название)
+$ukAuto = AdminCatalog::seoAuto('brand', $b, 'uk');
+$ukFb = ['title' => trim((string) ($b['title'] ?? '')) ?: $ukAuto['title'], 'meta_description' => trim((string) ($b['meta_description'] ?? '')) ?: $ukAuto['desc'], 'h1' => $ruH1];
 ?>
 <?php if ($errors): ?><div class="flash bad">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
 

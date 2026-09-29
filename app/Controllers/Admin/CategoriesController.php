@@ -12,6 +12,8 @@ use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
+use App\Services\SeoAudit;
+use App\Services\SeoVars;
 
 /** Админка → Категории: дерево (nested set), создание/редактирование, перемещение, удаление с переносом товаров. */
 final class CategoriesController extends BaseController
@@ -21,13 +23,23 @@ final class CategoriesController extends BaseController
 
     public function index(): Response
     {
+        $cats = AdminCatalog::categories();
+        // точки Title/Description — как в SEO-обзоре: своих meta_* и seo_name нет в дереве — одним запросом на все категории
+        $meta = App::db()->keyed('SELECT id, seo_name, meta_title, meta_title_uk, meta_description, meta_description_uk FROM categories');
+        $rows = [];
+        foreach ($cats as $id => $c) $rows[] = ($meta[$id] ?? []) + $c;
+        $seoCells = SeoAudit::listCells('category', $rows);
+        $seo = array_key_exists(Request::get('seo'), SeoAudit::LIST_FILTERS) ? Request::get('seo') : '';
         return $this->render('admin/categories/index', [
-            'title'   => 'Категории',
-            'actions' => '<a class="btn btn-p" href="/admin/categories/new/">+ Добавить категорию</a>',
-            'styles'  => ['admin/catalog.css'],
-            'scripts' => ['admin/catalog.js'],
-            'cats'    => AdminCatalog::categories(),
-            'direct'  => AdminCatalog::directCounts(),
+            'title'     => 'Категории',
+            'actions'   => '<a class="btn btn-p" href="/admin/categories/new/">+ Добавить категорию</a>',
+            'styles'    => ['admin/catalog.css'],
+            'scripts'   => ['admin/catalog.js'],
+            'cats'      => $cats,
+            'direct'    => AdminCatalog::directCounts(),
+            'seoFilter' => $seo,
+            'seoCounts' => SeoAudit::listCounts($seoCells),
+            'seoCells'  => $seoCells,
         ]);
     }
 
@@ -224,9 +236,10 @@ final class CategoriesController extends BaseController
             [$where, $params] = CatalogIndexer::conditionSql((string) $c['conditions']);
             $dynCount = $where !== '' ? (int) $db->value("SELECT COUNT(*) FROM products p WHERE p.status = 1 AND $where", $params) : 0;
         }
-        $vars = ['category' => ['name' => $c['name'], 'seo_name' => trim((string) $c['seo_name']) ?: $c['name']]];
+        // переменные шаблонов — как у витрины (App\Services\SeoVars: full_name «Детская обувь: кеды 26-32», product_count)
+        $vars = SeoVars::category($c);
         $uk = AdminCatalog::ukRow($c);
-        $varsUk = ['category' => ['name' => $uk['name'], 'seo_name' => trim((string) $uk['seo_name']) ?: $uk['name']]];
+        $varsUk = SeoAudit::inLang('uk', static fn() => SeoVars::category($uk));
         // что покажет /ua/ при пустом украинском поле: своё русское значение, иначе украинский шаблон (как витрина)
         $seoUk = AdminCatalog::ukFallback($c, AdminCatalog::seoTemplates('category', $varsUk, 'uk'));
         $seoUk['meta_title'] = $seoUk['meta_title'] ?: (string) $uk['name'];

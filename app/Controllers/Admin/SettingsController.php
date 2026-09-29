@@ -6,11 +6,14 @@ namespace App\Controllers\Admin;
 use App\Core\App;
 use App\Core\Auth;
 use App\Core\Cache;
+use App\Core\Lang;
 use App\Core\Mailer;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Settings;
 use App\Services\Catalog;
+use App\Services\SeoAudit;
+use App\Services\SeoVars;
 
 /**
  * Настройки сайта (таблица settings) по вкладкам. Сохранять может только администратор,
@@ -54,20 +57,27 @@ final class SettingsController extends BaseController
     /** Тексты магазина, у которых есть украинский вариант «<ключ>.uk» */
     public const STORE_UK = ['site_title', 'address', 'work_hours'];
 
-    /** SEO-шаблоны: группа → [название, [поле → подпись], переменные] */
+    /**
+     * SEO-шаблоны: группа → [название, [поле → подпись], переменные]. Кроме переменных шаблон понимает необязательные части
+     * [[…]] (пропадают, если в них пустая переменная или текст длиннее нормы — справа налево) и {$x|plural:пара,пары,пар};
+     * результат title/description подгоняется под норму (App\Core\Seo::build). Стандартные шаблоны — App\Services\SeoFix::TEMPLATES.
+     */
     public const SEO_GROUPS = [
         'home_page' => ['Главная страница', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords'],
             ['store_info.name', 'store_info.phone']],
         'category' => ['Категория', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords', 'h1' => 'H1'],
-            ['category.name', 'category.seo_name', 'store_info.name', 'store_info.phone']],
+            ['category.full_name', 'category.name', 'category.seo_name', 'category.product_count', 'store_info.name', 'store_info.phone']],
         'category_pagination' => ['Категория — страницы 2, 3, … (пагинация)', ['meta_title' => 'Title', 'meta_description' => 'Description', 'h1' => 'H1'],
-            ['category.name', 'category.seo_name', 'page_number', 'store_info.name', 'store_info.phone']],
+            ['category.full_name', 'category.name', 'category.seo_name', 'page_number', 'store_info.name', 'store_info.phone']],
         'product' => ['Товар', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords', 'h1' => 'H1'],
-            ['product.name', 'product.seo_name', 'product.format_price', 'category.name', 'category.seo_name', 'store_info.name', 'store_info.phone']],
+            ['product.name', 'product.seo_name', 'product.format_price', 'product.box_qty', 'product.sizes', 'category.full_name', 'category.name', 'category.seo_name',
+             'store_info.name', 'store_info.phone']],
         'page' => ['Информационная страница', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords'],
             ['page.name', 'store_info.name', 'store_info.phone']],
         'brand' => ['Бренд', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords', 'h1' => 'H1'],
-            ['brand.name', 'store_info.name', 'store_info.phone']],
+            ['brand.name', 'brand.product_count', 'store_info.name', 'store_info.phone']],
+        'reviews' => ['Отзывы о магазине — /reviews/', ['meta_title' => 'Title', 'meta_description' => 'Description'], ['store_info.name']],
+        'sitemap' => ['Карта сайта — /sitemap/', ['meta_title' => 'Title', 'meta_description' => 'Description'], ['store_info.name']],
     ];
 
     /** Флаги «шаблоны включены», которые читает витрина: группа → ключ (выключено — только свои мета-теги) */
@@ -263,6 +273,7 @@ final class SettingsController extends BaseController
     {
         if (mb_strlen($v) > 1000) return 'Слишком длинный шаблон';
         if (substr_count($v, '{') !== substr_count($v, '}')) return 'Незакрытая фигурная скобка';
+        if (substr_count($v, '[[') !== substr_count($v, ']]') || preg_match('/\[\[[^\]]*\[\[/u', $v)) return 'Необязательная часть [[…]] не закрыта или вложена в другую';
         if (preg_match_all('/\{\$([a-z_]+)(?:\.([a-z_]+))?[^}]*\}/i', $v, $m)) {
             foreach ($m[1] as $i => $var) {
                 if (!in_array($var, self::SEO_VARS, true)) return 'Неизвестная переменная {$' . $var . ($m[2][$i] ? '.' . $m[2][$i] : '') . '}';
@@ -397,17 +408,20 @@ final class SettingsController extends BaseController
         $db = App::db();
         $all = Settings::all();
         $pick = static fn(array $r, string $k) => $uk && (string) ($r[$k . '_uk'] ?? '') !== '' ? (string) $r[$k . '_uk'] : (string) ($r[$k] ?? '');
-        $p = $db->row('SELECT id, name, name_uk, seo_name, seo_name_uk, price, category_id FROM products WHERE status = 1 AND category_id IS NOT NULL ORDER BY id DESC LIMIT 1') ?? [];
+        $p = $db->row('SELECT id, name, name_uk, sku, seo_name, seo_name_uk, price, box_qty, size, category_id FROM products WHERE status = 1 AND category_id IS NOT NULL ORDER BY id DESC LIMIT 1') ?? [];
         $c = $p ? (Catalog::category((int) $p['category_id']) ?? []) : [];
         $brand = [];
         foreach (Catalog::brands() as $b) { if (!(int) $b['hidden'] && (int) $b['product_count'] > 0) { $brand = $b; break; } }
         $page = $db->row("SELECT name, name_uk FROM pages WHERE status = 1 AND url NOT LIKE 'pages/%' ORDER BY sort, id LIMIT 1") ?? [];
         $pName = $pick($p, 'name') ?: 'Кроссовки';
         $cName = $pick($c, 'name') ?: 'Детская обувь';
+        // те же переменные, что у витрины (App\Services\SeoVars); для UA — глазами /ua/ (name_uk категорий и бренда)
+        $vars = SeoAudit::inLang($uk ? 'uk' : 'ru', static fn() => ($p ? SeoVars::product($uk ? Lang::localize($p) : $p, $c ? ($uk ? Lang::localize($c) : $c) : null) : [])
+            + ($brand ? SeoVars::brand($uk ? Lang::localize($brand) : $brand) : []));
         return [
-            'product'    => ['name' => $pName, 'seo_name' => $pick($p, 'seo_name') ?: $pName, 'format_price' => price_format($p['price'] ?? 250)],
-            'category'   => ['name' => $cName, 'seo_name' => $pick($c, 'seo_name') ?: $cName],
-            'brand'      => ['name' => $brand['name'] ?? 'Jong Golf'],
+            'product'    => ['name' => $pName, 'seo_name' => $pick($p, 'seo_name') ?: $pName] + ($vars['product'] ?? []) + ['format_price' => price_format(250), 'box_qty' => '8', 'sizes' => '36-41'],
+            'category'   => ['name' => $cName, 'seo_name' => $pick($c, 'seo_name') ?: $cName] + ($vars['category'] ?? []) + ['full_name' => $cName, 'product_count' => '120'],
+            'brand'      => ($vars['brand'] ?? []) + ['name' => 'Jong Golf', 'product_count' => '120'],
             'page'       => ['name' => $pick($page, 'name') ?: 'О компании'],
             'store_info' => ['name' => (string) ($all['store_name'] ?? 'Tomobuv'), 'phone' => (string) ($all['store_phone'] ?? '')],
             'page_number' => 2,

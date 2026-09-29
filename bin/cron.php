@@ -23,3 +23,12 @@ if ($db->value("SELECT 1 FROM blog_posts WHERE status = 'published' AND publishe
 }
 @file_put_contents(STORAGE . '/cron-last', (string) time());   // для «Состояния системы» в админке
 echo "cron: кэш-файлов удалено $removed, старых корзин $carts\n";
+
+// Автозагрузка Jong•Golf («Каталог → Поставщики»): если включена — по расписанию владельца (окно часов и период),
+// прерванный запуск продолжается; блокировка не даёт идти двум запускам сразу. Выключена — только уборка старых отчётов.
+try {
+    \App\Services\Suppliers\JongGolf::cron(static function (string $m): void { echo 'jonggolf: ' . $m . "\n"; });
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron jonggolf: ' . $e->getMessage());
+    echo 'jonggolf: ошибка — ' . $e->getMessage() . "\n";
+}

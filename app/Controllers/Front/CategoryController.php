@@ -12,10 +12,12 @@ use App\Core\View;
 use App\Services\Catalog;
 use App\Services\Listing;
 use App\Services\Products;
+use App\Services\SeoVars;
 
 /**
  * Страница категории /category/{url}/ — список товаров с фильтрами, сортировкой и пагинацией.
- * SEO — как на старом сайте (плагин SEO Webasyst): свои meta категории, иначе шаблоны seo.category_*,
+ * SEO — как на старом сайте (плагин SEO Webasyst): свои meta категории, иначе шаблоны seo.category_*
+ * (переменные — App\Services\SeoVars, длина под норму — App\Core\Seo::pick),
  * на ?page=N — шаблоны seo.category_pagination_* и « | Страница N», canonical на первую страницу.
  */
 final class CategoryController
@@ -118,10 +120,8 @@ final class CategoryController
     {
         $page = $L->pageNo();
         $name = (string) $cat['name'];
-        $vars = [
-            'category' => ['name' => $name, 'seo_name' => self::own($full['seo_name'] ?? null) !== '' ? (string) $full['seo_name'] : $name],
-            'page_number' => $page,
-        ];
+        // переменные — общие с SEO-обзором и автоисправлением: full_name («Детская обувь: кеды 26-32»), product_count…
+        $vars = SeoVars::category(['seo_name' => self::own($full['seo_name'] ?? null)] + $cat) + ['page_number' => $page];
         $on = (bool) Settings::get('seo.category_is_enabled', 1);
         $pag = $page > 1 && (bool) Settings::get('seo.category_pagination_is_enabled', 0);
         $pick = static function (?string $own, string $key) use ($vars, $on): string {

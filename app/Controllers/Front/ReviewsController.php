@@ -96,9 +96,9 @@ final class ReviewsController
         $reviews = $total ? $db->all('SELECT id, name, text, rating, response, created_at FROM store_reviews
             WHERE status = 1 ORDER BY created_at DESC, id DESC LIMIT ' . $pg->offset . ', ' . $pg->perPage) : [];
 
-        // мета как на старом сайте: title «Отзывы» на всех страницах списка, description пустой;
-        // canonical (на старом его не было) — на первую страницу, как у остальной пагинации сайта
-        $seo = Seo::make(t('Отзывы'));
+        // мета — настройки seo.reviews_meta_* (на /ua/ — «.uk»), одни на всех страницах списка; пусто — «Отзывы» без описания,
+        // как на старом сайте; canonical (на старом его не было) — на первую страницу, как у остальной пагинации сайта
+        $seo = Seo::make(Seo::pick('', 'seo.reviews_meta_title', []) ?: t('Отзывы'), Seo::pick('', 'seo.reviews_meta_description', []));
         $seo->canonical = url('/reviews/');
         if ($pg->page > 1) $seo->prev = url(Lang::path($pg->url($pg->page - 1)));
         if ($pg->hasNext()) $seo->next = url(Lang::path($pg->url($pg->page + 1)));

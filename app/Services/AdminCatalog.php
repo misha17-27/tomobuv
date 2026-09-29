@@ -550,19 +550,14 @@ final class AdminCatalog
     /** Переменные SEO-шаблонов товара — как Front\ProductController::seoVars */
     public static function productSeoVars(array $p, ?array $cat): array
     {
-        $name = (string) ($p['name'] ?? '');
-        return [
-            'product'  => ['name' => $name, 'seo_name' => trim((string) ($p['seo_name'] ?? '')) ?: $name, 'sku' => (string) ($p['sku'] ?? ''),
-                'price' => (string) round((float) ($p['price'] ?? 0)), 'format_price' => price_format((float) ($p['price'] ?? 0))],
-            'category' => $cat ? ['name' => (string) $cat['name'], 'seo_name' => trim((string) ($cat['seo_name'] ?? '')) ?: (string) $cat['name']] : ['name' => '', 'seo_name' => ''],
-        ];
+        return SeoVars::product($p, $cat);          // те же переменные, что у витрины и SEO-обзора
     }
 
     /** Категория для SEO-шаблонов товара — как на витрине: основная (даже скрытая), иначе первая в дереве */
     public static function productSeoCategory(?int $categoryId): ?array
     {
         $db = App::db();
-        $cols = 'id, name, seo_name, name_uk, seo_name_uk';
+        $cols = 'id, parent_id, depth, name, seo_name, name_uk, seo_name_uk, product_count';
         $c = $categoryId ? $db->row("SELECT $cols FROM categories WHERE id = ?", [$categoryId]) : null;
         return $c ?? $db->row("SELECT $cols FROM categories WHERE status = 1 ORDER BY lft, sort, id LIMIT 1");
     }
@@ -597,6 +592,15 @@ final class AdminCatalog
             if ($lang !== $prev) Lang::set($prev);
         }
         return $out;
+    }
+
+    /**
+     * Что покажет сайт без своего title/description (шаблон, отрывок текста, название) — как витрина и SEO-обзор
+     * (SeoAudit::auto), глазами версии $lang: для 'uk' — строка с *_uk и украинские шаблоны. $type: page | brand | blog | category | product.
+     */
+    public static function seoAuto(string $type, array $row, string $lang = 'ru'): array
+    {
+        return SeoAudit::inLang($lang, static fn() => SeoAudit::auto($type, $lang === 'uk' ? Lang::localize($row) : $row));
     }
 
     /**

@@ -43,6 +43,7 @@ $ic = [
     'brands'     => '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
     'features'   => '<path d="M4 7h6M4 12h10M4 17h7"/><circle cx="17" cy="7" r="2"/><circle cx="19" cy="17" r="2"/>',
     'import'     => '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/>',
+    'suppliers'  => '<path d="M3 6h11v10H3z"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7" cy="17.5" r="1.6"/><circle cx="17" cy="17.5" r="1.6"/>',
     'coupons'    => '<path d="M4 9V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 6v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-6z"/><path d="M14 8.5l-4 7"/>',
     'reviews'    => '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.8-5.3-2.8-5.3 2.8 1.1-5.8L3.5 9.7l5.9-.8z"/>',
     'pages'      => '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
@@ -72,6 +73,7 @@ $groups = [
         ['/admin/brands/', 'brands', 'Бренды'],
         ['/admin/features/', 'features', 'Характеристики'],
         ['/admin/import/', 'import', 'Импорт / экспорт'],
+        ['/admin/suppliers/', 'suppliers', 'Поставщики'],
         ['/admin/coupons/', 'coupons', 'Промокоды'],
         ['/admin/reviews/', 'reviews', 'Отзывы', 'reviews'],
     ],
@@ -92,8 +94,9 @@ $groups = [
         ['/admin/status/', 'status', 'Состояние системы'],
     ],
 ];
-// «Безопасность» и «Сотрудники» — только администратору (менеджеру там 403)
+// «Безопасность», «Сотрудники» и «Поставщики» (ключ API, автозагрузка) — только администратору (менеджеру там 403)
 if (!Auth::isAdmin()) {
+    $groups['Каталог'] = array_values(array_filter($groups['Каталог'], static fn($l) => $l[0] !== '/admin/suppliers/'));
     $groups['Настройки'] = array_values(array_filter($groups['Настройки'], static fn($l) => !in_array($l[0], ['/admin/security/', '/admin/users/'], true)));
 }
 ?><!DOCTYPE html>

@@ -38,6 +38,12 @@ final class Settings
         return is_array($v) ? $v : $default;
     }
 
+    /** Перечитать настройки при следующем обращении (после записи в таблицу напрямую, например SeoFix) */
+    public static function reset(): void
+    {
+        self::$all = null;
+    }
+
     public static function set(string $name, $value): void
     {
         if (is_array($value)) $value = json_encode($value, JSON_UNESCAPED_UNICODE);

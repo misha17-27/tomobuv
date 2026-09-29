@@ -7,7 +7,10 @@
  */
 $varHelp = [
     'product.name' => 'название товара', 'product.seo_name' => 'SEO-название товара (или название)', 'product.format_price' => 'цена за пару «1 020 грн.»',
+    'product.box_qty' => 'пар в ящике (с |plural:пара,пары,пар — «8 пар»)', 'product.sizes' => 'размеры «36-41» (мусор в поле — пусто)',
     'category.name' => 'название категории', 'category.seo_name' => 'SEO-название категории (или название)',
+    'category.full_name' => 'полное имя «Детская обувь: кеды 26-32»', 'category.product_count' => 'моделей в категории (|plural:модель,модели,моделей)',
+    'brand.product_count' => 'моделей бренда (|plural:модель,модели,моделей)',
     'store_info.name' => 'название магазина', 'store_info.phone' => 'телефон для SEO', 'page.name' => 'название страницы',
     'brand.name' => 'название бренда', 'page_number' => 'номер страницы (2, 3…)',
 ];
@@ -18,7 +21,8 @@ $field = static function (string $key, string $label, bool $long, string $name =
         $k = $lang === 'uk' ? $key . '.uk' : $key;
         $v = (string) ($values[$k] ?? '');
         $n = ($lang === 'uk' ? $name . '_uk' : $name) . '[' . e($key) . ']';
-        $attr = ' id="' . $id . ($lang === 'uk' ? '-uk' : '') . '" name="' . $n . '"' . ($tpl ? ' data-seo="' . $lang . '"' : '')
+        $kind = \App\Core\Seo::fieldOf($key) ?? '';
+        $attr = ' id="' . $id . ($lang === 'uk' ? '-uk' : '') . '" name="' . $n . '"' . ($tpl ? ' data-seo="' . $lang . '"' . ($kind !== '' ? ' data-seo-kind="' . $kind . '"' : '') : '')
             . (isset($errors[$k]) ? ' aria-invalid="true"' : '')
             . ($lang === 'uk' ? ' aria-label="' . e($label) . ' — украинский вариант" placeholder="пусто — русский вариант"' : '');
         $input = $long ? '<textarea' . $attr . ' rows="3" class="plain">' . e($v) . '</textarea>' : '<input type="text"' . $attr . ' value="' . e($v) . '">';
@@ -33,7 +37,10 @@ $field = static function (string $key, string $label, bool $long, string $name =
 <div class="note-box">Шаблоны используются, когда у товара, категории, страницы или бренда не заполнены свои мета-теги.
   Нажмите на переменную, чтобы вставить её в поле, где стоит курсор. Под полем — пример результата на реальных данных.
   <b>UA</b> — шаблон для украинской версии сайта (/ua/…); пусто — используется русский шаблон.
-  На страницах 2, 3… категории к title и description дополнительно добавляется «| Страница N».</div>
+  На страницах 2, 3… категории к title и description дополнительно добавляется «| Страница N».
+  <br><b>[[…]]</b> — необязательная часть: пропадает, если в ней пустая переменная, а если title длиннее 70 или description длиннее 170 символов —
+  такие части убираются справа налево (последней пишите наименее важную); <code>{$product.box_qty|plural:пара,пары,пар}</code> — «8 пар».
+  Что всё равно длиннее нормы — сайт сокращает сам: title по слову, description по предложению.</div>
 <script type="application/json" id="seo-sample"><?= json_encode(['ru' => $sample, 'uk' => $sampleUk], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 
 <?php foreach ($groups as $g => [$title, $fields, $vars]): ?>

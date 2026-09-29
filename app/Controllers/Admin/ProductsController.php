@@ -13,6 +13,8 @@ use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
+use App\Services\ProductName;
+use App\Services\SeoAudit;
 
 /** Админка → Товары: список с фильтрами и массовыми действиями, карточка товара, фото. */
 final class ProductsController extends BaseController
@@ -65,7 +67,8 @@ final class ProductsController extends BaseController
         if ($ids) {
             [$ph, $vals] = $db->in($ids);
             $byId = $db->keyed("SELECT id, name, name_uk, sku, url, price, compare_price, box_qty, size, stock, in_stock, status, image_id, image_ext,
-                brand_id, category_id, badge, updated_at FROM products WHERE id IN ($ph)", $vals);
+                brand_id, category_id, badge, updated_at, seo_name, meta_title, meta_title_uk, meta_description, meta_description_uk
+                FROM products WHERE id IN ($ph)", $vals);
             foreach ($ids as $id) if (isset($byId[$id])) $rows[] = $byId[$id];
         }
         $cats = AdminCatalog::categories();
@@ -87,6 +90,7 @@ final class ProductsController extends BaseController
             'bulk'    => self::BULK,
             'query'   => http_build_query(array_filter(array_diff_key($f, ['sort' => 1]), static fn($v) => $v !== '' && $v !== 0 && $v !== false)),
             'capped'  => self::$capped ? self::SEARCH_LIMIT : 0,
+            'seoCells' => SeoAudit::listCells('product', $rows),    // точки Title/Description — как в SEO-обзоре и на витрине
         ]);
     }
 
@@ -108,6 +112,7 @@ final class ProductsController extends BaseController
             'nouk'     => $s('nouk') === '1' ? '1' : '',             // без перевода на украинский
             'ff'       => max(0, (int) $s('ff')),              // характеристика + значение (ссылка из раздела «Характеристики»)
             'fv'       => max(0, (int) $s('fv')),
+            'seo'      => array_key_exists($s('seo'), SeoAudit::LIST_FILTERS) ? $s('seo') : '',   // без своего title / description, длина
             'sort'     => isset(self::SORTS[$sort]) ? $sort : 'id_desc',
         ];
     }
@@ -171,6 +176,22 @@ final class ProductsController extends BaseController
         if ($f['sale']) $w[] = 'p.compare_price > 0 AND p.compare_price > p.price';   // первое условие — по индексу compare_price
         if ($f['nophoto']) $w[] = 'p.image_id IS NULL';
         if ($f['nouk']) $w[] = "(p.name_uk IS NULL OR p.name_uk = '')";
+        // SEO: условие без индекса (полный проход по 107 тыс. — ~50–100 мс). Редкое («без своего title/description» — сотни
+        // товаров) — как «без категории»: один проход за id, дальше список id — COUNT и страница при любой сортировке по
+        // первичному ключу (иначе «Название Я–А», последняя страница — индекс названия с чтением почти всех строк, ~0,3 с).
+        // Частое («длина не в норме» — почти все) — обычным условием: страница по индексу сортировки находится сразу
+        if ($f['seo'] !== '') {
+            $seoW = SeoAudit::listWhere($f['seo'], 'p.meta_title', 'p.meta_description');
+            $few = array_map('intval', $db->col("SELECT p.id FROM products p WHERE $seoW LIMIT 5001"));
+            if (count($few) <= 5000) {
+                if (!$few) return ['0', []];
+                [$ph, $vals] = $db->in($few);
+                $w[] = "p.id IN ($ph)";
+                $p = array_merge($p, $vals);
+            } else {
+                $w[] = $seoW;
+            }
+        }
         if ($f['ff'] && $f['fv']) {
             $w[] = 'p.id IN (SELECT pf.product_id FROM product_features pf WHERE pf.feature_id = ? AND pf.value_id = ?)';
             array_push($p, $f['ff'], $f['fv']);
@@ -399,8 +420,14 @@ final class ProductsController extends BaseController
                 }
                 CatalogIndexer::products([$newId], $this->snap);
                 Cache::forget('admin.category_direct_counts');
-                $this->log($id ? 'product_update' : 'product_create', 'product', $newId, ['name' => $data['name']]);
-                $this->flash(($id ? 'Товар сохранён.' : 'Товар создан.') . HtmlSanitizer::notice());
+                $auto = $this->autoName;
+                $this->log($id ? 'product_update' : 'product_create', 'product', $newId, ['name' => $auto['name'] ?? $data['name']] + ($auto ? ['auto_name' => $auto] : []));
+                $note = array_filter([
+                    array_key_exists('name_uk', $auto) ? 'UA: ' . ($auto['name_uk'] !== null ? '«' . $auto['name_uk'] . '»' : 'пусто (как русское)') : '',
+                    isset($auto['sku']) ? 'артикул: ' . ($auto['sku'] !== '' ? $auto['sku'] : 'пусто') : '']);
+                $note = isset($auto['name']) ? ' Название дополнено: «' . $auto['name'] . '»' . ($note ? ', ' . implode(', ', $note) : '') . '.'
+                    : ($note ? ' Название — код, дополнено: ' . implode(', ', $note) . '.' : '');
+                $this->flash(($id ? 'Товар сохранён.' : 'Товар создан.') . $note . HtmlSanitizer::notice());
                 return Response::redirect('/admin/products/' . $newId . '/');
             }
             $p = array_merge($p, $data);
@@ -408,7 +435,8 @@ final class ProductsController extends BaseController
 
         $cats = AdminCatalog::categories();
         $catFull = AdminCatalog::productSeoCategory($p['category_id'] ? (int) $p['category_id'] : null);
-        $seoTplUk = AdminCatalog::seoTemplates('product', AdminCatalog::productSeoVars(AdminCatalog::ukRow($p), AdminCatalog::ukRow($catFull)), 'uk');
+        // переменные UA — глазами /ua/ (полное имя категории из name_uk предков)
+        $seoTplUk = AdminCatalog::seoTemplates('product', SeoAudit::inLang('uk', static fn() => AdminCatalog::productSeoVars(AdminCatalog::ukRow($p), AdminCatalog::ukRow($catFull))), 'uk');
         $seoUk = AdminCatalog::ukFallback($p, $seoTplUk);
         $ukP = AdminCatalog::ukRow($p);
         $seoUk['seo_name'] = trim((string) ($p['seo_name'] ?? '')) ?: (string) $ukP['name'];
@@ -461,6 +489,9 @@ final class ProductsController extends BaseController
 
     /** Снимок товара до сохранения — CatalogIndexer::snapshot (для точного пересчёта фильтров и счётчиков брендов) */
     private ?array $snap = null;
+
+    /** Что дополнило автоназвание при сохранении (ProductName::fix): name / name_uk / sku — для сообщения */
+    private array $autoName = [];
 
     /** Разбор и проверка формы: [данные products, категории, характеристики, ошибки]; $old — товар из базы (описания без правок) */
     private function validate(int $id, array $features, array $old): array
@@ -573,6 +604,12 @@ final class ProductsController extends BaseController
         $sizeF = AdminCatalog::featureId('size');
         $d['brand_id'] = isset($state[$brandF][0]) ? $state[$brandF][0]['id'] : null;
         $d['size'] = isset($state[$sizeF][0]) ? mb_substr($state[$sizeF][0]['value'], 0, 64) : '';
+
+        // название-код («60189A») → «Категория Бренд Код» из выбранных категории и бренда (UA — если пустое или тоже код,
+        // артикул — если пуст). Нормальное название не трогается; адрес уже посчитан из введённого (validate).
+        // Правка товара, уже названного правилом, с новым кодом/категорией: его UA и артикул правила — заново ($old)
+        $this->autoName = ProductName::fix($d, $id ? $old : null);
+        $d = array_merge($d, $this->autoName);
 
         $texts = ['summary' => $d['summary'] !== '' ? $d['summary'] : null, 'description' => trim($d['description']) !== '' ? $d['description'] : null,
             'summary_uk' => $d['summary_uk'], 'description_uk' => $d['description_uk']];

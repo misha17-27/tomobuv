@@ -10,6 +10,7 @@ use App\Core\Log;
 use App\Core\Str;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
+use App\Services\ProductName;
 
 /**
  * Импорт товаров от поставщиков.
@@ -1036,6 +1037,17 @@ final class Importer
                 if (!isset($out[$nk]['many'])) $out[$nk][] = $r;
             }
         }
+        // ключ «Название», в файле код («60189A»), а товар уже назван правилом ProductName — «Зимняя обувь Tom.m 60189A»
+        // с артикулом 60189A: ищем по артикулу и окончанию названия, иначе каждый такой прайс создавал бы дубль
+        if ($key === 'name') {
+            $miss = array_values(array_filter($vals, static fn($v) => !isset($out[self::nk((string) $v)]) && ProductName::isBare((string) $v)));
+            foreach (array_chunk($miss, 1000) as $part) {
+                [$ph, $p] = $db->in($part);
+                $sql = 'SELECT ' . self::EX_COLS . " FROM products WHERE sku IN ($ph) AND RIGHT(name, CHAR_LENGTH(sku) + 1) = CONCAT(' ', sku)";
+                if ($bySupplier) { $sql .= ' AND supplier = ?'; $p[] = $supplier; }
+                foreach ($db->all($sql . ' LIMIT 5000', $p) as $r) $out[self::nk((string) $r['sku'])][] = $r;
+            }
+        }
         return $out;
     }
 
@@ -1270,6 +1282,10 @@ final class Importer
             'supplier' => $supplier, 'supplier_code' => $f['supplier_code'] ?? null, 'created_at' => $now, 'updated_at' => $now,
         ];
         foreach (self::TEXT_COLS as $c => $_) $it['row'][$c] = ($f[$c] ?? '') !== '' ? $f[$c] : null;   // все строки пачки — с одинаковым набором колонок
+        // название-код («88888X») → «Категория Бренд Код», как в админке (ProductName); адрес — из кода в файле
+        $auto = ProductName::fix(['name' => $f['name'], 'name_uk' => $it['row']['name_uk'], 'sku' => $it['row']['sku'], 'category_id' => $cat]
+            + (is_string($brand) ? ['brand_name' => $brandsNew[substr($brand, 4)] ?? ''] : ['brand_id' => $brand]));
+        $it['row'] = array_merge($it['row'], $auto);
         $it['cat'] = $cat;
         $it['feat'] = self::featPlan($it['rec']['feat'], $fv);
         if ($brand !== null && $ctx['sysF']['brand']) $it['feat'][$ctx['sysF']['brand']] = ['brand' => $brand];
@@ -1277,7 +1293,7 @@ final class Importer
         if ($ctx['sysF']['box']) $it['feat'][$ctx['sysF']['box']] = self::featPlan([$ctx['sysF']['box'] => [(string) $box => (string) $box]], $fv)[$ctx['sysF']['box']];
         foreach (self::TEXT_FIELDS as $t) if (isset($f[$t])) $it['texts'][$t] = $f[$t];
         if (!empty($opt['images'])) $it['img'] = $it['rec']['img'];
-        $it['show'] = ['name' => $f['name'], 'price' => $price, 'box_qty' => $box, 'category' => $ctx['ci']['path'][$cat] ?? '',
+        $it['show'] = ['name' => $it['row']['name'], 'price' => $price, 'box_qty' => $box, 'category' => $ctx['ci']['path'][$cat] ?? '',
             'brand' => $f['brand'] ?? '', 'brand_new' => is_string($brand), 'size' => $f['size'] ?? '', 'in_stock' => $inStock, 'images' => count($it['img']), 'url' => $url];
     }
 
@@ -1315,9 +1331,12 @@ final class Importer
         if ($inStock !== null) $set('in_stock', $inStock, 'i');
         $sysFeat = [];
         $showCat = $ctx['ci']['path'][(int) $ex['category_id']] ?? '';
+        $bare = false;
         if (!$priceOnly) {
-            if (($f['name'] ?? '') !== '') $set('name', $f['name'], 'ws');
-            if (($f['name_uk'] ?? '') !== '') $set('name_uk', $f['name_uk'], 'ws');
+            // название-код в файле («60189A») — после категории и бренда (ниже): ProductName, как при создании
+            $bare = ($f['name'] ?? '') !== '' && ProductName::isBare($f['name']);
+            if (($f['name'] ?? '') !== '' && !$bare) $set('name', $f['name'], 'ws');
+            if (($f['name_uk'] ?? '') !== '' && !$bare) $set('name_uk', $f['name_uk'], 'ws');
             foreach (['sku', 'supplier_code', 'size'] as $c) if (isset($f[$c]) && $f[$c] !== '') $set($c, $f[$c]);
             foreach (self::TEXT_COLS as $c => $_) if ($c !== 'name_uk' && ($f[$c] ?? '') !== '') $set($c, $f[$c]);
             foreach (['box_qty', 'min_qty', 'status'] as $c) if (isset($f[$c])) $set($c, $f[$c], 'i');
@@ -1343,6 +1362,7 @@ final class Importer
                     $showCat = $ctx['ci']['path'][$cat] ?? '';
                 }
             }
+            if ($bare) self::bareName($f, $ex, $upd, $brandsNew, $set);
             // характеристики: перезаписываются только отличающиеся
             $want = self::featPlan($it['rec']['feat'], $fv);
             if (array_key_exists('brand_id', $upd) && $ctx['sysF']['brand']) $want[$ctx['sysF']['brand']] = ['brand' => $upd['brand_id']];
@@ -1398,10 +1418,42 @@ final class Importer
             }
         }
         $u = $it['upd'];
-        $it['show'] = ['name' => $f['name'] ?? $ex['name'], 'price' => $u['price'] ?? (float) $ex['price'], 'box_qty' => $u['box_qty'] ?? (int) $ex['box_qty'],
+        $it['show'] = ['name' => $u['name'] ?? ($bare ? $ex['name'] : ($f['name'] ?? $ex['name'])), 'price' => $u['price'] ?? (float) $ex['price'], 'box_qty' => $u['box_qty'] ?? (int) $ex['box_qty'],
             'category' => $it['action'] === 'conflict' ? ($ctx['ci']['path'][(int) $ex['category_id']] ?? '') : $showCat,
             'brand' => $f['brand'] ?? '', 'brand_new' => isset($u['brand_id']) && is_string($u['brand_id']),
             'size' => $u['size'] ?? $ex['size'], 'in_stock' => $u['in_stock'] ?? (int) $ex['in_stock'], 'images' => count($it['img']), 'url' => $u['url'] ?? $ex['url']];
+    }
+
+    /**
+     * Название-код из файла у найденного товара: «60189A» → «Категория Бренд Код» (ProductName) с категорией и брендом
+     * после этой строки файла. Название, собранное правилом из этого же кода, пересобирается (сменились категория или
+     * бренд); своё полное название с этим кодом в конце («Ботинки зимние Tom.m 60189A») не меняется — в файле просто код.
+     */
+    private static function bareName(array $f, array $ex, array $upd, array $brandsNew, callable $set): void
+    {
+        $code = trim((string) preg_replace('/\s+/u', ' ', (string) $f['name']));
+        $old = trim((string) preg_replace('/\s+/u', ' ', (string) $ex['name']));
+        $gen = ProductName::generated($ex);                                // [название, UA, код] — собрано правилом
+        $auto = $gen !== null && mb_strtolower($gen[2]) === mb_strtolower($code);
+        if ($auto) $code = $gen[2];                                        // «60189a» в файле — написание кода с сайта
+        elseif (!ProductName::isBare($old) && str_ends_with(mb_strtolower($old), ' ' . mb_strtolower($code))) return;
+        $brand = array_key_exists('brand_id', $upd) ? $upd['brand_id'] : $ex['brand_id'];
+        // UA: из файла; своё UA-название остаётся, если русское было кодом (как в админке) или UA своё у собранного правилом;
+        // собранное правилом и после смены названия на другой код — пересобирается
+        $exUk = trim((string) $ex['name_uk']);
+        $ukOld = ($f['name_uk'] ?? '') !== '' ? (string) $f['name_uk']
+            : (ProductName::isBare($old) || ($auto && $exUk !== $gen[1]) ? $exUk : '');
+        // артикул, который записало правило (= прежний код), а в файле артикула нет — вместе с новым кодом
+        $ownSku = $gen !== null && ($f['sku'] ?? '') === '' && trim((string) $ex['sku']) === $gen[2];
+        $auto = ProductName::fix(['name' => $code, 'name_uk' => $ukOld, 'sku' => $ownSku ? '' : ($upd['sku'] ?? $ex['sku']),
+            'category_id' => $upd['category_id'] ?? $ex['category_id']]
+            + (is_string($brand) ? ['brand_name' => $brandsNew[substr($brand, 4)] ?? ''] : ['brand_id' => $brand]));
+        $set('name', $auto['name'] ?? $code, 'ws');
+        if (isset($auto['name_uk'])) $set('name_uk', $auto['name_uk'], 'ws');
+        elseif (($f['name_uk'] ?? '') !== '') $set('name_uk', $f['name_uk'], 'ws');
+        elseif ($ukOld === '' && trim((string) $ex['name_uk']) !== '') $set('name_uk', null);   // прежнее UA-название — от другого товара-названия
+        if (isset($auto['sku'])) $set('sku', $auto['sku']);
+        elseif ($ownSku) $set('sku', '');
     }
 
     /** [fid => [nk => значение]] → [fid => [id значения | "fid|nk" для новых]] */

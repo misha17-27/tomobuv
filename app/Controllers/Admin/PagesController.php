@@ -12,6 +12,7 @@ use App\Core\Settings;
 use App\Core\Str;
 use App\Services\AdminCatalog;
 use App\Services\HtmlSanitizer;
+use App\Services\SeoAudit;
 
 /**
  * Информационные страницы (/o-kompanii/, /dostavka-i-oplata/…).
@@ -39,7 +40,9 @@ final class PagesController extends BaseController
         $q = mb_strtolower(Request::get('q'));
         // страниц единицы — фильтруем в PHP (без тяжёлого content)
         $rows = $db->all("SELECT id, url, name, name_uk, status, in_menu, sort, canonical, updated_at,
+                title, title_uk, meta_description, meta_description_uk,
                 (content_uk IS NOT NULL AND content_uk <> '') AS has_uk FROM pages ORDER BY sort, id");
+        $seoCells = SeoAudit::listCells('page', $rows);          // точки Title/Description — как в SEO-обзоре
         $byUrl = array_column($rows, 'id', 'url');
         $counts = ['all' => count($rows), 'main' => 0, 'dup' => 0, 'hidden' => 0];
         foreach ($rows as &$r) {
@@ -57,8 +60,13 @@ final class PagesController extends BaseController
             if ($q !== '' && !str_contains(mb_strtolower($r['name'] . ' ' . $r['name_uk'] . ' ' . $r['url']), $q)) return false;
             return true;
         }));
+        // фильтр «SEO» (?seo=): счётчики чипов — под вкладку и поиск
+        $seo = array_key_exists(Request::get('seo'), SeoAudit::LIST_FILTERS) ? Request::get('seo') : '';
+        $seoCounts = SeoAudit::listCounts(array_intersect_key($seoCells, array_flip(array_map('intval', array_column($rows, 'id')))));
+        if ($seo !== '') $rows = array_values(array_filter($rows, static fn($r) => SeoAudit::listMatches($seoCells[(int) $r['id']], $seo)));
         return $this->render('admin/pages/index', [
             'title' => 'Страницы', 'rows' => $rows, 'filter' => $filter, 'q' => Request::get('q'), 'counts' => $counts,
+            'seoFilter' => $seo, 'seoCounts' => $seoCounts, 'seoCells' => $seoCells,
             'actions' => '<a class="btn btn-p" href="/admin/pages/new/">+ Новая страница</a>',
             'styles' => ['admin/content.css'], 'scripts' => ['admin/content.js'],
         ]);
@@ -139,21 +147,21 @@ final class PagesController extends BaseController
         };
         $nameRu = $page['name'] ?: 'Название';
         $nameUk = ($page['name_uk'] ?? '') ?: $nameRu;
+        // title/description — как витрина (SeoAudit::auto: шаблон с подгонкой длины; description — отрывок текста, иначе шаблон)
+        $autoRu = AdminCatalog::seoAuto('page', ['name' => $nameRu] + $page, 'ru');
+        $autoUk = AdminCatalog::seoAuto('page', ['name' => $nameRu, 'name_uk' => $nameUk] + $page, 'uk');
         $hints = [
-            'ru' => ['title' => $tpl('seo.page_meta_title', $nameRu, false), 'desc' => $tpl('seo.page_meta_description', $nameRu, false), 'keys' => $tpl('seo.page_meta_keywords', $nameRu, false)],
-            'uk' => ['title' => $tpl('seo.page_meta_title', $nameUk, true), 'desc' => $tpl('seo.page_meta_description', $nameUk, true), 'keys' => $tpl('seo.page_meta_keywords', $nameUk, true)],
+            'ru' => ['title' => $autoRu['title'], 'desc' => $autoRu['desc'], 'keys' => $tpl('seo.page_meta_keywords', $nameRu, false)],
+            'uk' => ['title' => $autoUk['title'], 'desc' => $autoUk['desc'], 'keys' => $tpl('seo.page_meta_keywords', $nameUk, true)],
         ];
         // на /ua/ пустое поле *_uk берёт русское значение страницы (DB::$localize), и только если пусто и оно — шаблон
         foreach (['title' => 'title', 'desc' => 'meta_description', 'keys' => 'meta_keywords'] as $h => $col) {
             $own = trim((string) ($page[$col] ?? ''));
             if ($own !== '') $hints['uk'][$h] = $own;
         }
-        // шаблоны для страниц выключены — без своих значений title = название, description/keywords пустые
+        // шаблоны для страниц выключены — без своих значений keywords пустые (title и description уже учтены в SeoAudit::auto)
         if ((string) ($all['seo.page_is_enabled'] ?? '1') === '0') {
-            foreach (['ru' => $nameRu, 'uk' => $nameUk] as $l => $n) {
-                if (trim((string) $page['title']) === '') $hints[$l]['title'] = $n;
-                foreach (['desc' => 'meta_description', 'keys' => 'meta_keywords'] as $h => $col) if (trim((string) $page[$col]) === '') $hints[$l][$h] = '';
-            }
+            foreach (['ru', 'uk'] as $l) if (trim((string) $page['meta_keywords']) === '') $hints[$l]['keys'] = '';
         }
 
         $actions = '';

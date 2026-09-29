@@ -3,10 +3,13 @@ declare(strict_types=1);
 
 namespace App\Controllers\Admin;
 
+use App\Core\Auth;
+use App\Core\Cache;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
 use App\Services\SeoAudit;
+use App\Services\SeoFix;
 
 /**
  * SEO-обзор (как «SEO» в админке ARG FLEX): что видят поисковики на каждом адресе из sitemap.xml.
@@ -15,9 +18,11 @@ use App\Services\SeoAudit;
  *   ?group=pages|categories|brands|blog|products — одна группа; товары — по 50 на страницу, поиск ?q=;
  *   ?lang=uk                       — таблица глазами украинской версии (/ua/…: поля *_uk, шаблоны «seo.*.uk»);
  *   ?sample=ID                     — товар для превью шаблонов;
- *   POST /admin/seo/refresh/       — пересчитать сейчас (итоги кэшируются на 10 минут).
- * Экран только показывает — правки делаются на экранах товара/категории/страницы и в «Настройки → SEO-шаблоны»,
- * поэтому доступен и менеджерам.
+ *   POST /admin/seo/refresh/       — пересчитать сейчас (итоги кэшируются на 10 минут);
+ *   GET  /admin/seo/autofix/       — «Исправить автоматически»: предпросмотр (что изменится по группам, 50 примеров) и пакеты;
+ *   POST /admin/seo/autofix/       — применить одним пакетом; POST /admin/seo/autofix/{id}/revert/ — откатить пакет.
+ * Обзор только показывает — правки делаются на экранах товара/категории/страницы и в «Настройки → SEO-шаблоны»,
+ * поэтому доступен и менеджерам; автоисправление (App\Services\SeoFix) — только администратору.
  */
 final class SeoController extends BaseController
 {
@@ -76,7 +81,8 @@ final class SeoController extends BaseController
             . '<button class="btn" type="submit" title="Итоги считаются раз в 10 минут">'
             . '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>'
             . 'Пересчитать</button></form>'
-            . '<a class="btn" href="' . e(SeoAudit::SETTINGS_URL) . '">SEO-шаблоны</a>';
+            . '<a class="btn" href="' . e(SeoAudit::SETTINGS_URL) . '">SEO-шаблоны</a>'
+            . (Auth::isAdmin() ? '<a class="btn btn-p" href="/admin/seo/autofix/" title="Сначала предпросмотр: до «Применить» ничего не меняется">Исправить автоматически</a>' : '');
 
         return $this->render('admin/seo/index', [
             'title'      => 'SEO',
@@ -104,6 +110,84 @@ final class SeoController extends BaseController
             'templates'  => SeoAudit::templates($sample),
             'service'    => SeoAudit::service($ru['rows']),
         ]);
+    }
+
+    // ------------------------------------------------------------------ автоисправление
+
+    /**
+     * Предпросмотр автоисправления: итоги «в норме» сейчас → после по группам и языкам, правила, шаблоны, 50 примеров «было → стало»,
+     * что останется не в норме, пакеты с откатом. Расчёт (~10 с на 107 тыс. товаров) кэшируется на 10 минут
+     * (Cache::flush после любой правки в админке сбрасывает сразу); «Применить» считает заново на свежих данных.
+     */
+    public function autofix(): Response
+    {
+        if (!Auth::isAdmin()) return $this->adminOnly();
+        $ready = SeoFix::hasTables();
+        $report = null;
+        if ($ready) {
+            $report = Request::get('fresh') === '1' ? null : Cache::get('seo.autofix.preview');
+            if (!is_array($report)) {
+                if (function_exists('set_time_limit')) @set_time_limit(300);
+                $report = SeoFix::run(false, ['examples' => 10]) + ['at' => time()];
+                Cache::set('seo.autofix.preview', $report, SeoAudit::TTL);
+            }
+        }
+        return $this->render('admin/seo/autofix', [
+            'title'    => 'SEO: исправить автоматически',
+            'back'     => ['/admin/seo/', 'SEO-обзор'],
+            'styles'   => ['admin/seo.css'],
+            'ready'    => $ready,
+            'report'   => $report,
+            'examples' => $report ? SeoFix::examples($report, 50) : [],
+            'batches'  => $ready ? SeoFix::batches(20) : [],
+        ]);
+    }
+
+    /** Применить автоисправление одним пакетом (на свежих данных, не по сохранённому предпросмотру) */
+    public function autofixApply(): Response
+    {
+        if (!Auth::isAdmin()) return $this->adminOnly();
+        if (!SeoFix::hasTables()) {
+            $this->flash('Нет таблиц журнала — выполните php bin/install.php.', true);
+            return Response::redirect('/admin/seo/autofix/');
+        }
+        ignore_user_abort(true);
+        if (function_exists('set_time_limit')) @set_time_limit(600);
+        try {
+            $r = SeoFix::run(true, ['source' => 'admin', 'user_id' => Auth::id() ?: null, 'examples' => 1]);
+        } catch (\RuntimeException $e) {
+            $this->flash($e->getMessage(), true);
+            return Response::redirect('/admin/seo/autofix/');
+        }
+        $this->log('seo_autofix', 'seo_fix_batch', $r['batch'], ['changes' => $r['changes'], 'rules' => $r['rules'], 'time' => $r['time']]);
+        $this->flash($r['batch'] ? 'Исправлено ' . number_format($r['changes'], 0, '', ' ') . ' ' . plural($r['changes'], 'значение', 'значения', 'значений')
+            . ' — пакет № ' . $r['batch'] . ' (' . $r['time'] . ' с). Кэш сайта сброшен; пакет можно откатить ниже.'
+            : 'Исправлять нечего — всё уже в норме, пакет не создан.');
+        return Response::redirect('/admin/seo/autofix/' . ($r['batch'] ? '#batches' : ''));
+    }
+
+    /** Откатить пакет: вернуть «было», кроме значений, изменённых после пакета */
+    public function autofixRevert(string $id): Response
+    {
+        if (!Auth::isAdmin()) return $this->adminOnly();
+        ignore_user_abort(true);
+        if (function_exists('set_time_limit')) @set_time_limit(600);
+        try {
+            $r = SeoFix::revert((int) $id, Auth::id() ?: null);
+        } catch (\RuntimeException $e) {
+            $this->flash($e->getMessage(), true);
+            return Response::redirect('/admin/seo/autofix/#batches');
+        }
+        $this->log('seo_autofix_revert', 'seo_fix_batch', (int) $id, ['restored' => $r['restored'], 'skipped' => $r['skipped']]);
+        $this->flash('Пакет № ' . (int) $id . ' откачен: возвращено ' . number_format($r['restored'], 0, '', ' ')
+            . ($r['skipped'] ? ', пропущено ' . number_format($r['skipped'], 0, '', ' ') . ' (значение меняли после пакета — список в строке пакета)' : '') . '.');
+        return Response::redirect('/admin/seo/autofix/#batches');
+    }
+
+    private function adminOnly(): Response
+    {
+        $this->flash('Автоисправление SEO доступно только администратору.', true);
+        return Response::redirect('/admin/seo/');
     }
 
     /** Пересчитать итоги сейчас (сбрасывает только кэш этого экрана, обе версии сайта) */

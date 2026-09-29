@@ -9,12 +9,14 @@
  *   php bin/i18n-seed-uk.php --force    — перезаписать и то, что уже переведено вручную в админке
  *
  * Без --force заполняются только пустые *_uk (ручные правки в админке не затираются).
+ * В конце — SEO-стандарт title/description (App\Services\SeoFix, как php bin/seo-autofix.php; «seo» — только он).
  */
 declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
 
 use App\Core\App;
 use App\Core\Cache;
+use App\Services\ProductName;
 
 ini_set('memory_limit', '1024M');
 if (function_exists('set_time_limit')) set_time_limit(0);
@@ -148,14 +150,18 @@ $steps['features'] = function () use ($db, $data, $setCols, $say) {
 $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
     // Названия и мета товаров: перевод типовых слов (Кроссовки → Кросівки) + шаблоны старого сайта
     $last = 0; $upd = 0;
+    ProductName::reset();                     // категории и бренды — с name_uk из шагов выше
     while (true) {
-        $rows = $db->all('SELECT id, name, meta_title, meta_description, meta_keywords, name_uk, meta_title_uk, meta_description_uk, meta_keywords_uk
+        $rows = $db->all('SELECT id, name, sku, category_id, brand_id, meta_title, meta_description, meta_keywords, name_uk, meta_title_uk, meta_description_uk, meta_keywords_uk
             FROM products WHERE id > ? ORDER BY id LIMIT 3000', [$last]);
         if (!$rows) break;
         $batch = [];
         foreach ($rows as $p) {
             $last = (int) $p['id'];
-            $nameUk = $trWords($p['name']);
+            // автоназвание «Зимняя обувь Tom.m 60189A» (ProductName) — UA из name_uk категории и бренда, как при сборке;
+            // с --force результат тот же, что записали bin/product-names.php и перенос
+            $gen = ProductName::generated($p);
+            $nameUk = $gen ? $gen[1] : $trWords($p['name']);
             $new = [];
             if ($nameUk !== $p['name'] && ($force || !$p['name_uk'])) $new['name_uk'] = $nameUk;
             $n = $new['name_uk'] ?? ($p['name_uk'] ?: $nameUk);
@@ -200,6 +206,20 @@ $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
 foreach ($steps as $name => $fn) {
     if ($only && $only !== $name) continue;
     $fn();
+}
+// SEO-стандарт после сида (App\Services\SeoFix): сид повторяет на украинском «машинные» мета старого сайта («купити … в Одесі»),
+// а с --force возвращает шаблоны «seo.*.uk» — приводим title/description обеих версий к норме, одним пакетом в журнале
+// (откат: php bin/seo-autofix.php --revert=N; повторный запуск ничего не меняет). Отдельный шаг — только его часть; «seo» — только это.
+$seoParts = ['settings' => ['settings'], 'categories' => ['categories'], 'pages' => ['pages'], 'blog' => ['blog'], 'brands' => ['brands'],
+    'products' => ['products'], 'seo' => array_keys(\App\Services\SeoFix::PARTS)];
+if (!$only || isset($seoParts[$only])) {
+    if (!\App\Services\SeoFix::hasTables()) {
+        $say('SEO: нет таблиц журнала — выполните php bin/install.php, затем php bin/seo-autofix.php');
+    } else {
+        $r = \App\Services\SeoFix::run(true, ['parts' => $only ? $seoParts[$only] : array_keys(\App\Services\SeoFix::PARTS), 'source' => 'i18n']);
+        $say('SEO title/description приведены к норме: изменено ' . $r['changes'] . ($r['batch'] ? ' (пакет №' . $r['batch'] . ')' : '')
+            . ', не в норме осталось ' . count($r['left']));
+    }
 }
 Cache::flush();
 $say('Готово (кэш сброшен).');

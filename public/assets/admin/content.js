@@ -832,22 +832,77 @@
     if (!sEl) return;
     var samples = {};
     try { samples = JSON.parse(sEl.textContent); } catch (e) { return; }
-    var tpl = function (t, lang) {
+    // как App\Core\Seo::build: переменные, |plural, необязательные части [[…]] (пустая переменная — части нет; длиннее нормы —
+    // убираются справа налево), чистка пробелов и краёв; что всё равно длиннее — как Seo::fit: title по слову без висячих
+    // предлогов и союзов, description по концу предложения (если остаётся от 70), иначе по слову + «…»
+    var LIM = { title: 70, description: 170 };
+    var HANG = new RegExp('\\s+(?:в|во|и|с|со|на|от|для|по|за|к|ко|о|об|у|из|а|но|или|без|до|при|под|над|про|через|не|з|із|зі|від|або|та|й|і|під|чи)$', 'iu');
+    var cleanTail = function (s) {
+      var prev;
+      do { prev = s; s = s.replace(/[\s,;:—–\-|(\/«"„+&]+$/u, '').replace(HANG, ''); } while (s !== prev && s !== '');
+      return s;
+    };
+    var wordCut = function (s, max) {
+      if (s.length <= max) return s;
+      var cut = s.slice(0, max + 1), sp = cut.lastIndexOf(' ');
+      return cleanTail(sp > 0 ? cut.slice(0, sp) : s.slice(0, max));
+    };
+    var fit = function (s, kind) {
+      if (s.length <= LIM[kind]) return s;
+      if (kind === 'title') return wordCut(s, LIM.title);
+      var best = '', re = /[.!?…](?=\s+[\p{Lu}\d«"„]|\s*$)/gu, m;
+      while ((m = re.exec(s)) && m.index + 1 <= LIM.description) if (m.index + 1 >= 70) best = s.slice(0, m.index + 1);
+      return best !== '' ? best : wordCut(s, LIM.description - 1) + '…';
+    };
+    var plural = function (n, f) {
+      var a = n % 10, b = n % 100;
+      return a === 1 && b !== 11 ? f[0] : (a >= 2 && a <= 4 && (b < 10 || b >= 20) ? f[1] : f[2]);
+    };
+    var tpl = function (t, lang, kind) {
       var sample = samples[lang] || samples.ru || {};
-      return t.replace(/\{\$([a-z_]+)(?:\.([a-z_]+))?(?:\|[^}]*)?\}/gi, function (m, a, b) {
+      var val = function (a, b, mod) {
         var v = sample[a];
         if (b) v = v && typeof v === 'object' ? v[b] : '';
-        return v == null || typeof v === 'object' ? '' : String(v);
-      }).trim();
+        v = v == null || typeof v === 'object' ? '' : String(v).trim();
+        var m = /^\|\s*plural\s*:(.+)$/.exec(mod || '');
+        if (!m) return v;
+        var f = m[1].split(',').map(function (x) { return x.trim(); }), n = parseInt(v.replace(/\D/g, ''), 10);
+        if (!/^[\d\s]+$/.test(v) || !(n > 0) || f.length < 3) return '';
+        return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' ' + plural(n, f);
+      };
+      var parts = t.split(/(\[\[[\s\S]*?\]\])/).filter(Boolean).map(function (p) {
+        var opt = p.slice(0, 2) === '[[' && p.slice(-2) === ']]', empty = false;
+        var s = (opt ? p.slice(2, -2) : p).replace(/\{\$([a-z_]+)(?:\.([a-z_]+))?((?:\|[^}]*)?)\}/gi, function (m0, a, b, mod) {
+          var v = val(a, b, mod);
+          if (v === '' || v === '0') empty = true;
+          return v;
+        });
+        return opt && empty ? null : { s: s, opt: opt };
+      }).filter(Boolean);
+      var join = function () {
+        return parts.map(function (p) { return p.s; }).join('').replace(/\s+/g, ' ').replace(/ ([,.;:!?…)])/g, '$1').replace(/([(«]) /g, '$1')
+          .replace(/([,;:])(?:\s*[,;:])+/g, '$1').replace(/^[\s—–\-|,;:]+|[\s—–\-|,;:]+$/g, '');
+      };
+      var out = join(), max = LIM[kind];
+      if (max) {
+        for (var i = parts.length - 1; out.length > max && i >= 0; i--) if (parts[i].opt) { parts.splice(i, 1); out = join(); }
+        out = fit(out, kind);
+      }
+      return out;
+    };
+    var shown = function (s, kind) {
+      var n = s.length, lim = kind === 'title' ? [30, 70] : (kind === 'description' ? [70, 170] : null);
+      return '<b>' + esc(s) + '</b>' + (lim ? ' <span class="' + (n < lim[0] || n > lim[1] ? 'warn' : 'muted') + '">(' + n + ' симв.)</span>' : '');
     };
     $$('[data-seo]').forEach(function (el) {
       var out = el.parentNode.querySelector('.seo-prev');
       var lang = el.getAttribute('data-seo') === 'uk' ? 'uk' : 'ru';
+      var kind = el.getAttribute('data-seo-kind') || '';
       var ru = lang === 'uk' ? el.closest('.i18n').querySelector('[data-seo=ru]') : null;
       var upd = function () {
         var v = el.value.trim();
-        if (!v && ru && ru.value.trim()) { out.innerHTML = 'Пусто — русский шаблон: <b>' + esc(tpl(ru.value.trim(), 'uk')) + '</b>'; return; }
-        out.innerHTML = v ? 'Пример: <b>' + esc(tpl(v, lang)) + '</b>' : 'Пусто — будет использовано название';
+        if (!v && ru && ru.value.trim()) { out.innerHTML = 'Пусто — русский шаблон: ' + shown(tpl(ru.value.trim(), 'uk', kind), kind); return; }
+        out.innerHTML = v ? 'Пример: ' + shown(tpl(v, lang, kind), kind) : 'Пусто — будет использовано название';
       };
       if (ru) ru.addEventListener('input', upd);
       el.addEventListener('input', upd);

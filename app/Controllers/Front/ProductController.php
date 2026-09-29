@@ -19,13 +19,14 @@ use App\Core\View;
 use App\Services\Cart;
 use App\Services\Catalog;
 use App\Services\Products;
+use App\Services\SeoVars;
 
 /**
  * Страница товара /product/{url}/, отзывы о товаре /product/{url}/reviews/ (как в Webasyst)
  * и HTML-карточки по списку id /products/cards/?ids=… (блок «Вы недавно смотрели»).
  *
- * SEO повторяет живой сайт: свои meta_* товара, иначе шаблоны seo.product_meta_* с переменными
- * {$product.name}, {$product.seo_name}, {$product.format_price}, {$category.name}, {$category.seo_name}.
+ * SEO: свои meta_* товара, иначе шаблоны seo.product_meta_* (App\Core\Seo::pick подгоняет длину под норму) с переменными
+ * {$product.name}, {$product.format_price}, {$product.box_qty}, {$product.sizes}, {$category.full_name}… (App\Services\SeoVars).
  */
 final class ProductController
 {
@@ -213,23 +214,10 @@ final class ProductController
         return $first ? reset($first) : null;
     }
 
+    /** Переменные SEO-шаблонов — общие с SEO-обзором и автоисправлением (App\Services\SeoVars) */
     private static function seoVars(array $p, ?array $cat): array
     {
-        $seoName = trim((string) ($p['seo_name'] ?? ''));
-        $catSeo = trim((string) ($cat['seo_name'] ?? ''));
-        return [
-            'product' => [
-                'name'         => $p['name'],
-                'seo_name'     => $seoName !== '' ? $seoName : $p['name'],
-                'format_price' => price_format($p['price']),
-                'price'        => (string) round($p['price']),
-                'sku'          => $p['sku'],
-            ],
-            'category' => [
-                'name'     => (string) ($cat['name'] ?? ''),
-                'seo_name' => $catSeo !== '' ? $catSeo : (string) ($cat['name'] ?? ''),
-            ],
-        ];
+        return SeoVars::product($p, $cat);
     }
 
     /** Хлебные крошки: путь основной категории (только активные) + товар */

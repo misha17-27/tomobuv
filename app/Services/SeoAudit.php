@@ -18,9 +18,10 @@ use App\Core\Settings;
  *
  * Четыре состояния, а не два (как в админке ARG FLEX): пустое поле — не всегда ошибка.
  *   none — «Нет»:        своего нет и шаблон тоже пустой — на сайте мета-тега не будет;
- *   warn — «Длина»:      своё задано, но короче/длиннее, чем покажет Google;
+ *   warn — «Длина»:      своё задано (или результат шаблона), но короче/длиннее, чем покажет Google;
  *   ok   — «Задан»:      своё значение нормальной длины;
- *   auto — «По шаблону»: своего нет, строится из шаблона (или из названия) — это нормально.
+ *   auto — «По шаблону»: своего нет, строится из шаблона (или из названия, отрывка текста) нормальной длины — это нормально.
+ * У товаров итоги считаются агрегатами по своим значениям: результат шаблона товара движок подгоняет под норму (Seo::build).
  *
  * Небольшие группы (страницы, категории, бренды, статьи) считаются целиком в PHP;
  * товары (100 000+) — только агрегатами одним SQL, список — постранично по 50.
@@ -33,10 +34,10 @@ use App\Core\Settings;
  */
 final class SeoAudit
 {
-    public const TITLE_MIN = 30;
-    public const TITLE_MAX = 70;
-    public const DESC_MIN = 70;
-    public const DESC_MAX = 170;
+    public const TITLE_MIN = Seo::TITLE_MIN;      // норма — общая с движком шаблонов (App\Core\Seo) и автоисправлением (SeoFix)
+    public const TITLE_MAX = Seo::TITLE_MAX;
+    public const DESC_MIN = Seo::DESC_MIN;
+    public const DESC_MAX = Seo::DESC_MAX;
     public const TTL = 600;
     public const PER_PAGE = 50;
     private const SEARCH_LIMIT = 5000;
@@ -62,11 +63,11 @@ final class SeoAudit
 
     // ======================================================================= состояние
 
-    /** Состояние title/description: своё значение + что покажет сайт без него (результат шаблона) */
+    /** Состояние title/description: своё значение + что покажет сайт без него (результат шаблона; вне нормы — «Длина») */
     public static function state(string $own, string $field, string $auto = ''): string
     {
         $len = mb_strlen(trim($own));
-        if ($len === 0) return trim($auto) !== '' ? 'auto' : 'none';
+        if ($len === 0) return trim($auto) === '' ? 'none' : (self::lengthState($auto, $field) === 'warn' ? 'warn' : 'auto');
         [$min, $max] = $field === 'title' ? [self::TITLE_MIN, self::TITLE_MAX] : [self::DESC_MIN, self::DESC_MAX];
         return ($len < $min || $len > $max) ? 'warn' : 'ok';
     }
@@ -206,15 +207,20 @@ final class SeoAudit
                 $vars = self::categoryVars($row);
                 return ['title' => ($on ? Seo::pick('', 'seo.category_meta_title', $vars) : '') ?: (string) ($row['name'] ?? ''),
                         'desc'  => $on ? Seo::pick('', 'seo.category_meta_description', $vars) : ''];
-            case 'page':                                      // Front\PageController::seo
+            case 'page':                                      // Front\PageController::seo: description — отрывок текста, иначе шаблон
                 $on = (string) Settings::get('seo.page_is_enabled', '1') !== '0';
-                $vars = ['page' => ['name' => (string) ($row['name'] ?? ''), 'title' => (string) ($row['title'] ?? '')]];
+                $vars = ['page' => ['name' => (string) ($row['name'] ?? ''), 'title' => '']];
+                $desc = Seo::excerpt((string) ($row['content'] ?? ''));
                 return ['title' => ($on ? Seo::pick('', 'seo.page_meta_title', $vars) : '') ?: (string) ($row['name'] ?? ''),
-                        'desc'  => $on ? Seo::pick('', 'seo.page_meta_description', $vars) : ''];
-            case 'brand':                                     // Front\BrandController::seo — без шаблонов, как на старом сайте
-                return ['title' => (string) ($row['name'] ?? ''), 'desc' => ''];
-            case 'blog':                                      // Front\BlogController::post
-                return ['title' => self::blogName() . ' » ' . ($row['title'] ?? ''), 'desc' => ''];
+                        'desc'  => $desc !== '' ? $desc : ($on ? Seo::pick('', 'seo.page_meta_description', $vars) : '')];
+            case 'brand':                                     // Front\BrandController::seo: шаблоны seo.brand_meta_*, иначе имя
+                $on = (string) Settings::get('seo.brand_is_enabled', '1') !== '0';
+                $vars = SeoVars::brand($row);
+                return ['title' => ($on ? Seo::pick('', 'seo.brand_meta_title', $vars) : '') ?: trim((string) ($row['name'] ?? '')),
+                        'desc'  => $on ? Seo::pick('', 'seo.brand_meta_description', $vars) : ''];
+            case 'blog':                                      // Front\BlogController::post: description — отрывок текста
+                return ['title' => self::blogName() . ' » ' . ($row['title'] ?? ''),
+                        'desc'  => Seo::excerpt(\App\Controllers\Front\BlogController::excerptSource($row))];
             case 'home':                                      // Front\HomeController::index
                 return ['title' => (string) Settings::get('site_title', ''), 'desc' => ''];
         }
@@ -296,7 +302,7 @@ final class SeoAudit
             'uk' => [self::filled($raw['seo.home_page_meta_title.uk'] ?? ''), self::filled($raw['seo.home_page_meta_description.uk'] ?? '')],
             'tpl' => ['site_title', '']]);
 
-        foreach ($db->all('SELECT id, url, name, name_uk, title, title_uk, meta_description, meta_description_uk, status, canonical FROM pages ORDER BY (url LIKE \'pages/%\'), sort, id') as $p) {
+        foreach ($db->all('SELECT id, url, name, name_uk, title, title_uk, meta_description, meta_description_uk, status, canonical, content, content_uk FROM pages ORDER BY (url LIKE \'pages/%\'), sort, id') as $p) {
             $path = '/' . $p['url'];
             ['title' => $autoTitle, 'desc' => $autoDesc] = self::auto('page', $p);
             $canon = trim((string) $p['canonical']);
@@ -309,15 +315,16 @@ final class SeoAudit
                 'uk' => [self::filled($p['title_uk']), self::filled($p['meta_description_uk'])],
                 'tpl' => $pageTpl ? ['seo.page_meta_title', 'seo.page_meta_description'] : ['', '']]);
         }
-        // заголовки этих двух страниц заданы в коде витрины (Front\ReviewsController::index, Front\PageController::htmlMap);
-        // description у обеих не выводится — как на живом сайте
-        $rows[] = self::row('pages', 'Отзывы о магазине', '/reviews/', '', t('Отзывы'), '', '',
-            '', ['closed' => $closedBy('/reviews/'), 'edit_note' => 'задано в коде сайта']);
-        $rows[] = self::row('pages', 'Карта сайта', '/sitemap/', '', t('Карта сайта') . ' — ' . $store, '', '',
-            '', ['closed' => $closedBy('/sitemap/'), 'edit_note' => 'задано в коде сайта']);
+        // отзывы и HTML-карта: настройки seo.reviews_meta_* / seo.sitemap_meta_* (Front\ReviewsController::index, Front\PageController::htmlMap);
+        // пусто — заголовок из кода сайта, без описания (как на старом сайте)
+        foreach ([['Отзывы о магазине', '/reviews/', 'reviews', t('Отзывы')], ['Карта сайта', '/sitemap/', 'sitemap', t('Карта сайта') . ' — ' . $store]] as [$label, $path, $k, $def]) {
+            $rows[] = self::row('pages', $label, $path, '', Seo::pick('', "seo.{$k}_meta_title", []) ?: $def, '', Seo::pick('', "seo.{$k}_meta_description", []),
+                self::SETTINGS_URL . "#f-seo-{$k}_meta_title", ['closed' => $closedBy($path), 'edit_note' => 'Настройки → SEO-шаблоны',
+                'tpl' => ["seo.{$k}_meta_title", "seo.{$k}_meta_description"]]);
+        }
 
         // ---- категории: свои meta_*, иначе шаблоны seo.category_meta_* ({$category.seo_name} = seo_name или name)
-        foreach ($db->all('SELECT id, parent_id, depth, name, name_uk, url, type, status, seo_name, seo_name_uk, meta_title, meta_title_uk, meta_description, meta_description_uk FROM categories ORDER BY lft, sort, id') as $c) {
+        foreach ($db->all('SELECT id, parent_id, depth, name, name_uk, url, type, status, seo_name, seo_name_uk, product_count, meta_title, meta_title_uk, meta_description, meta_description_uk FROM categories ORDER BY lft, sort, id') as $c) {
             $path = '/category/' . $c['url'] . '/';
             $auto = self::auto('category', $c);
             $hidden = !(int) $c['status'];
@@ -330,7 +337,7 @@ final class SeoAudit
                 'tpl' => $catTpl ? ['seo.category_meta_title', 'seo.category_meta_description'] : ['', '']]);
         }
 
-        // ---- бренды: title = brands.title, иначе имя бренда; description = brands.meta_description (как на старом сайте);
+        // ---- бренды: свои brands.title / meta_description, иначе шаблоны seo.brand_meta_* (Front\BrandController::seo);
         //      имя на /ua/ — name_uk, если задано («Не вказано»), как Catalog::brands() на витрине (DB::$localize)
         foreach ($db->all('SELECT id, name, name_uk, url, title, title_uk, meta_description, meta_description_uk, hidden, product_count FROM brands ORDER BY name, id') as $b) {
             $path = '/brand/' . urlencode((string) $b['url']) . '/';
@@ -340,7 +347,8 @@ final class SeoAudit
             $rows[] = self::row('brands', (string) $b['name'], $path, $b['title'], $auto['title'], $b['meta_description'], $auto['desc'],
                 '/admin/brands/' . (int) $b['id'] . '/#h-seo', ['closed' => $closed, 'hidden' => !$live, 'sitemap' => $live, 'all' => $live,
                 'sub' => number_format((int) $b['product_count'], 0, '', ' ') . ' ' . plural((int) $b['product_count'], 'товар', 'товара', 'товаров'),
-                'uk' => [self::filled($b['title_uk']), self::filled($b['meta_description_uk'])]]);
+                'uk' => [self::filled($b['title_uk']), self::filled($b['meta_description_uk'])],
+                'tpl' => (string) Settings::get('seo.brand_is_enabled', '1') !== '0' ? ['seo.brand_meta_title', 'seo.brand_meta_description'] : ['', '']]);
         }
 
         // ---- блог: список — blog.meta_title, иначе название блога (= название магазина); статья — meta_title, иначе «Блог » Заголовок»
@@ -349,7 +357,8 @@ final class SeoAudit
             ['closed' => $closedBy('/blog/'), 'edit_note' => 'Настройки → SEO-шаблоны, блок «Блог»',
              'uk' => [self::filled($raw['blog.meta_title.uk'] ?? ''), self::filled($raw['blog.meta_description.uk'] ?? '')]]);
         $now = date('Y-m-d H:i:s');
-        foreach ($db->all('SELECT id, url, title, title_uk, meta_title, meta_title_uk, meta_description, meta_description_uk, status, published_at FROM blog_posts ORDER BY published_at DESC, id DESC') as $p) {
+        foreach ($db->all('SELECT id, url, title, title_uk, meta_title, meta_title_uk, meta_description, meta_description_uk, status, published_at,
+            text_before_cut, text_before_cut_uk, text, text_uk FROM blog_posts ORDER BY published_at DESC, id DESC') as $p) {
             $path = '/blog/' . $p['url'] . '/';
             $live = $p['status'] === 'published' && (string) $p['published_at'] <= $now;
             $closed = $p['status'] !== 'published' ? 'черновик'
@@ -363,26 +372,16 @@ final class SeoAudit
         return $rows;
     }
 
-    /** Переменные категории для шаблонов */
+    /** Переменные категории для шаблонов — как Front\CategoryController::seo (App\Services\SeoVars) */
     private static function categoryVars(?array $c): array
     {
-        $seo = trim((string) ($c['seo_name'] ?? ''));
-        return ['category' => ['name' => (string) ($c['name'] ?? ''), 'seo_name' => $seo !== '' ? $seo : (string) ($c['name'] ?? '')]];
+        return SeoVars::category($c);
     }
 
-    /** Переменные товара — как Front\ProductController::seoVars */
+    /** Переменные товара — как Front\ProductController::seoVars (App\Services\SeoVars) */
     public static function productVars(array $p, ?array $cat): array
     {
-        $seoName = trim((string) ($p['seo_name'] ?? ''));
-        return [
-            'product' => [
-                'name'         => (string) $p['name'],
-                'seo_name'     => $seoName !== '' ? $seoName : (string) $p['name'],
-                'format_price' => price_format($p['price']),
-                'price'        => (string) round((float) $p['price']),
-                'sku'          => (string) ($p['sku'] ?? ''),
-            ],
-        ] + self::categoryVars($cat);
+        return SeoVars::product($p, $cat);
     }
 
     // ======================================================================= товары
@@ -518,7 +517,7 @@ final class SeoAudit
         $limit = $rev ? min($perPage, $total - $offset) : $perPage;
         $off = $rev ? max(0, $total - $offset - $perPage) : $offset;
         $order = ' ORDER BY id ' . ($rev ? 'ASC' : 'DESC');
-        $cols = 'id, url, name, name_uk, sku, seo_name, seo_name_uk, price, category_id, status,
+        $cols = 'id, url, name, name_uk, sku, seo_name, seo_name_uk, price, box_qty, size, category_id, status,
             meta_title, meta_title_uk, meta_description, meta_description_uk';
         if ($off < 2000) {
             // у края списка — одним запросом по первичному ключу (останавливается на нужной строке)
@@ -536,12 +535,12 @@ final class SeoAudit
         return ['rows' => self::productRows($list), 'total' => $total, 'counts' => $counts, 'page' => $page] + $extra;
     }
 
-    /** Итоговые title/description товаров — как на странице товара */
-    private static function productRows(array $list): array
+    /**
+     * Категории товаров для шаблонов, пакетно: [id товара => категория|null]. Как Front\ProductController::seoCategory —
+     * основная (даже скрытая: её нет в кэше справочника — один запрос на всех), иначе первая в дереве.
+     */
+    private static function productCats(array $list): array
     {
-        if (!$list) return [];
-        $db = App::db();
-        // категория для шаблонов — как Front\ProductController::seoCategory: основная (даже скрытая), иначе первая
         $need = [];
         foreach ($list as $p) {
             $cid = (int) $p['category_id'];
@@ -549,17 +548,29 @@ final class SeoAudit
         }
         $extra = [];
         if ($need) {
+            $db = App::db();
             [$ph, $vals] = $db->in(array_values($need));
-            $extra = $db->keyed("SELECT id, name, name_uk, seo_name, seo_name_uk FROM categories WHERE id IN ($ph)", $vals);
+            $extra = $db->keyed("SELECT id, parent_id, depth, name, name_uk, seo_name, seo_name_uk, product_count FROM categories WHERE id IN ($ph)", $vals);
         }
         $all = Catalog::categories();
         $first = $all ? self::loc(reset($all)) : null;
-        $robots = self::robots()['rules'];
         $out = [];
         foreach ($list as $p) {
             $cid = (int) $p['category_id'];
-            $cat = ($cid ? (self::loc(Catalog::category($cid)) ?? $extra[$cid] ?? null) : null) ?? $first;
-            $auto = self::auto('product', $p, $cat);
+            $out[(int) $p['id']] = ($cid ? (self::loc(Catalog::category($cid)) ?? $extra[$cid] ?? null) : null) ?? $first;
+        }
+        return $out;
+    }
+
+    /** Итоговые title/description товаров — как на странице товара */
+    private static function productRows(array $list): array
+    {
+        if (!$list) return [];
+        $cats = self::productCats($list);
+        $robots = self::robots()['rules'];
+        $out = [];
+        foreach ($list as $p) {
+            $auto = self::auto('product', $p, $cats[(int) $p['id']]);
             $path = '/product/' . $p['url'] . '/';
             $live = (int) $p['status'] === 1;
             $blocked = $live ? self::blockedBy(Lang::path($path), $robots) : '';
@@ -594,6 +605,132 @@ final class SeoAudit
             $ids = $db->col('SELECT id FROM products WHERE name LIKE ? OR sku LIKE ? ORDER BY id DESC LIMIT ' . self::SEARCH_LIMIT, [$sub, $sub]);
         }
         return array_slice(array_values(array_unique(array_map('intval', $ids))), 0, self::SEARCH_LIMIT);
+    }
+
+    // ======================================================================= списки админки
+
+    /** Фильтр «SEO» в списках товаров, статей, страниц и категорий: ?seo= → подпись */
+    public const LIST_FILTERS = ['' => 'Все', 'notitle' => 'Без своего title', 'nodesc' => 'Без своего description', 'len' => 'Длина не в норме'];
+
+    /** Вкладка SEO-обзора (?group=) для списка админки: тип строки → группа */
+    public const LIST_GROUPS = ['product' => 'products', 'blog' => 'blog', 'page' => 'pages', 'category' => 'categories'];
+
+    /**
+     * Title и description строк списка админки — те же state() и auto(), что у таблицы обзора (и витрины), пакетно:
+     * шаблоны — из настроек (кэш), категории товаров — из справочника и одним запросом для скрытых; запросов в цикле нет.
+     * $type: product | blog | page | category. В строках — поля как у meta(): свои meta_title/meta_description
+     * (у страницы — title/meta_description) и их *_uk; товар — name, seo_name, price, sku, category_id;
+     * категория — name, seo_name; страница — name; статья — title.
+     * Возвращает [id => ['title' => ячейка, 'desc' => ячейка]], ячейка:
+     *   state — ключ STATES; own — своё значение; text — что выведет сайт (своё или результат шаблона), len — его длина;
+     *   uk — что на /ua/ (ключ UK_STATES, как в ukCoverage), uk_len — длина своего украинского значения (0 — его нет).
+     */
+    public static function listCells(string $type, array $rows): array
+    {
+        if (!$rows) return [];
+        $raw = Settings::all();
+        [$own, $tpl] = match ($type) {
+            // шаблоны — как в buildRows; у товаров — как в ukCoverage: без шаблона title = название, description пуст
+            'page'     => [['title', 'meta_description'], (string) Settings::get('seo.page_is_enabled', '1') !== '0'
+                ? ['seo.page_meta_title', 'seo.page_meta_description'] : ['', '']],
+            'category' => [['meta_title', 'meta_description'], (bool) Settings::get('seo.category_is_enabled', 1)
+                ? ['seo.category_meta_title', 'seo.category_meta_description'] : ['', '']],
+            'product'  => [['meta_title', 'meta_description'], array_map(static fn($k) => self::filled($raw[$k] ?? '') ? $k : '',
+                ['seo.product_meta_title', 'seo.product_meta_description'])],
+            default    => [['meta_title', 'meta_description'], ['', '']],
+        };
+        $ukTpl = array_map(static fn($k) => $k !== '' && self::hasUk($k), $tpl);
+        $cats = $type === 'product' ? self::productCats($rows) : [];
+        $rows = self::withText($type, $rows);
+        $out = [];
+        foreach ($rows as $r) {
+            $id = (int) $r['id'];
+            $auto = $type === 'product' ? self::auto('product', $r, $cats[$id]) : self::auto($type, $r);
+            $cells = [];
+            foreach (['title' => 0, 'desc' => 1] as $f => $i) {
+                $mine = trim((string) ($r[$own[$i]] ?? ''));
+                $made = trim($auto[$f]);
+                $text = $mine !== '' ? $mine : $made;
+                $uk = trim((string) ($r[$own[$i] . '_uk'] ?? ''));
+                $cells[$f] = [
+                    'state'  => self::state($mine, $f === 'title' ? 'title' : 'description', $made),
+                    'own'    => $mine !== '',
+                    'text'   => $text,
+                    'len'    => mb_strlen($text),
+                    'uk'     => match (true) {
+                        $uk !== ''       => 'own',
+                        $mine !== ''     => 'ru',
+                        $text === ''     => 'none',
+                        $tpl[$i] === ''  => 'tpl',
+                        default          => $ukTpl[$i] ? 'tpl' : 'ru',
+                    },
+                    'uk_len' => mb_strlen($uk),
+                ];
+            }
+            $out[$id] = $cells;
+        }
+        return $out;
+    }
+
+    /**
+     * Текст страниц и статей для отрывка (description по умолчанию — Seo::excerpt), если его нет в строках списка:
+     * одним запросом на все строки. Прочие типы — как есть.
+     */
+    private static function withText(string $type, array $rows): array
+    {
+        $cols = ['page' => ['pages', ['content', 'content_uk']], 'blog' => ['blog_posts', ['text_before_cut', 'text_before_cut_uk', 'text', 'text_uk']]][$type] ?? null;
+        if ($cols === null || !$rows || array_key_exists($cols[1][0], reset($rows))) return $rows;
+        $db = App::db();
+        [$ph, $vals] = $db->in(array_map(static fn($r) => (int) $r['id'], $rows));
+        $text = $db->keyed('SELECT id, ' . implode(', ', $cols[1]) . " FROM `{$cols[0]}` WHERE id IN ($ph)", $vals);
+        foreach ($rows as &$r) $r += $text[(int) $r['id']] ?? array_fill_keys($cols[1], null);
+        unset($r);
+        return $rows;
+    }
+
+    /**
+     * Условие SQL фильтра ?seo= (пороги — как у state(), длина — по TRIM, как в sql()); '' — без условия.
+     * $t, $d — колонки своих title/description из кода вызывающего ('p.meta_title'), не из запроса.
+     * Длина — корзинами INTERVAL, как в productStats (TRIM один раз на колонку: 1 — короче минимума, 3 — длиннее максимума;
+     * NULL → -1, пусто → 0). У товаров без индекса: COUNT по 107 тыс. — ~0,1 с, «без своего title» — ~0,05 с.
+     */
+    public static function listWhere(string $filter, string $t, string $d): string
+    {
+        $empty = static fn(string $c): string => "($c IS NULL OR TRIM($c) = '')";
+        $warn = static fn(string $c, int $min, int $max): string => "INTERVAL(CHAR_LENGTH(TRIM($c)), 1, $min, " . ($max + 1) . ') IN (1, 3)';
+        return match ($filter) {
+            'notitle' => $empty($t),
+            'nodesc'  => $empty($d),
+            'len'     => '(' . $warn($t, self::TITLE_MIN, self::TITLE_MAX) . ' OR ' . $warn($d, self::DESC_MIN, self::DESC_MAX) . ')',
+            default   => '',
+        };
+    }
+
+    /** Счётчики фильтра одним запросом: «SUM(…) AS notitle, SUM(…) AS nodesc, SUM(…) AS len» */
+    public static function listCountSql(string $t, string $d): string
+    {
+        $out = [];
+        foreach (['notitle', 'nodesc', 'len'] as $f) $out[] = 'COALESCE(SUM(' . self::listWhere($f, $t, $d) . "), 0) AS `$f`";
+        return implode(', ', $out);
+    }
+
+    /** Подходит ли строка под фильтр ?seo= — для списков, которые фильтруются в PHP (ячейки из listCells) */
+    public static function listMatches(array $cells, string $filter): bool
+    {
+        return match ($filter) {
+            'notitle' => !$cells['title']['own'],
+            'nodesc'  => !$cells['desc']['own'],
+            'len'     => $cells['title']['state'] === 'warn' || $cells['desc']['state'] === 'warn',
+            default   => true,
+        };
+    }
+
+    /** Счётчики фильтра по ячейкам listCells(): ['' => всего, 'notitle' => …, 'nodesc' => …, 'len' => …] */
+    public static function listCounts(array $cells): array
+    {
+        $n = array_fill_keys(array_keys(self::LIST_FILTERS), 0);
+        foreach ($cells as $c) foreach ($n as $f => $_) if (self::listMatches($c, $f)) $n[$f]++;
+        return $n;
     }
 
     // ======================================================================= итоги
@@ -721,7 +858,7 @@ final class SeoAudit
     public static function sample(int $productId = 0): array
     {
         $db = App::db();
-        $cols = 'SELECT id, url, name, name_uk, sku, seo_name, seo_name_uk, price, category_id, status FROM products';
+        $cols = 'SELECT id, url, name, name_uk, sku, seo_name, seo_name_uk, price, box_qty, size, category_id, status FROM products';
         $p = $productId > 0 ? $db->row($cols . ' WHERE id = ?', [$productId]) : null;
         $p ??= $db->row($cols . ' WHERE status = 1 AND category_id IS NOT NULL ORDER BY id DESC LIMIT 1');
         $cat = $p ? self::productCategory($p) : null;
@@ -730,7 +867,7 @@ final class SeoAudit
             $cat = $all ? reset($all) : null;
         }
         $page = $db->row("SELECT id, url, name, name_uk, title, title_uk FROM pages WHERE status = 1 AND url NOT LIKE 'pages/%' ORDER BY sort, id LIMIT 1");
-        $brand = $db->row('SELECT id, name, url FROM brands WHERE hidden = 0 AND product_count > 0 ORDER BY product_count DESC, id LIMIT 1');
+        $brand = $db->row('SELECT id, name, name_uk, url, product_count FROM brands WHERE hidden = 0 AND product_count > 0 ORDER BY product_count DESC, id LIMIT 1');
         return ['product' => $p, 'category' => $cat, 'page' => $page, 'brand' => $brand];
     }
 
@@ -767,10 +904,11 @@ final class SeoAudit
         $cVars = self::categoryVars($c);
         $cpVars = $cVars + ['page_number' => 2];
         $gVars = ['page' => ['name' => (string) ($pg['name'] ?? 'О компании'), 'title' => '']];
-        $bVars = ['brand' => ['name' => (string) ($sample['brand']['name'] ?? 'Jong Golf')]];
+        $bVars = SeoVars::brand($sample['brand'] ?? ['name' => 'Jong Golf']);
         $catOn = (bool) Settings::get('seo.category_is_enabled', 1);
         $pagOn = (bool) Settings::get('seo.category_pagination_is_enabled', 0);
         $pageOn = (string) Settings::get('seo.page_is_enabled', '1') !== '0';
+        $brandOn = (string) Settings::get('seo.brand_is_enabled', '1') !== '0';
         $groups = [
             'Главная' => [['Title', 'seo.home_page_meta_title', [], 'title', true], ['Description', 'seo.home_page_meta_description', [], 'description', true]],
             'Категория' => [['Title', 'seo.category_meta_title', $cVars, 'title', $catOn], ['Description', 'seo.category_meta_description', $cVars, 'description', $catOn],
@@ -780,7 +918,9 @@ final class SeoAudit
             'Товар' => [['Title', 'seo.product_meta_title', $pVars, 'title', true], ['Description', 'seo.product_meta_description', $pVars, 'description', true],
                 ['H1', 'seo.product_h1', $pVars, '', true]],
             'Инфо-страница' => [['Title', 'seo.page_meta_title', $gVars, 'title', $pageOn], ['Description', 'seo.page_meta_description', $gVars, 'description', $pageOn]],
-            'Бренд' => [['Title', 'seo.brand_meta_title', $bVars, 'title', false], ['Description', 'seo.brand_meta_description', $bVars, 'description', false]],
+            'Бренд' => [['Title', 'seo.brand_meta_title', $bVars, 'title', $brandOn], ['Description', 'seo.brand_meta_description', $bVars, 'description', $brandOn]],
+            'Отзывы о магазине /reviews/' => [['Title', 'seo.reviews_meta_title', [], 'title', true], ['Description', 'seo.reviews_meta_description', [], 'description', true]],
+            'Карта сайта /sitemap/' => [['Title', 'seo.sitemap_meta_title', [], 'title', true], ['Description', 'seo.sitemap_meta_description', [], 'description', true]],
         ];
         $out = [];
         foreach ($groups as $where => $items) {

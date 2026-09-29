@@ -125,3 +125,15 @@ a.seo-count:hover{text-decoration:none;color:var(--ink)}
   .seo-search .btn{flex:1}
   .seo-sample input[type=number]{width:100%}
 }
+
+/* «Исправить автоматически» (admin/seo/autofix.php) */
+.seo-fix .stats{margin:14px 0}
+.seo-fix-act{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:6px 0 0}
+.seo-fix-act .hint{flex:1 1 320px;margin:0}
+.seo-fix-groups td{vertical-align:top}
+.seo-fix-groups td small{display:block;color:var(--steel);font-size:12px;margin-top:2px}
+.seo-fix-ex td{vertical-align:top}
+.seo-fix-ex .seo-cell > span{display:inline}
+.seo-fix-ex .seo-cell > em{display:inline;margin-left:4px;font-style:normal;font-size:11.5px;color:var(--steel);white-space:nowrap}
+.seo-fix-ex .seo-cell em.warn{color:#b26b00;font-weight:700}
+.seo-fix-ex td small{display:block}
