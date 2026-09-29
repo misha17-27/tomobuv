@@ -19,7 +19,10 @@ use App\Core\App;
  * и даже ему — только когда автозагрузка включена в настройках и сайт не в режиме разработки (config debug = false).
  * Проверка — здесь, в единственном месте, которое умеет их отправить.
  *
- * Ключ не попадает ни в сообщения об ошибках, ни в журналы (mask), ни в сохранённые ответы (он только в теле запроса).
+ * Ключ не попадает ни в сообщения об ошибках, ни в журналы (mask), ни в сохранённые ответы (он только в теле запроса),
+ * ни в трассировки исключений: клиент сам читает его из настроек в закрытое свойство — ключ не передаётся аргументом
+ * ни в одну функцию, которая может бросить исключение (при zend.exception_ignore_args = Off строковые аргументы
+ * попадают в getTraceAsString() и журнал ошибок); var_dump / print_r объекта показывают «***» (__debugInfo).
  */
 final class JongGolfApi
 {
@@ -30,9 +33,17 @@ final class JongGolfApi
     private const TRIES = 3;
 
     private static float $last = 0.0;
+    private string $key;
 
-    public function __construct(private string $key, private bool $live = false)
+    /** $live — боевой клиент (clean_export и callback разрешены, см. canChangeQueue); ключ — из настроек jonggolf.api_key */
+    public function __construct(private bool $live = false)
     {
+        $this->key = JongGolf::cfg('api_key');
+    }
+
+    public function __debugInfo(): array
+    {
+        return ['key' => $this->key !== '' ? '***' : '', 'live' => $this->live];
     }
 
     /** Можно ли менять состояние у поставщика (clean_export, callback) */
@@ -119,11 +130,11 @@ final class JongGolfApi
         }
         $text = trim($body);
         if (stripos($text, 'Access denied') === 0) {
-            throw new JongGolfError('Поставщик отклонил запрос: «' . $this->mask(mb_substr($text, 0, 100)) . '» — IP этого сервера не в белом списке Jong•Golf.'
+            throw new JongGolfError('Поставщик отклонил запрос: «' . $this->excerpt($text, 100) . '» — IP этого сервера не в белом списке Jong•Golf.'
                 . ' Сообщите поставщику внешний IP хостинга (старый сайт работает со своего IP).', 'ip');
         }
         $j = json_decode($text, true);
-        if (!is_array($j)) throw new JongGolfError('Непонятный ответ поставщика (не JSON): «' . $this->mask(mb_substr(strip_tags($text), 0, 200)) . '»');
+        if (!is_array($j)) throw new JongGolfError('Непонятный ответ поставщика (не JSON): «' . $this->excerpt(strip_tags($text), 200) . '»');
         $j['_bytes'] = strlen($body);
         $j['_raw'] = $body;
         return $j;
@@ -145,9 +156,28 @@ final class JongGolfApi
         return $this->mask(is_scalar($msg) && (string) $msg !== '' ? (string) $msg : 'type=' . (string) ($r['type'] ?? '?'));
     }
 
-    /** Убрать ключ из текста (сообщения об ошибках, ответы) */
+    /** Убрать ключ из текста (сообщения об ошибках, ответы): как есть, в URL-кодировке и в HTML-экранировании */
     public function mask(string $s): string
     {
-        return $this->key !== '' ? str_replace([$this->key, rawurlencode($this->key)], '***', $s) : $s;
+        if ($this->key === '') return $s;
+        $k = $this->key;
+        $s = str_replace(array_values(array_unique([$k, rawurlencode($k), urlencode($k), htmlspecialchars($k, ENT_QUOTES)])), '***', $s);
+        // обрывки ключа от 6 символов (поставщик повторил часть ключа, текст обрезан) — в тексте размером с сообщение
+        $n = strlen($k);
+        if (strlen($s) <= 5000 && $n >= 6) {
+            for ($i = 0; $i <= $n - 6; $i++) {
+                if (!str_contains($s, substr($k, $i, 6))) continue;
+                for ($len = $n - $i; $len >= 6; $len--) {
+                    if (str_contains($s, $f = substr($k, $i, $len))) { $s = str_replace($f, '***', $s); break; }
+                }
+            }
+        }
+        return $s;
+    }
+
+    /** Начало текста поставщика для сообщения: без ключа и его обрывков (маска — и до обрезки, и после) */
+    private function excerpt(string $text, int $len): string
+    {
+        return $this->mask(mb_substr($this->mask($text), 0, $len));
     }
 }

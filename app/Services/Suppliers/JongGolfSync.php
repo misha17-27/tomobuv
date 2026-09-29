@@ -33,6 +33,9 @@ use App\Services\ProductName;
 final class JongGolfSync
 {
     private const PORTION = 20;                 // товаров поставщика (≈80 цветов) за транзакцию
+    private const MIN_LEFT = 5.0;               // следующая порция шага — только если до конца бюджета осталось столько секунд
+    private const LOCK_WAIT = 10.0;             // ждать блокировку индекса не дольше (и не дольше остатка бюджета шага)
+    private const PRECHECK = 2.0;               // проверка «не идёт ли перестройка» до скачивания фото — ждать не дольше
     private const IMG_MAX = 10485760;
     private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext, meta_title, meta_description, meta_keywords, meta_title_uk, meta_description_uk, meta_keywords_uk';
@@ -63,10 +66,12 @@ final class JongGolfSync
     private array $ci = [];
     private array $brandByNk = [];
     private array $values = [];                 // [fid => [нормализованное значение => id]]
+    private array $brandByNorm = [];            // [ключ раскодированного названия => [id, …]] — «J&amp;amp;G» на сайте = «J&G»
     private int $brandFeature = 0;
     private int $sizeFeature = 0;
     private array $skipBrands = [];
     private array $skipCats = [];
+    private bool $deferred = false;             // порция отложена: блокировка индекса занята (идёт полная перестройка)
 
     public function __construct(int $runId, array $dict, bool $dry, array &$stats)
     {
@@ -87,33 +92,57 @@ final class JongGolfSync
 
     /**
      * Товары страницы [[ключ, товар], …] с позиции $pos до $deadline (и не больше $limit). $saved($pos) — после каждой
-     * записанной порции (сохранить место: после обрыва записанное не обрабатывается повторно). @return int новая позиция
+     * записанной порции (сохранить место: после обрыва записанное не обрабатывается повторно); вернула false — запуск
+     * остановлен, следующая порция не начинается. Следующая порция — только если до $deadline осталось ≥ MIN_LEFT с
+     * (первая — всегда): скачивание фото и ожидание блокировки ограничены остатком бюджета шага. @return int новая позиция
      */
     public function process(array $list, int $pos, float $deadline, ?int $limit, ?callable $saved = null): int
     {
         $this->ci = Importer::categoryIndex();
         $this->loadBrands();
-        while ($pos < count($list) && microtime(true) < $deadline - 1.0 && ($limit === null || $limit > 0)) {
+        $this->deferred = false;
+        $first = true;
+        while ($pos < count($list) && ($limit === null || $limit > 0) && microtime(true) < $deadline - ($first ? 1.0 : self::MIN_LEFT)) {
+            $first = false;
             $n = self::PORTION;
             if ($limit !== null) $n = min($n, $limit);
             $slice = array_slice($list, $pos, $n);
-            if (!$this->portion($slice, $deadline)) break;                  // идёт перестройка индекса — продолжим следующим шагом
+            if (!$this->portion($slice, $deadline)) { $this->deferred = true; break; }   // идёт перестройка индекса — следующим шагом
             $pos += count($slice);
             if ($limit !== null) $limit -= count($slice);
-            if ($saved) $saved($pos);
+            if ($saved && $saved($pos) === false) break;
         }
         return $pos;
     }
 
-    /** Бренды сайта [ключ названия => id]; значения характеристик — заново (после отката транзакции в кэше могли остаться несуществующие id) */
+    /** Последняя порция process() отложена (блокировка индекса занята) — шаг заканчивается и повторяется позже */
+    public function deferred(): bool
+    {
+        return $this->deferred;
+    }
+
+    /**
+     * Бренды сайта: [ключ названия как в базе => id] и [ключ раскодированного названия => [id, …]] (JongGolf::name —
+     * «J&amp;amp;G» и «J&amp;G» из старой базы оба «J&G»); значения характеристик — заново (после отката транзакции
+     * в кэше могли остаться несуществующие id)
+     */
     private function loadBrands(): void
     {
         $this->brandByNk = [];
+        $this->brandByNorm = [];
         $this->values = [];
-        foreach (App::db()->all('SELECT id, name FROM brands ORDER BY id') as $b) $this->brandByNk[Importer::nk((string) $b['name'])] ??= (int) $b['id'];
+        $norm = [];
+        foreach (App::db()->all('SELECT id, name, product_count FROM brands ORDER BY id') as $b) {
+            $this->brandByNk[Importer::nk((string) $b['name'])] ??= (int) $b['id'];
+            $norm[Importer::nk(JongGolf::name((string) $b['name']))][(int) $b['id']] = (int) $b['product_count'];
+        }
+        foreach ($norm as $k => $list) {                                    // больше товаров — первым, при равенстве — меньший id
+            uksort($list, static fn($a, $b) => [$list[$b], $a] <=> [$list[$a], $b]);
+            $this->brandByNorm[$k] = array_keys($list);
+        }
     }
 
-    /** Одна порция. false — не дождались блокировки индекса (порция не записана, повторится) */
+    /** Одна порция. false — блокировка индекса занята (порция не записана, повторится; скачанные фото остаются в папке запуска) */
     private function portion(array $slice, float $deadline): bool
     {
         $items = [];
@@ -133,17 +162,28 @@ final class JongGolfSync
             JongGolf::flushLog();
             return true;
         }
+        // порция откладывается без следов: счётчики и строки отчёта — как до неё (разбор повторится следующим шагом)
+        $defer = function () use ($statsBefore, $logMark): bool {
+            $this->stats = $statsBefore;
+            JongGolf::logRollback($logMark);
+            return false;
+        };
+        // блокировка индекса занята дольше PRECHECK с (идёт полная перестройка — минуты; правка в админке держит её
+        // доли секунды): отложить сразу, ничего не скачивая
+        if (!CatalogIndexer::locked(static function (): void {}, max(0.0, min(self::PRECHECK, $deadline - microtime(true) - 1.0)), false)) return $defer();
+        // фото — до ожидания блокировки; скачанные лежат в папке запуска (photo-*.jpg) и при повторе порции не качаются снова
         $photos = $this->photos($items, $deadline);
         $done = false;
         for ($try = 1; ; $try++) {
             $moved = [];
             try {
+                // ждать блокировку — не дольше LOCK_WAIT и остатка бюджета шага
                 $ok = CatalogIndexer::locked(function () use (&$items, $photos, &$moved): void {
                     App::db()->transaction(function () use (&$items, $photos, &$moved): void {
                         $this->apply($items, $photos, $moved);
                     });
-                }, 10.0, false);
-                if (!$ok) { $this->stats = $statsBefore; JongGolf::logRollback($logMark); $this->dropPhotos($photos); return false; }
+                }, max(0.0, min(self::LOCK_WAIT, $deadline - microtime(true) - 1.0)), false);
+                if (!$ok) return $defer();                                  // фото не удаляются — пригодятся следующему шагу
                 $done = true;
                 break;
             } catch (\PDOException $e) {
@@ -183,7 +223,7 @@ final class JongGolfSync
         $size = trim((string) ($p['size'] ?? ''));
         $bid = (string) ($p['brand'] ?? '');
         $brandRaw = trim((string) ($a['brand'][$bid]['name'] ?? ''));
-        $brand = self::decode($brandRaw);
+        $brand = JongGolf::name($brandRaw);                                 // «J&amp;amp;amp;G» → «J&G»
         if ($brand !== '' && isset($this->skipBrands[JongGolfMap::norm($brand)])) return $this->skipAll($p, 'brand', $label . ' бренд ' . $brand);
         if ($this->skipCats && (isset($this->skipCats[JongGolfMap::norm($cat)]) || isset($this->skipCats[JongGolfMap::norm($season . '|' . $cat)]))) return $this->skipAll($p, 'category_skip', $label . ' ' . $cat);
         // характеристики — как $attribute_textarea старого загрузчика
@@ -201,7 +241,7 @@ final class JongGolfSync
             } else {
                 $v = (string) ($p[$field] ?? '');
             }
-            $v = trim(self::decode($v));
+            $v = JongGolf::name($v);
             if ($v !== '') $feat[(int) $f['id']] = ['name' => (string) $f['name'], 'value' => $v];
         }
         // цена за пару: со скидкой — discount, старая — cost (без наценки у старого загрузчика; здесь — коэффициент категории)
@@ -502,16 +542,29 @@ final class JongGolfSync
     }
 
     /**
-     * Бренд: id существующего, «new:Название» (создаётся при записи) или null — не указан. Поставщик экранирует название
-     * дважды («J&amp;amp;G»): сначала ищется раскодированное «J&G», потом как у поставщика (так его записывал старый загрузчик)
+     * Бренд: id существующего, «new:Название» (создаётся при записи) или null — не указан. $brand — раскодированное
+     * название (JongGolf::name: «J&G»), $raw — как в ответе поставщика (экранировано многократно: «J&amp;amp;amp;G»).
+     * На сайте такой бренд мог остаться со старого сайта экранированным («J&amp;amp;G», id 72267; есть и «J&amp;G»,
+     * id 71814) — загрузчик его не переименовывает (сменился бы адрес /brand/…/ — решение владельца), а находит:
+     *  1) бренд с раскодированным названием «J&G» (владелец переименовал — берётся он);
+     *  2) название как в базе — от ответа поставщика, раскодируя по одному уровню: первое совпадение (ближайшее
+     *     к ответу поставщика — то, что записывал старый загрузчик: «J&amp;amp;G» = id 72267);
+     *  3) по раскодированному названию: из нескольких — с большим числом товаров, при равенстве — меньший id;
+     *  4) нет — новый бренд с раскодированным названием («J&G»).
      */
     private function brandRef(string $brand, string $raw = ''): int|string|null
     {
         if ($brand === '') return null;
-        foreach (array_unique([$brand, $raw, html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8')]) as $name) {
-            if ($name !== '' && isset($this->brandByNk[Importer::nk($name)])) return $this->brandByNk[Importer::nk($name)];
+        if (isset($this->brandByNk[Importer::nk($brand)])) return $this->brandByNk[Importer::nk($brand)];
+        $s = $raw !== '' ? $raw : $brand;
+        for ($i = 0; $i < 10; $i++) {
+            if (isset($this->brandByNk[Importer::nk($s)])) return $this->brandByNk[Importer::nk($s)];
+            $d = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($d === $s) break;
+            $s = $d;
         }
-        return 'new:' . $brand;
+        $ids = $this->brandByNorm[Importer::nk($brand)] ?? [];
+        return $ids ? $ids[0] : 'new:' . $brand;
     }
 
     private static function show(string $col, $v, self $s): string
@@ -524,19 +577,15 @@ final class JongGolfSync
         return mb_strlen($v) > 40 ? mb_substr($v, 0, 39) . '…' : $v;
     }
 
-    /** «Бренд»-заглушки и двойное экранирование поставщика: «J&amp;amp;G» → «J&G» */
-    private static function decode(string $s): string
-    {
-        for ($i = 0; $i < 3 && str_contains($s, '&'); $i++) $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        return trim($s);
-    }
-
     // ================================================================== фото
 
     /**
      * Скачать и подготовить фото новых товаров и товаров без фото (до транзакции): вписывание в холст
      * photo_width × photo_height по центру на белом фоне, JPEG с качеством photo_quality (как load_photos старого
-     * загрузчика; ширина или высота 0 — без холста, как есть). @return [индекс цвета => ['file', 'w', 'h'] | ['error']]
+     * загрузчика; ширина или высота 0 — без холста, как есть). Готовое фото — в папке запуска (photoFile): порция,
+     * отложенная из-за перестройки индекса, при повторе берёт его оттуда, а не качает снова; после записи порции
+     * (или при ошибке) файлы удаляются (dropPhotos), остатки — по окончании запуска (JongGolf::dropPhotoCache).
+     * Время скачивания — в пределах остатка бюджета шага. @return [индекс цвета => ['file', 'w', 'h'] | ['error']]
      */
     private function photos(array $items, float $deadline): array
     {
@@ -544,12 +593,19 @@ final class JongGolfSync
         foreach ($items as $i => $it) if (!empty($it['photo']) && in_array($it['action'], ['create', 'update'], true)) $urls[$i] = $it['url'];
         if (!$urls) return [];
         $out = [];
+        foreach ($urls as $i => $u) {                                        // скачано прошлым шагом (порция была отложена)
+            $f = $this->photoFile($u);
+            $info = is_file($f) ? @getimagesize($f) : false;
+            if ($info) { $out[$i] = ['file' => $f, 'w' => (int) $info[0], 'h' => (int) $info[1]]; unset($urls[$i]); }
+        }
         for ($try = 1; $try <= 2 && $urls; $try++) {
-            $left = max(5.0, $deadline - microtime(true) - 3.0);
+            $left = $deadline - microtime(true) - 2.0;
+            if ($try === 2 && $left < 3.0) break;                           // на повтор время шага кончилось
+            $left = max(3.0, $left);
             $res = Importer::fetchMany($urls, self::IMG_MAX, (int) min(20, ceil($left)), true, $left);
             foreach ($res as $i => $r) {
                 if (isset($r['error'])) { $out[$i] = ['error' => (string) $r['error']]; continue; }
-                $out[$i] = $this->frame((string) $r['file']);
+                $out[$i] = $this->frame((string) $r['file'], $this->photoFile($urls[$i]));
                 @unlink((string) $r['file']);
                 unset($urls[$i]);
             }
@@ -558,7 +614,14 @@ final class JongGolfSync
         return $out;
     }
 
-    private function frame(string $src): array
+    /** Готовое фото по ссылке в папке запуска (с параметрами холста: другие настройки — другой файл) */
+    private function photoFile(string $url): string
+    {
+        $c = $this->cfg;
+        return JongGolf::dir($this->runId) . '/photo-' . md5($url . '|' . $c['photo_width'] . 'x' . $c['photo_height'] . 'q' . $c['photo_quality']) . '.jpg';
+    }
+
+    private function frame(string $src, string $dst): array
     {
         $info = @getimagesize($src);
         if (!$info || filesize($src) < 500) return ['error' => 'файл не является картинкой'];
@@ -580,11 +643,11 @@ final class JongGolfSync
         $tw = max(1, (int) round($w * $scale)); $th = max(1, (int) round($h * $scale));
         imagecopyresampled($canvas, $img, intdiv($cw - $tw, 2), intdiv($ch - $th, 2), 0, 0, $tw, $th, $w, $h);
         imagedestroy($img);
-        $tmp = (string) tempnam(Importer::dir() . '/tmp', 'jg');
+        $tmp = $dst . '.part';                                              // целиком или никак: недописанный файл не примется за готовый
         $ok = imagejpeg($canvas, $tmp, max(30, min(100, (int) $this->cfg['photo_quality'])));
         imagedestroy($canvas);
-        if (!$ok) { @unlink($tmp); return ['error' => 'не удалось сохранить JPEG']; }
-        return ['file' => $tmp, 'w' => $cw, 'h' => $ch];
+        if (!$ok || !@rename($tmp, $dst)) { @unlink($tmp); return ['error' => 'не удалось сохранить JPEG']; }
+        return ['file' => $dst, 'w' => $cw, 'h' => $ch];
     }
 
     private function dropPhotos(array $photos): void
@@ -774,9 +837,10 @@ final class JongGolfSync
         return $out;
     }
 
+    /** Ключ значения характеристики: раскодированное (значение сайта «Шкіра &amp;amp; текстиль» = «Шкіра & текстиль» поставщика) */
     private static function vkey(string $v): string
     {
-        return Importer::nk($v);
+        return Importer::nk(JongGolf::name($v));
     }
 
     /**
@@ -928,13 +992,16 @@ final class JongGolfSync
      * (старый загрузчик их физически удалял вместе с фото). Только если получена вся очередь и в запуске был хоть один
      * найденный или новый товар (как «добавлено > 0 или изменено > 0» у старого). Защита: больше половины активных
      * товаров поставщика — не скрываем (похоже на неполную выгрузку). В конце — сброс кэша сайта.
+     * $alive() — запуск ещё «Идёт» (не остановлен кнопкой): проверяется прямо перед скрытием.
      */
-    public function finish(bool $complete): void
+    public function finish(bool $complete, ?callable $alive = null): void
     {
         $db = App::db();
         $s = &$this->stats;
         $touched = $s['created'] + $s['updated'] + $s['same'] + $s['hidden_color'];
-        if (!$complete) {
+        if ($complete && $alive && !$alive()) {
+            JongGolf::log($this->runId, 'info', 'Запуск остановлен — скрытие отсутствующих у поставщика не выполнялось');
+        } elseif (!$complete) {
             JongGolf::log($this->runId, 'info', 'Скрытие отсутствующих у поставщика не выполнялось: обработана не вся очередь поставщика');
         } elseif ($this->cfg['full_update'] !== '1') {
             JongGolf::log($this->runId, 'info', '«Полное обновление» выключено — товары, которых нет у поставщика, не скрываются');

@@ -40,10 +40,12 @@ final class SuppliersController extends BaseController
         $tab = Request::get('tab', 'settings');
         if (!isset(self::TABS[$tab])) $tab = 'settings';
         $db = App::db();
+        $cfg = array_combine(array_keys(JongGolf::DEFAULTS), array_map([JongGolf::class, 'cfg'], array_keys(JongGolf::DEFAULTS)));
+        $cfg['api_key'] = $cfg['api_key'] !== '' ? '1' : '';                 // сам ключ в шаблон не передаётся — только «задан»
         $data = [
             'title' => 'Поставщики → ' . JongGolf::TITLE, 'tab' => $tab, 'base' => self::BASE,
             'styles' => ['admin/suppliers.css'], 'scripts' => ['admin/suppliers.js'],
-            'cfg' => array_combine(array_keys(JongGolf::DEFAULTS), array_map([JongGolf::class, 'cfg'], array_keys(JongGolf::DEFAULTS))),
+            'cfg' => $cfg,
             'enabled' => JongGolf::enabled(), 'keyHint' => JongGolf::keyHint(), 'debug' => App::isDebug(),
             'due' => JongGolf::due(), 'next' => JongGolf::nextRun(), 'active' => JongGolf::active(), 'last' => JongGolf::runs(1)[0] ?? null,
             'lastFinished' => JongGolf::lastFinished(), 'mapCount' => JongGolfMap::count(),
@@ -90,7 +92,7 @@ final class SuppliersController extends BaseController
             $this->flash('Выберите файл wa_loader_jonggolf.cfg.php (до 200 КБ).', true);
             return Response::redirect(self::BASE);
         }
-        [$set, $skipped] = JongGolf::importOldConfig((string) file_get_contents((string) $f['tmp_name']));
+        [$set, $skipped] = JongGolf::importOldConfig((string) $f['tmp_name']);
         @unlink((string) $f['tmp_name']);
         $this->log('jonggolf_import_cfg', 'settings', null, array_keys($set));
         $this->flash($set ? 'Перенесено настроек: ' . count($set) . (isset($set['api_key']) ? ', в том числе ключ API' : '')
@@ -190,10 +192,11 @@ final class SuppliersController extends BaseController
 
     public function stop(string $id): Response
     {
-        JongGolf::stop((int) $id);
-        $this->log('jonggolf_stop', 'settings', (int) $id);
-        if (Request::isAjax()) return Response::json(['ok' => true]);
-        $this->flash('Запуск остановлен.');
+        // false — запуск уже закончился сам («Готово», «Ошибка») или его нет: в журнал админки не пишем
+        $stopped = JongGolf::stop((int) $id);
+        if ($stopped) $this->log('jonggolf_stop', 'settings', (int) $id);
+        if (Request::isAjax()) return Response::json(['ok' => true, 'stopped' => $stopped]);
+        $this->flash($stopped ? 'Запуск остановлен.' : 'Запуск уже не идёт — останавливать нечего.');
         return Response::redirect(self::BASE . 'runs/' . (int) $id . '/');
     }
 

@@ -108,18 +108,30 @@ final class AdminCatalog
     // ======================================================================= редиректы (смена адреса, удаление)
 
     /**
-     * 301 со старого адреса на новый. from_url хранится раскодированным (как Request::path), to_url — как ссылка.
-     * Цепочки «X → старый адрес» сразу переводятся на новый (без двойного редиректа), обратный редирект «новый → …»
-     * удаляется (иначе петля). $oldTargets — в каком виде старый адрес мог быть записан в to_url (по умолчанию $from).
+     * 301 со старого адреса на новый (смена адреса товара, категории, бренда, страницы, статьи). from_url хранится
+     * раскодированным (как Request::path), to_url — как ссылка: символы вне RFC 3986 (кириллица, пробел) — в %XX,
+     * уже закодированное («%26», «+» в адресе бренда) — как есть. Без цепочек и петель:
+     *  - редирект с нового адреса удаляется — там теперь страница (переименование обратно B → A не даёт петли A ↔ B);
+     *  - всё, что вело на старый адрес («X → старый» в любом написании: раскодированном, %XX, без «/» в конце), сразу
+     *    ведёт на новый: A → B, потом B → C даёт A → C и B → C.
+     * Префикс /ua/ не хранится: ErrorController ищет редирект по пути без него, Response::send добавляет /ua к Location
+     * на украинской версии (/ua/старый → /ua/новый). $oldTargets — ещё написания старого адреса в to_url.
      */
     public static function addRedirect(string $from, string $to, array $oldTargets = []): void
     {
+        $enc = static fn(string $u): string => preg_replace_callback("#[^A-Za-z0-9\\-._~!$&'()*+,;=:@/%]#u", static fn($m) => rawurlencode($m[0]), $u) ?? $u;
+        $to = $enc($to);
         $toPath = rawurldecode($to);
         if ($from === '' || $from === $toPath) return;
         $db = App::db();
         $db->query('DELETE FROM redirects WHERE from_url = ?', [$toPath]);
-        $old = array_values(array_unique(array_merge([$from], $oldTargets)));
-        [$ph, $vals] = $db->in($old);
+        $old = [];
+        foreach (array_merge([$from, $enc($from)], $oldTargets) as $u) {
+            if ($u === '') continue;
+            $old[$u] = 1;
+            if ($u !== '/' && str_ends_with($u, '/')) $old[rtrim($u, '/')] = 1;
+        }
+        [$ph, $vals] = $db->in(array_keys($old));
         $db->query("UPDATE redirects SET to_url = ? WHERE to_url IN ($ph)", array_merge([$to], $vals));
         $db->upsert('redirects', ['from_url' => $from, 'to_url' => $to, 'code' => 301], ['to_url', 'code']);
     }

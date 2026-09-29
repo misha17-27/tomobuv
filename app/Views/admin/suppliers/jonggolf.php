@@ -77,7 +77,7 @@ $unmappedCount = count($lastFinished['stats']['unmapped'] ?? []);
         <h2>Подключение и расписание</h2>
         <label class="check jg-big"><input type="checkbox" name="enabled" value="1"<?= $on('enabled') ? ' checked' : '' ?>> <span><b>Автозагрузка включена</b> — только после отключения cron старого сайта</span></label>
         <label class="fld"><span>Ключ API (access_key)</span>
-          <input name="api_key" type="password" value="" autocomplete="new-password" placeholder="<?= $keyHint !== '' ? e($keyHint) . ' сохранён (пусто — не менять, «-» — удалить)' : 'не задан' ?>">
+          <input name="api_key" type="password" value="" autocomplete="new-password" placeholder="<?= $keyHint !== '' ? e($keyHint) . ' — пусто: не менять, «-»: удалить' : 'не задан' ?>">
           <span class="hint">Хранится в базе сайта, на экране и в отчётах не показывается. Поставщик пускает только IP из белого списка — сообщите ему IP нового хостинга.</span></label>
         <div class="row3">
           <label class="fld"><span>Запуск с, час</span><input name="window_from" type="number" min="0" max="23" value="<?= e($cfg['window_from']) ?>"></label>

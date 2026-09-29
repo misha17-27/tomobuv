@@ -8,8 +8,8 @@ namespace App\Core;
  *   1) если у товара/категории/страницы заполнен свой meta_title/description — берётся он (как есть);
  *   2) иначе — шаблон из настроек (seo.product_meta_title и т.д.) с переменными
  *      {$product.name}, {$category.full_name}, {$store_info.name}, {$page_number}…;
- *   3) на страницах пагинации (?page=N) к title и description добавляется « | Страница N»,
- *      canonical указывает на первую страницу.
+ *   3) на страницах пагинации (?page=N) к title и description добавляется « | Страница N» (один раз: если номер
+ *      страницы в тексте уже есть, суффикса нет), canonical указывает на первую страницу.
  * Шаблоны перенесены из shop_seo_storefront_settings и редактируются в админке (Настройки → SEO).
  *
  * Норма длины (как в SEO-обзоре): title 30–70 символов, description 70–170. Результат шаблона подгоняется под норму:
@@ -18,7 +18,8 @@ namespace App\Core;
  *   {$x|plural:пара,пары,пар} — число со склонением: «8 пар» (UA — «пара,пари,пар»); 0 или не число — пусто;
  *   остальные модификаторы Smarty из старых шаблонов ({$x|escape}) игнорируются, как раньше;
  *   после подстановки схлопываются пробелы, пробелы перед знаками препинания, с краёв снимаются « — | , ; :»;
- *   если текст всё ещё длиннее нормы — Seo::fit (title — по слову без «…», description — по предложению).
+ *   если текст всё ещё длиннее нормы — Seo::fit (title — по слову без «…», description — по предложению); у обрезанного
+ *   по слову снимаются незакрытая скобка с хвостом и обрывки («…бронзовый 4» от «4 пары:…») — Seo::cutTail.
  * Старые шаблоны вида «{$product.name} купить…» работают как раньше (без «[[» и модификаторов).
  */
 final class Seo
@@ -182,9 +183,9 @@ final class Seo
         if ($field === 'description') {
             $cut = self::sentenceCut($text, $min, $max);
             if ($cut !== '') return $cut;
-            return self::wordCut($text, $max - 1) . '…';
+            return self::wordCut($text, $max - 1, $min) . '…';
         }
-        return self::wordCut($text, $max);
+        return self::wordCut($text, $max, $min);
     }
 
     /** Самый длинный кусок из целых предложений длиной $min…$max ('' — такого нет) */
@@ -202,15 +203,81 @@ final class Seo
         return rtrim($best);
     }
 
-    /** Обрезка по слову не длиннее $max, без висячих знаков, предлогов и союзов в конце */
-    public static function wordCut(string $text, int $max): string
+    /**
+     * Обрезка по слову не длиннее $max: без висячих знаков, предлогов и союзов в конце, без незакрытой скобки
+     * и обрывков отрезанного (cutTail). Обрывки снимаются, только пока текст не короче $min.
+     */
+    public static function wordCut(string $text, int $max, int $min = 0): string
     {
         $text = trim($text);
         if (mb_strlen($text) <= $max) return $text;
         $cut = mb_substr($text, 0, $max + 1);
         $sp = mb_strrpos($cut, ' ');
         $cut = $sp !== false && $sp > 0 ? mb_substr($cut, 0, $sp) : mb_substr($text, 0, $max);
-        return self::cleanTail($cut);
+        return self::cutTail($cut, mb_substr($text, mb_strlen($cut)), $min);
+    }
+
+    /**
+     * Край обрезанного текста ($rest — отрезанная часть). Кроме висячих знаков, предлогов и союзов (cleanTail) снимаются:
+     *   незакрытая скобка/кавычка с хвостом: «УЦЕНКА(брак: отклеиваются цепочки» → «УЦЕНКА» (если без хвоста текст короче
+     *   $min — только сам знак);
+     *   обрывок перечня, который продолжается в отрезанном: «…РОЗПРОДАЖ 4пари:23» (дальше «; 23,5; 24,5») → «…РОЗПРОДАЖ»;
+     *   число, от которого отрезана единица: «…бронзовый 4» (дальше «пары:36;37») → «…бронзовый»; знак-символ в конце.
+     * Целые значения («2 пары:36; 40», «R200964085 W», «Nike 90» перед «оптом») не трогаются.
+     */
+    public static function cutTail(string $s, string $rest, int $min = 0): string
+    {
+        $s = self::cleanTail($s);
+        $unit = (bool) preg_match('/^\s*(?:пар|шт|р-?р|разм|розм|см\b|мм\b|%)/iu', $rest);
+        $list = (bool) preg_match('/^[\s;,.!]*\d/u', $rest);
+        for ($i = 0; $i < 6; $i++) {
+            $prev = $s;
+            foreach (['(' => ')', '«' => '»', '[' => ']'] as $open => $close) {
+                if (mb_substr_count($s, $open) <= mb_substr_count($s, $close)) continue;
+                $pos = self::unmatched($s, $open, $close);
+                if ($pos === null) continue;
+                $head = self::cleanTail(mb_substr($s, 0, $pos));
+                $s = $head !== '' && mb_strlen($head) >= $min ? $head
+                    : self::cleanTail((string) preg_replace('/\s+/u', ' ', mb_substr($s, 0, $pos) . ' ' . mb_substr($s, $pos + 1)));
+            }
+            // «N пар:36;37» / «4пари:23» — перечень оборван: отрезанное начинается с числа
+            if ($list && preg_match('/\s\d+\s?пар\p{L}*\s?:?[\d\s,.;:!]*$/u', $s, $m, PREG_OFFSET_CAPTURE)) {
+                $head = self::cleanTail(substr($s, 0, $m[0][1]));
+                if ($head !== '' && mb_strlen($head) >= $min) $s = $head;
+            }
+            // число без единицы («4» от «4 пары»), не часть перечня («36; 40»); одиночный знак-символ
+            if (($unit && preg_match('/(?<![;,:])\s\d{1,3}$/u', $s, $m, PREG_OFFSET_CAPTURE))
+                || preg_match('/\s[^\p{L}\p{N}\s]$/u', $s, $m, PREG_OFFSET_CAPTURE)) {
+                $head = self::cleanTail(substr($s, 0, $m[0][1]));
+                if ($head !== '' && mb_strlen($head) >= $min) $s = $head;
+            }
+            if ($s === $prev) break;
+        }
+        return $s;
+    }
+
+    /**
+     * Обрывок в конце title — признак неудачной обрезки прежними правилами: незакрытая скобка, число без единицы
+     * («…бронзовий 4»), оборванный перечень («…РОЗПРОДАЖ 4пари:23»). Целые «2 пары:36;37», «47-50» — не обрывок.
+     */
+    public static function badTail(string $s): bool
+    {
+        $s = trim($s);
+        return mb_substr_count($s, '(') > mb_substr_count($s, ')')
+            || (bool) preg_match('/(?<![;,:])\s\d{1,3}$/u', $s)
+            || (bool) preg_match('/\s\d+\s?пар\p{L}*\s?:?\s*\d*$/u', $s);
+    }
+
+    /** Позиция (в символах) последней незакрытой открывающей скобки $open или null */
+    private static function unmatched(string $s, string $open, string $close): ?int
+    {
+        $stack = [];
+        $chars = preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($chars as $i => $ch) {
+            if ($ch === $open) $stack[] = $i;
+            elseif ($ch === $close && $stack) array_pop($stack);
+        }
+        return $stack ? (int) end($stack) : null;
     }
 
     /** Снять с конца знаки препинания и висячие короткие слова (предлоги, союзы) */
@@ -219,7 +286,9 @@ final class Seo
         $hang = implode('|', array_map(static fn($w) => preg_quote($w, '/'), self::HANGING));
         do {
             $prev = $s;
-            $s = (string) preg_replace('/[\s,;:—–\-|(\/«"„+&]+$/u', '', $s);
+            $s = (string) preg_replace('/[\s,;:—–\-|(\/«„+&]+$/u', '', $s);
+            // прямая кавычка в конце — только открывающая (их нечётное число), закрывающую «"Lian Xin"» не снимаем
+            if (str_ends_with($s, '"') && substr_count($s, '"') % 2 === 1) $s = substr($s, 0, -1);
             $s = (string) preg_replace('/\s+(?:' . $hang . ')$/iu', '', $s);
         } while ($s !== $prev && $s !== '');
         return $s;
@@ -351,12 +420,21 @@ final class Seo
     public function paginate(int $page, string $basePath, int $pages = 0): self
     {
         if ($page > 1) {
-            $suffix = ' | ' . t('Страница') . ' ' . $page;
-            if ($this->title !== '') $this->title .= $suffix;
-            if ($this->description !== '') $this->description .= $suffix;
+            if ($this->title !== '') $this->title = self::pageSuffix($this->title, $page);
+            if ($this->description !== '') $this->description = self::pageSuffix($this->description, $page);
             $this->canonical = url($basePath);
         }
         return $this;
+    }
+
+    /**
+     * « | Страница N» (на /ua/ — « | Сторінка N») к title/description страницы 2, 3…; номер страницы в тексте уже есть
+     * (шаблон «… — страница {$page_number}») — без второго суффикса.
+     */
+    public static function pageSuffix(string $text, int $page): string
+    {
+        if ($page <= 1 || preg_match('/(?:страниц|сторінк)\p{L}*\s*' . $page . '(?!\d)/iu', $text)) return $text;
+        return $text . ' | ' . t('Страница') . ' ' . $page;
     }
 
     public function ogTitle(): string

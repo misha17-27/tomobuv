@@ -14,7 +14,8 @@ foreach (['title' => 'Title', 'desc' => 'Description'] as $f => $label):
     $len = number_format($c['len'], 0, '', ' ') . ' симв.';
     $head = $label . ': ' . match ($c['state']) {
         'ok'    => 'свой, ' . $len,
-        'warn'  => 'свой, ' . $len . ' — ' . ($c['len'] < $min ? 'короче ' . $min : 'длиннее ' . $max),
+        // «Длина» бывает и у результата шаблона (SeoAudit::state): своего нет — «по шаблону», а не «свой»
+        'warn'  => ($c['own'] ? 'свой, ' : 'по шаблону, ') . $len . ' — ' . ($c['len'] < $min ? 'короче ' . $min : 'длиннее ' . $max),
         'auto'  => 'по шаблону, ' . $len,
         default => 'нет — пусто и шаблона нет, на сайте тега не будет',
     };

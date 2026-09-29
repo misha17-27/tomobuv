@@ -60,7 +60,7 @@ try {
     if (isset($opts['import-cfg'])) {
         $f = (string) $opts['import-cfg'];
         if (!is_file($f)) $fail('файл не найден: ' . $f);
-        [$set, $skipped] = JongGolf::importOldConfig((string) file_get_contents($f));
+        [$set, $skipped] = JongGolf::importOldConfig($f);
         $say('Перенесено настроек: ' . count($set) . ' (' . implode(', ', array_keys($set)) . ')');
         if ($skipped) $say('Не переносятся: ' . implode(', ', $skipped));
         $say('Автозагрузка остаётся ' . (JongGolf::on('enabled') ? 'ВКЛЮЧЁННОЙ' : 'выключенной') . ' — включите её в админке после отключения cron старого сайта.');

@@ -25,7 +25,13 @@ use App\Core\Settings;
  *   г) у инфо-страниц и статей без своего description витрина берёт отрывок текста (Seo::excerpt), затем шаблон;
  *   д) служебные страницы (отзывы, карта сайта, список блога) — готовые тексты в настройках, если своих нет или они не в норме;
  *   е) шаблон группы заменяется стандартным (TEMPLATES), только если он пуст, это шаблон Webasyst, который возвращает перенос
- *      (LEGACY), или по нему в норме меньше 98% объектов группы. Удачный шаблон владельца не трогается.
+ *      (LEGACY), или по нему в норме меньше 98% объектов группы. Удачный шаблон владельца не трогается. Keywords и H1 групп,
+ *      которые говорят о детской обуви для всех (WORDING), — нейтральные; шаблоны пагинации категорий с номером страницы
+ *      выключаются (номер дважды с « | Страница N» витрины);
+ *   ж) одинаковый title у разных товаров на сайте — у всех, кроме одного, различающая часть (dedupe): конец названия,
+ *      который убрала обрезка, или код товара у одинаковых названий; title, написанный владельцем (ownTitle), не меняется;
+ *   з) значение, которое записало прошлое автоисправление и с тех пор не меняли, решается заново от исходного значения
+ *      владельца (refix) — новые правила исправляют и прежний пакет, не откатывая его.
  *
  * Каждое применение — пакет в журнале (seo_fix_batches + seo_fix_log: объект, поле, язык, было, стало, время);
  * откат пакета (revert) возвращает «было», только если значение с тех пор не меняли. Повторный запуск ничего не меняет.
@@ -34,7 +40,7 @@ use App\Core\Settings;
  */
 final class SeoFix
 {
-    public const VERSION = 1;
+    public const VERSION = 2;
     private const LOCK = 'tomobuv_seo_autofix';
     private const CHUNK = 5000;
     /** Доля объектов группы, у которых шаблон в норме, чтобы шаблон владельца остался */
@@ -57,6 +63,8 @@ final class SeoFix
         'uk_fill'  => 'UA: перевода нет — по исправленному русскому',
         'template' => 'шаблон заменён стандартным',
         'text'     => 'текст служебной страницы',
+        'refix'    => 'прежнее автоисправление пересчитано по новым правилам',
+        'dedupe'   => 'одинаковый title у разных товаров — различающая часть',
     ];
 
     /** Стандартные шаблоны групп: ключ настройки → [RU, UA («<ключ>.uk»)] */
@@ -126,7 +134,31 @@ final class SeoFix
         'Дитяче взуття бренду {$brand.name} від виробника, найкращі бренди дитячого взуття в інтернет-магазині ТомВзуття. Пропонуємо вам оптом брендове взуття {$brand.name}',
     ];
 
-    /** Хвосты короткого description своего значения: самый длинный из влезающих */
+    /**
+     * Keywords и H1 групп (витрина подставляет их всем категориям и товарам): шаблон, который говорит о детской обуви
+     * («для девочек», «интернет-магазин детской обуви», «Детская обувь {$brand.name}»), заменяется нейтральным — с корневым
+     * разделом категории ({$category.root_name}: «Женская обувь», «Детская обувь»). Нейтральный шаблон владельца не трогается
+     * (H1 товара «{$product.seo_name} оптом в Украине» — как на старом сайте). Ключ → [RU, UA].
+     */
+    public const WORDING = [
+        'seo.product_meta_keywords' => [
+            'Купить {$product.name} оптом, {$product.name} оптом Одесса, {$category.root_name} оптом, {$product.name} в Украине',
+            'Купити {$product.name} оптом, {$product.name} оптом Одеса, {$category.root_name} оптом, {$product.name} в Україні'],
+        'seo.product_h1' => ['{$product.seo_name} оптом в Украине', '{$product.seo_name} оптом в Україні'],
+        'seo.category_meta_keywords' => [
+            'Обувь {$category.seo_name}, купить оптом {$category.seo_name}, обувь {$category.seo_name} оптом от производителя, {$category.seo_name} Украина, {$category.root_name} оптом',
+            'Взуття {$category.seo_name}, купити оптом {$category.seo_name}, взуття {$category.seo_name} оптом від виробника, {$category.seo_name} Україна, {$category.root_name} оптом'],
+        'seo.category_h1' => ['{$category.seo_name} оптом купить в Украине', '{$category.seo_name} оптом купити в Україні'],
+        'seo.brand_meta_keywords' => [
+            '{$brand.name} оптом, обувь {$brand.name} оптом, купить обувь {$brand.name}, {$brand.name} Одесса, интернет-магазин обуви {$store_info.name}',
+            '{$brand.name} оптом, взуття {$brand.name} оптом, купити взуття {$brand.name}, {$brand.name} Одеса, інтернет-магазин взуття {$store_info.name}'],
+        'seo.brand_h1' => ['Обувь {$brand.name} оптом', 'Взуття {$brand.name} оптом'],
+    ];
+
+    /** «Детская обувь» в шаблоне, который витрина подставляет всем (WORDING) */
+    private const CHILDISH = '/детск|дитяч|для девоч|для мальчик|для дівчат|для хлопчик/iu';
+
+    /** Хвосты короткого description своего значения, когда в тексте нет ни одной части: самый длинный из влезающих */
     private const DESC_TAILS = [
         'ru' => [' Купить оптом ящиками в Одессе на 7 км или с доставкой по Украине — интернет-магазин {store}.',
                  ' Опт ящиками в Одессе на 7 км и доставка по Украине — {store}.'],
@@ -158,6 +190,10 @@ final class SeoFix
     private array $same = [];
     private array $report = [];
     private int $examplesPer;
+    /** Значения текущей сущности, записанные прошлым автоисправлением (ourValues): [id][колонка] => [orig, new, ok] */
+    private array $ours = [];
+    /** Различение одинаковых title товаров (dedupeTitles): [id][язык] => [base, title] */
+    private array $dedupe = [];
 
     private function __construct(bool $apply, array $opt)
     {
@@ -278,6 +314,46 @@ final class SeoFix
             $this->tplAfter['ru'][$key] = $newRu;
             $this->tplAfter['uk'][$key] = $newUk !== '' ? $newUk : $newRu;
         }
+        if (!$withSettings) return;
+        $this->wording();
+        $this->pagination();
+    }
+
+    /** Keywords и H1 групп, которые говорят о детской обуви для всех категорий и товаров (WORDING) → нейтральные */
+    private function wording(): void
+    {
+        $why = 'шаблон для всех категорий и товаров говорит о детской обуви';
+        foreach (self::WORDING as $key => [$stdRu, $stdUk]) {
+            $ru = trim((string) ($this->raw[$key] ?? ''));
+            $uk = trim((string) ($this->raw[$key . '.uk'] ?? ''));
+            $newRu = $ru !== '' && preg_match(self::CHILDISH, $ru) ? $stdRu : $ru;
+            // пустой UA — на /ua/ работает русский шаблон: русский заменён — пишем украинский стандарт
+            $newUk = $uk !== '' ? (preg_match(self::CHILDISH, $uk) ? $stdUk : $uk) : ($newRu !== $ru ? $stdUk : '');
+            foreach ([['ru', $key, $ru, $newRu], ['uk', $key . '.uk', $uk, $newUk]] as [$lang, $name, $old, $new]) {
+                if ($new === $old || Seo::norm($new) === Seo::norm($old)) continue;
+                $this->setting($name, $lang, $this->raw[$name] ?? null, $new, 'template', $why);
+                $this->report['templates'][$name] = ['old' => $old, 'new' => $new, 'why' => $why];
+            }
+        }
+    }
+
+    /**
+     * Страницы 2, 3… категорий: шаблоны Webasyst seo.category_pagination_* с номером страницы («— страница {$page_number}»)
+     * и « | Страница N» витрины давали номер дважды. Шаблоны пагинации выключаются: как основная форма на старом сайте —
+     * шаблон категории + « | Страница N» (Seo::paginate).
+     */
+    private function pagination(): void
+    {
+        $key = 'seo.category_pagination_is_enabled';
+        if ((string) ($this->raw[$key] ?? '0') !== '1') return;
+        $numbered = false;
+        foreach (['seo.category_pagination_meta_title', 'seo.category_pagination_meta_description'] as $k) {
+            foreach ([$k, $k . '.uk'] as $n) if (str_contains((string) ($this->raw[$n] ?? ''), '{$page_number}')) $numbered = true;
+        }
+        if (!$numbered) return;
+        $why = 'номер страницы дважды: «— страница N» шаблона пагинации и « | Страница N» витрины';
+        $this->setting($key, 'ru', $this->raw[$key], '0', 'template', $why);
+        $this->report['templates'][$key] = ['old' => '1', 'new' => '0', 'why' => $why];
     }
 
     /** Почему шаблон заменяется стандартным (null — остаётся): пуст, шаблон Webasyst, в норме < 98% объектов группы */
@@ -407,6 +483,8 @@ final class SeoFix
             'blog'     => 'id, url, title, title_uk, status, published_at, text_before_cut, text_before_cut_uk, text, text_uk',
         };
         $cols .= ", $cT, {$cT}_uk, $cD, {$cD}_uk";
+        $this->ours = $this->ourValues($entity);
+        $this->dedupe = [];
         $work = function (bool $lock) use ($table, $cols, $entity): void {
             $rows = App::db()->query("SELECT $cols FROM `$table` ORDER BY id" . ($lock ? ' FOR UPDATE' : ''))->fetchAll();
             $this->process($entity, $rows);
@@ -417,13 +495,34 @@ final class SeoFix
 
     // ================================================================== товары
 
-    /** Товары — пачками по id: чтение с блокировкой, решение в PHP, до 8 UPDATE на пачку, журнал; одна транзакция на пачку */
+    /**
+     * Товары: сначала без блокировок — title всех товаров на сайте (RU и UA), чтобы найти одинаковые у разных товаров
+     * (правило dedupe, dedupeTitles); затем пачками по id: чтение с блокировкой, решение в PHP, до 8 UPDATE на пачку, журнал;
+     * одна транзакция на пачку.
+     */
     private function products(): void
     {
         $db = App::db();
-        $last = 0;
         $sql = 'SELECT id, url, name, name_uk, sku, seo_name, seo_name_uk, price, box_qty, size, category_id, status,
             meta_title, meta_title_uk, meta_description, meta_description_uk FROM products WHERE id > ? ORDER BY id LIMIT ' . self::CHUNK;
+        $this->ours = $this->ourValues('product');
+        $this->dedupe = [];
+        $titles = ['ru' => [], 'uk' => []];
+        $last = 0;
+        do {
+            $rows = $db->query($sql, [$last])->fetchAll();
+            if (!$rows) break;
+            $last = (int) end($rows)['id'];
+            foreach ($this->decide('product', $rows, ['title']) as $i => $o) {
+                if (!$o['live']) continue;
+                $titles['ru'][(int) $rows[$i]['id']] = $o['title']['after_ru'];
+                $titles['uk'][(int) $rows[$i]['id']] = $o['title']['after_uk'];
+            }
+        } while (count($rows) === self::CHUNK);
+        $this->dedupe = $this->dedupeTitles($titles);
+        unset($titles);
+
+        $last = 0;
         while (true) {
             $n = 0;
             $step = function (bool $lock) use ($db, $sql, &$last, &$n): void {
@@ -439,6 +538,86 @@ final class SeoFix
         }
     }
 
+    /**
+     * Одинаковый title у разных товаров на сайте (правило dedupe): у всех, кроме одного (самое короткое название, при равных —
+     * меньший id), в title остаётся различающая часть (distinct). $titles: [язык][id] => title без различения.
+     * Возвращает [id][язык] => ['base' => title без различения, 'title' => новый title].
+     */
+    private function dedupeTitles(array $titles): array
+    {
+        $db = App::db();
+        $out = [];
+        foreach ($titles as $lang => $byId) {
+            $groups = [];
+            foreach ($byId as $id => $t) $groups[mb_strtolower(trim($t))][] = $id;
+            $taken = array_fill_keys(array_keys($groups), true);
+            $groups = array_filter($groups, static fn($ids) => count($ids) > 1);
+            if (!$groups) continue;
+            $names = [];
+            foreach (array_chunk(array_merge(...array_values($groups)), 1000) as $part) {
+                [$ph, $vals] = $db->in($part);
+                foreach ($db->all("SELECT id, name, name_uk FROM products WHERE id IN ($ph)", $vals) as $p) {
+                    $n = $lang === 'uk' && trim((string) $p['name_uk']) !== '' ? $p['name_uk'] : $p['name'];
+                    $names[(int) $p['id']] = trim((string) preg_replace('/\s+/u', ' ', (string) $n));
+                }
+            }
+            foreach ($groups as $ids) {
+                usort($ids, static fn($a, $b) => [mb_strlen($names[$a] ?? ''), $a] <=> [mb_strlen($names[$b] ?? ''), $b]);
+                $keep = array_shift($ids);
+                foreach ($ids as $id) {
+                    $x = $this->distinct($lang, $id, $byId[$id], $names[$id] ?? '', $names[$keep] ?? '', $taken);
+                    if ($x === null) continue;
+                    $taken[mb_strtolower($x)] = true;
+                    $out[$id][$lang] = ['base' => $byId[$id], 'title' => $x];
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Title товара с различающей частью или null (не получилось в норме без нового совпадения):
+     *   названия различаются концом, который убрала обрезка («…бронзовый 4 пары:36;37;39;41 РОЗПРОДАЖ» и «…бронзовый 4 пары:36;37;39;41»)
+     *   — остаётся этот конец, сокращается середина: «Угги Diana 5825 натур.замша на натур меху бронзовый РОЗПРОДАЖ»;
+     *   названия одинаковые (дубли карточек, различаются только ценой или ничем) — код товара: «Кроссовки Paolla Т11 чорний (код 1036487)».
+     * Хвосты шаблона (« оптом», « — купить в Одессе», « | Tomobuv») — если были в title, сколько влезает в норму.
+     */
+    private function distinct(string $lang, int $id, string $title, string $name, string $keeper, array $taken): ?string
+    {
+        $max = Seo::TITLE_MAX;
+        $cands = [];
+        [$head, $diff] = self::tailDiff($name, $keeper);
+        if ($diff !== '') {
+            $d = Seo::wordCut($diff, 40);
+            $cands[] = [Seo::wordCut($head, $max - mb_strlen($d) - 1) . ' ' . $d, $name];
+        }
+        $code = ' (код ' . $id . ')';
+        $base = $name !== '' ? $name : $title;
+        $cands[] = [Seo::wordCut($base, $max - mb_strlen($code)) . $code, $base];
+        $tailed = Seo::norm($title) !== Seo::norm($name);        // в title были хвосты шаблона
+        foreach ($cands as [$t, $src]) {
+            foreach ($this->titleTails($src, $lang) as $tail) {
+                if (!$tailed && mb_strlen($t) >= Seo::TITLE_MIN) break;
+                if (mb_strlen($t . $tail) > $max) break;
+                $t .= $tail;
+            }
+            if (Seo::inNorm($t, 'title') && !isset($taken[mb_strtolower($t)])) return $t;
+        }
+        return null;
+    }
+
+    /** Общее начало названий по словам (без регистра) и остаток $name после него: [начало, остаток] (остаток '' — не различаются концом) */
+    private static function tailDiff(string $name, string $keeper): array
+    {
+        $a = preg_split('/\s+/u', $name, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $b = preg_split('/\s+/u', $keeper, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $i = 0;
+        while ($i < count($a) && $i < count($b) && mb_strtolower($a[$i]) === mb_strtolower($b[$i])) $i++;
+        while ($i > 1 && preg_match('/^\d+$/', $a[$i - 1])) $i--;       // «4 пари:36;37;40;41» — число вместе с перечнем
+        if ($i === 0 || $i >= count($a)) return [$name, ''];
+        return [implode(' ', array_slice($a, 0, $i)), implode(' ', array_slice($a, $i))];
+    }
+
     // ================================================================== решение по объектам
 
     /** Решить по строкам группы, записать изменения (при применении) и посчитать итоги */
@@ -446,50 +625,7 @@ final class SeoFix
     {
         [$table, $cT, $cD, , $g] = self::ENTITIES[$entity];
         $changes = [];
-        $data = [];
-        // русская версия
-        SeoAudit::inLang('ru', function () use ($entity, $rows, $cT, $cD, &$data): void {
-            foreach ($rows as $i => $r) {
-                $o = ['row' => $r, 'live' => $this->live($entity, $r), 'names' => $this->names($entity, $r)];
-                $auto = null;
-                $autoFn = function (string $f) use (&$auto, $entity, $r): string {
-                    $auto ??= $this->auto($entity, $r, 'after');
-                    return $auto[$f];
-                };
-                foreach (['title' => $cT, 'desc' => $cD] as $f => $col) {
-                    $o[$f] = $this->decideRu($f, (string) ($r[$col] ?? ''), $o['names'], $autoFn);
-                    $own = trim((string) ($r[$col] ?? ''));
-                    // «после» — и у скрытых (для примеров «станет на сайте»), «до» — только для итогов по адресам sitemap
-                    $o[$f]['after_ru'] = $o[$f]['final'] !== '' ? $o[$f]['final'] : $autoFn($f);
-                    if ($o['live']) $o[$f]['before_ru'] = $own !== '' ? $own : ($this->sameTpl('ru') ? $o[$f]['after_ru'] : $this->autoBefore($entity, $r, 'ru')[$f]);
-                }
-                $data[$i] = $o;
-            }
-        });
-        // украинская версия (/ua/): свои *_uk, иначе русское своё, иначе украинский шаблон
-        SeoAudit::inLang('uk', function () use ($entity, $rows, $cT, $cD, &$data): void {
-            foreach ($rows as $i => $r) {
-                $o = &$data[$i];
-                $auto = null;
-                $autoFn = function (string $f) use (&$auto, $entity, $r): string {
-                    $auto ??= $this->auto($entity, $this->loc($r), 'after');
-                    return $auto[$f];
-                };
-                foreach (['title' => $cT, 'desc' => $cD] as $f => $col) {
-                    $rawUk = (string) ($r[$col . '_uk'] ?? '');
-                    $o[$f]['uk'] = $this->decideUk($f, $rawUk, (string) ($r[$col] ?? ''), $o['names'], $o[$f], $autoFn);
-                    $finUk = $o[$f]['uk']['final'];
-                    $o[$f]['after_uk'] = $finUk !== '' ? $finUk : ($o[$f]['final'] !== '' ? $o[$f]['final'] : $autoFn($f));
-                    if ($o['live']) {
-                        $ownUk = trim($rawUk);
-                        $ownRu = trim((string) ($r[$col] ?? ''));
-                        $o[$f]['before_uk'] = $ownUk !== '' ? $ownUk : ($ownRu !== '' ? $ownRu
-                            : ($this->sameTpl('uk') ? $autoFn($f) : $this->autoBefore($entity, $this->loc($r), 'uk')[$f]));
-                    }
-                }
-                unset($o);
-            }
-        });
+        $data = $this->decide($entity, $rows);
         foreach ($rows as $i => $r) {
             $o = $data[$i];
             $id = (int) $r['id'];
@@ -519,6 +655,201 @@ final class SeoFix
         foreach ($changes as $ch) $this->record($ch);
     }
 
+    /**
+     * Решения по строкам на обоих языках: [i => ['live', 'names', 'title' => x, 'desc' => x]], x: final — что останется своим
+     * ('' — работает шаблон), change — null или [new, rule], after_ru/after_uk — что покажет витрина, before_ru/before_uk — что
+     * показывает сейчас (только у объектов на сайте), uk — решение по *_uk (final, change).
+     * Значение, которое записало прошлое автоисправление и с тех пор не меняли (ourValues), решается заново от исходного
+     * значения владельца: результат другой — правило refix. Одинаковые title товаров — dedupe (products → dedupeTitles).
+     * $only — какие поля решать (поиск одинаковых title — только title, без сборки description).
+     */
+    private function decide(string $entity, array $rows, array $only = ['title', 'desc']): array
+    {
+        [, $cT, $cD] = self::ENTITIES[$entity];
+        $fields = array_intersect_key(['title' => $cT, 'desc' => $cD], array_flip($only));
+        $data = [];
+        // русская версия
+        SeoAudit::inLang('ru', function () use ($entity, $rows, $fields, &$data): void {
+            foreach ($rows as $i => $r) {
+                $id = (int) $r['id'];
+                $o = ['live' => $this->live($entity, $r), 'names' => $this->names($entity, $r)];
+                $auto = [];
+                $autoFn = function (string $f) use (&$auto, $entity, $r): string {
+                    return $auto[$f] ??= $this->auto($entity, $r, 'after', $f)[$f];
+                };
+                foreach ($fields as $f => $col) {
+                    $cur = $r[$col] ?? null;
+                    [$raw, $ours] = $this->source($id, $col, $cur);
+                    $x = $this->decideRu($f, $raw, $o['names'], $autoFn);
+                    $x['raw'] = $raw;
+                    $x['rule'] = $x['change']['rule'] ?? '';          // решение от исходного значения (для uk_fill)
+                    if ($ours) $x = self::retarget($x, $cur, $x['change'] !== null ? $x['change']['new'] : $raw, 'refix');
+                    // «после» — и у скрытых (для примеров «станет на сайте»), «до» — только для итогов по адресам sitemap
+                    $x['after_ru'] = $x['final'] !== '' ? $x['final'] : $autoFn($f);
+                    $x['base_final'] = $x['final'];
+                    $dd = $f === 'title' ? ($this->dedupe[$id]['ru'] ?? null) : null;
+                    // своё значение владельца (не машинное, не текст шаблона) различение дублей не трогает: своё в норме не меняется
+                    $x['mine'] = $f === 'title' && isset($this->dedupe[$id]) && self::ownTitle($x['base_final'], $o['names'], $autoFn);
+                    if ($dd !== null && $dd['base'] === $x['after_ru'] && !$x['mine']) {
+                        $x = self::retarget($x, $cur, $dd['title'], 'dedupe');
+                        $x['after_ru'] = $dd['title'];
+                    }
+                    $own = trim((string) $cur);
+                    if ($o['live']) $x['before_ru'] = $own !== '' ? $own : ($this->sameTpl('ru') ? $x['after_ru'] : $this->autoBefore($entity, $r, 'ru')[$f]);
+                    $o[$f] = $x;
+                }
+                $data[$i] = $o;
+            }
+        });
+        // украинская версия (/ua/): свои *_uk, иначе русское своё, иначе украинский шаблон
+        SeoAudit::inLang('uk', function () use ($entity, $rows, $fields, &$data): void {
+            foreach ($rows as $i => $r) {
+                $id = (int) $r['id'];
+                $o = &$data[$i];
+                $auto = [];
+                $autoFn = function (string $f) use (&$auto, $entity, $r): string {
+                    return $auto[$f] ??= $this->auto($entity, $this->loc($r), 'after', $f)[$f];
+                };
+                foreach ($fields as $f => $col) {
+                    $ru = $o[$f];
+                    $cur = $r[$col . '_uk'] ?? null;
+                    [$raw, $ours] = $this->source($id, $col . '_uk', $cur);
+                    // русское — как до различения дублей (base_final): так же, как при поиске одинаковых title
+                    $uk = $this->decideUk($f, $raw, $ru['raw'], $o['names'], ['final' => $ru['base_final'], 'rule' => $ru['rule']], $autoFn);
+                    if ($ours) $uk = self::retarget($uk, $cur, $uk['change'] !== null ? $uk['change']['new'] : $raw, 'refix');
+                    $after = $uk['final'] !== '' ? $uk['final'] : ($ru['base_final'] !== '' ? $ru['base_final'] : $autoFn($f));
+                    $dd = $f === 'title' ? ($this->dedupe[$id]['uk'] ?? null) : null;
+                    // на /ua/ своё владельца — своё украинское или (его нет) русское: различение дублей его не трогает
+                    if ($dd !== null && $dd['base'] === $after && !($uk['final'] !== '' ? self::ownTitle($uk['final'], $o['names'], $autoFn) : $ru['mine'])) {
+                        $uk = self::retarget($uk, $cur, $dd['title'], 'dedupe');
+                    } elseif ($uk['final'] === '' && $ru['base_final'] === '' && $ru['final'] !== '') {
+                        // русский title был по шаблону, теперь своё с различающей частью — без своего *_uk /ua/ показал бы русский текст
+                        $uk = self::retarget($uk, $cur, $after, 'dedupe');
+                    }
+                    $o[$f]['uk'] = $uk;
+                    $o[$f]['after_uk'] = $uk['final'] !== '' ? $uk['final'] : ($ru['final'] !== '' ? $ru['final'] : $autoFn($f));
+                    if ($o['live']) {
+                        $ownUk = trim((string) $cur);
+                        $ownRu = trim((string) ($r[$col] ?? ''));
+                        $o[$f]['before_uk'] = $ownUk !== '' ? $ownUk : ($ownRu !== '' ? $ownRu
+                            : ($this->sameTpl('uk') ? $autoFn($f) : $this->autoBefore($entity, $this->loc($r), 'uk')[$f]));
+                    }
+                }
+                unset($o);
+            }
+        });
+        return $data;
+    }
+
+    /**
+     * Title — своё значение владельца: не пусто, не машинное (= название, Seo::isMachine) и не текст шаблона (его пишет
+     * само автоисправление — uk_tpl). Различение одинаковых title (dedupe) такое не меняет: своё в норме не меняется никогда.
+     */
+    private static function ownTitle(string $own, array $names, callable $auto): bool
+    {
+        $own = trim($own);
+        return $own !== '' && !Seo::isMachine($own, $names, 'title') && Seo::norm($own) !== Seo::norm($auto('title'));
+    }
+
+    /**
+     * Решение с новым значением колонки $target (null — пусто, работает шаблон) вместо текущего $cur: final — его текст,
+     * change — [target, rule], если отличается от текущего (пустая строка и NULL — одно и то же).
+     */
+    private static function retarget(array $x, ?string $cur, ?string $target, string $rule): array
+    {
+        $x['final'] = trim((string) $target);
+        $same = $cur === $target || (trim((string) $cur) === '' && trim((string) $target) === '');
+        $x['change'] = $same ? null : ['new' => $target !== null && trim($target) === '' ? null : $target, 'rule' => $rule];
+        return $x;
+    }
+
+    /**
+     * Значение для решения: записанное прошлым автоисправлением и с тех пор не менявшееся — исходное значение владельца
+     * (из журнала), иначе текущее. Возвращает [значение, «записано автоисправлением»].
+     */
+    private function source(int $id, string $col, ?string $cur): array
+    {
+        $x = $this->ours[$id][$col] ?? null;
+        if ($x !== null && $x['new'] === $cur) return [(string) ($x['orig'] ?? ''), true];
+        return [(string) ($cur ?? ''), false];
+    }
+
+    /**
+     * Значения сущности, которые записало автоисправление (пакеты без отката): [id][колонка] => [orig, new, rule].
+     * Пересчитываются правки из своего текста владельца (fix, uk_fill), различение дублей (dedupe), прежние пересчёты (refix)
+     * и текст украинского шаблона title, обрезанный с обрывком (uk_tpl «…бронзовий 4»). orig — значение до первой правки
+     * в цепочке пакетов подряд (правка, начатая с «стало» прошлой); значение, которое меняли между пакетами, начинает цепочку заново.
+     * Очистки (clear, keywords) и прочие uk_tpl не пересчитываются: своё значение там — текст шаблона или пусто.
+     */
+    private function ourValues(string $entity): array
+    {
+        if (!self::hasTables()) return [];
+        $db = App::db();
+        $recalc = static function (array $l) use ($entity): bool {
+            if (in_array($l['rule'], ['fix', 'uk_fill', 'dedupe', 'refix'], true)) return true;
+            return $l['rule'] === 'uk_tpl' && $l['field'] === self::ENTITIES[$entity][1] . '_uk' && Seo::badTail((string) $l['new_value']);
+        };
+        $skip = $this->batch ? ' AND l.batch_id <> ' . (int) $this->batch : '';
+        $ids = $db->col("SELECT DISTINCT l.entity_id FROM seo_fix_log l JOIN seo_fix_batches b ON b.id = l.batch_id
+            WHERE b.reverted_at IS NULL AND l.entity = ? AND l.rule IN ('fix', 'uk_fill', 'dedupe', 'refix', 'uk_tpl')$skip", [$entity]);
+        $out = [];
+        foreach (array_chunk(array_map('intval', $ids), 1000) as $part) {
+            [$ph, $vals] = $db->in($part);
+            $log = $db->all("SELECT l.entity_id, l.field, l.rule, l.old_value, l.new_value FROM seo_fix_log l JOIN seo_fix_batches b ON b.id = l.batch_id
+                WHERE b.reverted_at IS NULL AND l.entity = ? AND l.entity_id IN ($ph)$skip ORDER BY l.id", array_merge([$entity], $vals));
+            foreach ($log as $l) {
+                $id = (int) $l['entity_id'];
+                $x = $out[$id][$l['field']] ?? null;
+                $out[$id][$l['field']] = ($x !== null && $x['ok'] && $x['new'] === $l['old_value'] && $recalc($l))
+                    ? ['orig' => $x['orig'], 'new' => $l['new_value'], 'ok' => true]
+                    : ['orig' => $l['old_value'], 'new' => $l['new_value'], 'ok' => $recalc($l)];
+            }
+        }
+        foreach ($out as $id => $cols) {
+            foreach ($cols as $c => $x) if (!$x['ok']) unset($out[$id][$c]);
+        }
+        return $out;
+    }
+
+    /**
+     * *_uk, которые автоисправление само заполнило русским текстом, пока перевода не было (из пустого значения; затем,
+     * возможно, refix/dedupe в пакетах подряд), и с тех пор не менявшиеся: [id][колонка] => true. Это uk_fill (русский текст
+     * владельца с украинским хвостом) и dedupe, совпадающий с русским значением («Ботинки … (код N)»: различение дублей до сида).
+     * Для bin/i18n-seed-uk.php они пустые — перевод из словаря их заменяет: перенос (bin/import-webasyst.php) вызывает
+     * автоисправление раньше сида, и без этого на /ua/ остался бы русский текст («Детская обувь оптом… Купити оптом ящиками…»).
+     */
+    public static function autoFilledUk(string $entity): array
+    {
+        if (!isset(self::ENTITIES[$entity]) || !self::hasTables()) return [];
+        [$table, $cT, $cD] = self::ENTITIES[$entity];
+        $db = App::db();
+        $ids = $db->col("SELECT DISTINCT l.entity_id FROM seo_fix_log l JOIN seo_fix_batches b ON b.id = l.batch_id
+            WHERE b.reverted_at IS NULL AND l.entity = ? AND l.lang = 'uk' AND (l.rule = 'uk_fill' OR (l.rule = 'dedupe' AND COALESCE(l.old_value, '') = ''))",
+            [$entity]);
+        $out = [];
+        foreach (array_chunk(array_map('intval', $ids), 1000) as $part) {
+            [$ph, $vals] = $db->in($part);
+            $chain = [];                           // [id][колонка] => [правило начала цепочки из пустого значения или null, последнее «стало»]
+            foreach ($db->all("SELECT l.entity_id, l.field, l.rule, l.old_value, l.new_value FROM seo_fix_log l JOIN seo_fix_batches b ON b.id = l.batch_id
+                WHERE b.reverted_at IS NULL AND l.entity = ? AND l.entity_id IN ($ph) AND l.field IN (?, ?) ORDER BY l.id",
+                array_merge([$entity], $vals, [$cT . '_uk', $cD . '_uk'])) as $l) {
+                $x = $chain[(int) $l['entity_id']][$l['field']] ?? null;
+                $cont = $x !== null && $x[0] !== null && $x[1] === $l['old_value'] && in_array($l['rule'], ['refix', 'dedupe'], true);
+                $fromEmpty = in_array($l['rule'], ['uk_fill', 'dedupe'], true) && trim((string) $l['old_value']) === '' ? $l['rule'] : null;
+                $chain[(int) $l['entity_id']][$l['field']] = [$cont ? $x[0] : $fromEmpty, $l['new_value']];
+            }
+            foreach ($db->all("SELECT id, `$cT` AS t, `{$cT}_uk` AS t_uk, `$cD` AS d, `{$cD}_uk` AS d_uk FROM `$table` WHERE id IN ($ph)", $vals) as $r) {
+                foreach (['t' => $cT, 'd' => $cD] as $k => $col) {
+                    $x = $chain[(int) $r['id']][$col . '_uk'] ?? null;
+                    if ($x === null || $x[0] === null || $x[1] === null || $x[1] !== $r[$k . '_uk']) continue;
+                    // dedupe из пустого — только копия русского значения (украинский текст шаблона с кодом сид не трогает)
+                    if ($x[0] === 'uk_fill' || $r[$k . '_uk'] === $r[$k]) $out[(int) $r['id']][$col . '_uk'] = true;
+                }
+            }
+        }
+        return $out;
+    }
+
     /** Русское своё значение: [final — что останется своим ('' — пусто, работает шаблон), change — null или [new, rule]] */
     private function decideRu(string $f, string $raw, array $names, callable $auto): array
     {
@@ -533,14 +864,14 @@ final class SeoFix
         return $fixed !== $raw ? ['final' => $fixed, 'change' => ['new' => $fixed, 'rule' => 'fix']] : ['final' => $own, 'change' => null];
     }
 
-    /** Украинское своё значение (*_uk) при уже решённом русском $ru */
+    /** Украинское своё значение (*_uk) при уже решённом русском $ru: final — что останется русским своим, rule — что с ним сделано */
     private function decideUk(string $f, string $raw, string $rawRu, array $names, array $ru, callable $auto): array
     {
         $field = $f === 'title' ? 'title' : 'description';
         $own = trim($raw);
         if ($own === '') {
             // русское своё исправлено, украинского нет — то же с украинским хвостом (иначе /ua/ покажет русский текст с русским хвостом)
-            if (($ru['change']['rule'] ?? '') === 'fix' && $ru['final'] !== '') {
+            if (($ru['rule'] ?? '') === 'fix' && $ru['final'] !== '') {
                 $uk = $this->fixOwn(trim($rawRu), $field, 'uk');
                 if ($uk !== $ru['final']) return ['final' => $uk, 'change' => ['new' => $uk, 'rule' => 'uk_fill']];
             }
@@ -561,10 +892,10 @@ final class SeoFix
     }
 
     /**
-     * Исправить своё значение вне нормы (правило в): повторы подряд слова/фразы до 3 слов, заглавная буква,
-     * пробел после точки перед заглавной («Украине.Милые»; «Y.TOP» не трогается). Короткий title — хвост из частей,
-     * которых ещё нет в тексте (« оптом», « — купить в Одессе», « | Tomobuv»), не влезает — части снимаются с конца;
-     * короткий description — точка и самый длинный влезающий хвост; длинное — Seo::fit.
+     * Исправить своё значение вне нормы (правило в): строки через перевод строки — отдельные фразы («. »), повторы подряд
+     * слова/фразы до 3 слов, заглавная буква, пробел после точки перед заглавной («Украине.Милые»; «Y.TOP» не трогается).
+     * Короткий title — хвост из частей, которых ещё нет в тексте (« оптом», « — купить в Одессе», « | Tomobuv»), не влезает —
+     * части снимаются с конца; короткий description — точка и хвост из недостающих частей (descTails); длинное — Seo::fit.
      */
     public function fixOwn(string $text, string $field, string $lang): string
     {
@@ -573,13 +904,8 @@ final class SeoFix
         $len = mb_strlen($s);
         if ($len > $max) return Seo::fit($s, $field);
         if ($len >= $min) return $s;
-        $lc = mb_strtolower($s);
-        $brand = str_contains($lc, mb_strtolower($this->store)) || preg_match('/том\s?(обувь|взуття)|tomobuv/u', $lc);
         if ($field === 'title') {
-            $tails = [];
-            if (!str_contains($lc, 'опт')) $tails[] = ' оптом';
-            if (!str_contains($lc, 'купи') && !str_contains($lc, 'одес')) $tails[] = $lang === 'uk' ? ' — купити в Одесі' : ' — купить в Одессе';
-            if (!$brand) $tails[] = ' | ' . $this->store;
+            $tails = $this->titleTails($s, $lang);
             while ($tails) {
                 $cand = $s . implode('', $tails);
                 if (mb_strlen($cand) <= $max) return $cand;
@@ -588,11 +914,59 @@ final class SeoFix
             return $s;
         }
         $base = preg_match('/[.!?…]$/u', $s) ? $s : $s . '.';
-        foreach (self::DESC_TAILS[$lang === 'uk' ? 'uk' : 'ru'] as $tail) {
-            $cand = $base . str_replace('{store}', $this->store, $tail);
+        foreach ($this->descTails($base, $lang) as $tail) {
+            $cand = $base . $tail;
             if (mb_strlen($cand) <= $max) return $cand;
         }
         return $base;
+    }
+
+    /** Упоминает ли текст магазин (название, «Том Обувь», «Tomobuv») — тогда « | Tomobuv» не дописывается */
+    private function mentionsStore(string $lc): bool
+    {
+        return str_contains($lc, mb_strtolower($this->store)) || (bool) preg_match('/том\s?(обувь|взуття)|tomobuv/u', $lc);
+    }
+
+    /** Хвосты короткого title по порядку: « оптом», « — купить в Одессе», « | Tomobuv» — только те, которых ещё нет в тексте */
+    private function titleTails(string $s, string $lang): array
+    {
+        $lc = mb_strtolower($s);
+        $tails = [];
+        if (!str_contains($lc, 'опт')) $tails[] = ' оптом';
+        if (!str_contains($lc, 'купи') && !str_contains($lc, 'одес')) $tails[] = $lang === 'uk' ? ' — купити в Одесі' : ' — купить в Одессе';
+        if (!$this->mentionsStore($lc)) $tails[] = ' | ' . $this->store;
+        return $tails;
+    }
+
+    /**
+     * Хвосты короткого description (от полного к короткому): только части, которых ещё нет в тексте владельца —
+     * покупка (купить/покупайте), Одесса, доставка, магазин. Нет ни одной — прежние хвосты DESC_TAILS; текст уже о покупке
+     * оптом в Одессе («Купить оптом резиновую обувь. Одесса резиновые сапоги опт.») — « Доставка по Украине — интернет-магазин Tomobuv.»
+     */
+    private function descTails(string $s, string $lang): array
+    {
+        $uk = $lang === 'uk';
+        $lc = mb_strtolower($s);
+        $buy = !preg_match('/купи|купу|покуп/u', $lc);
+        $city = !str_contains($lc, 'одес');
+        $ship = !str_contains($lc, 'доставк');
+        $store = !$this->mentionsStore($lc);
+        if ($buy && $city && $ship && $store) {
+            return array_map(fn($t) => str_replace('{store}', $this->store, $t), self::DESC_TAILS[$uk ? 'uk' : 'ru']);
+        }
+        $phrase = match (true) {
+            $buy && $city && $ship => $uk ? 'Купити оптом ящиками в Одесі на 7 км або з доставкою по Україні' : 'Купить оптом ящиками в Одессе на 7 км или с доставкой по Украине',
+            $buy && $city          => $uk ? 'Купити оптом ящиками в Одесі на 7 км' : 'Купить оптом ящиками в Одессе на 7 км',
+            $buy && $ship          => $uk ? 'Купити оптом ящиками з доставкою по Україні' : 'Купить оптом ящиками с доставкой по Украине',
+            $buy                   => $uk ? 'Купити оптом ящиками' : 'Купить оптом ящиками',
+            $city && $ship         => $uk ? 'Опт ящиками в Одесі на 7 км і доставка по Україні' : 'Опт ящиками в Одессе на 7 км и доставка по Украине',
+            $city                  => $uk ? 'Опт ящиками в Одесі на 7 км' : 'Опт ящиками в Одессе на 7 км',
+            $ship                  => $uk ? 'Доставка по Україні' : 'Доставка по Украине',
+            default                => '',
+        };
+        $shop = ($uk ? 'інтернет-магазин ' : 'интернет-магазин ') . $this->store;
+        if ($phrase === '') return $store ? [' ' . mb_strtoupper(mb_substr($shop, 0, 1)) . mb_substr($shop, 1) . '.'] : [];
+        return $store ? [' ' . $phrase . ' — ' . $shop . '.', ' ' . $phrase . ' — ' . $this->store . '.', ' ' . $phrase . '.'] : [' ' . $phrase . '.'];
     }
 
     /**
@@ -615,9 +989,24 @@ final class SeoFix
     /** Названия городов и страны в своих текстах — с заглавной («одесса» → «Одесса», «україні» → «Україні») */
     private const PROPER = '/(?<!\p{L})(одесс[аеуыой]|одесой|одес[аіиу]|одесою|украин[аеуыой]|украиной|україн[аіиуою]|україною|киев[аеу]?|київ|києв[іу]?)(?!\p{L})/u';
 
-    /** Чистка своего текста: пробелы, повторы подряд (до 3 слов), заглавная буква, пробел после точки, «Одесса», «Украина» */
+    /**
+     * Чистка своего текста: строки через перевод строки — отдельные фразы («. » и заглавная буква, если перед переводом нет
+     * знака препинания: «…от производителя\nкожаная обувь…» → «…от производителя. Кожаная обувь…»), пробелы, повторы подряд
+     * (до 3 слов), заглавная буква, пробел после точки, «Одесса», «Украина»
+     */
     public static function clean(string $s): string
     {
+        $lines = preg_split('/\s*\R\s*/u', trim($s), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $s = '';
+        foreach ($lines as $line) {
+            if ($s !== '') {
+                $stop = preg_match('/[.!?…]$/u', $s);
+                if (!$stop && !preg_match('/[,;:—–\-]$/u', $s)) { $s .= '.'; $stop = true; }
+                if ($stop) $line = mb_strtoupper(mb_substr($line, 0, 1)) . mb_substr($line, 1);
+                $s .= ' ';
+            }
+            $s .= $line;
+        }
         $s = trim((string) preg_replace('/\s+/u', ' ', $s));
         do {
             $prev = $s;
@@ -673,7 +1062,7 @@ final class SeoFix
      * BrandController::seo, PageController::seo, BlogController::post); $r — строка на языке текущей версии (для /ua/ — с *_uk).
      * $when: before — шаблоны до запуска, after — после решения по шаблонам.
      */
-    private function auto(string $entity, array $r, string $when): array
+    private function auto(string $entity, array $r, string $when, ?string $only = null): array
     {
         $lang = Lang::current();
         $tpl = ($when === 'before' ? $this->tplBefore : $this->tplAfter)[$lang] ?? [];
@@ -682,7 +1071,9 @@ final class SeoFix
         switch ($entity) {
             case 'product':
                 $vars = SeoVars::product($r, SeoVars::productCategory($r)) + $st;
-                return ['title' => $b('seo.product_meta_title', $vars) ?: (string) $r['name'], 'desc' => $b('seo.product_meta_description', $vars)];
+                // $only — одно поле (поиск одинаковых title — без description)
+                return ['title' => $only === 'desc' ? '' : ($b('seo.product_meta_title', $vars) ?: (string) $r['name']),
+                        'desc'  => $only === 'title' ? '' : $b('seo.product_meta_description', $vars)];
             case 'category':
                 $on = (bool) ($this->raw['seo.category_is_enabled'] ?? 1);
                 $vars = SeoVars::category($r) + $st;

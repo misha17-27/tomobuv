@@ -67,7 +67,7 @@
         fails = 0;
         show(p);
         if (p.done) { note.textContent = 'Готово — обновляю страницу…'; setTimeout(function () { location.href = location.pathname; }, 600); return; }
-        setTimeout(tick, p.busy ? 3000 : 150);
+        setTimeout(tick, p.wait ? 5000 : (p.busy ? 3000 : 150));   // wait — идёт перестройка индекса каталога, порция отложена
       }).catch(function () {
         if (++fails <= 5) { note.textContent = 'Нет ответа сервера — повтор через 5 с (' + fails + ' из 5)…'; setTimeout(tick, 5000); return; }
         running = false; err.hidden = false; err.textContent = 'Связь с сервером прервалась. Нажмите «Продолжить» — запуск продолжится с того же места.';

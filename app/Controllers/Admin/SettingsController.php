@@ -66,12 +66,12 @@ final class SettingsController extends BaseController
         'home_page' => ['Главная страница', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords'],
             ['store_info.name', 'store_info.phone']],
         'category' => ['Категория', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords', 'h1' => 'H1'],
-            ['category.full_name', 'category.name', 'category.seo_name', 'category.product_count', 'store_info.name', 'store_info.phone']],
+            ['category.full_name', 'category.name', 'category.seo_name', 'category.root_name', 'category.product_count', 'store_info.name', 'store_info.phone']],
         'category_pagination' => ['Категория — страницы 2, 3, … (пагинация)', ['meta_title' => 'Title', 'meta_description' => 'Description', 'h1' => 'H1'],
             ['category.full_name', 'category.name', 'category.seo_name', 'page_number', 'store_info.name', 'store_info.phone']],
         'product' => ['Товар', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords', 'h1' => 'H1'],
             ['product.name', 'product.seo_name', 'product.format_price', 'product.box_qty', 'product.sizes', 'category.full_name', 'category.name', 'category.seo_name',
-             'store_info.name', 'store_info.phone']],
+             'category.root_name', 'store_info.name', 'store_info.phone']],
         'page' => ['Информационная страница', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords'],
             ['page.name', 'store_info.name', 'store_info.phone']],
         'brand' => ['Бренд', ['meta_title' => 'Title', 'meta_description' => 'Description', 'meta_keywords' => 'Keywords', 'h1' => 'H1'],
@@ -420,7 +420,8 @@ final class SettingsController extends BaseController
             + ($brand ? SeoVars::brand($uk ? Lang::localize($brand) : $brand) : []));
         return [
             'product'    => ['name' => $pName, 'seo_name' => $pick($p, 'seo_name') ?: $pName] + ($vars['product'] ?? []) + ['format_price' => price_format(250), 'box_qty' => '8', 'sizes' => '36-41'],
-            'category'   => ['name' => $cName, 'seo_name' => $pick($c, 'seo_name') ?: $cName] + ($vars['category'] ?? []) + ['full_name' => $cName, 'product_count' => '120'],
+            'category'   => ['name' => $cName, 'seo_name' => $pick($c, 'seo_name') ?: $cName] + ($vars['category'] ?? [])
+                + ['full_name' => $cName, 'root_name' => $uk ? 'Взуття' : 'Обувь', 'product_count' => '120'],
             'brand'      => ($vars['brand'] ?? []) + ['name' => 'Jong Golf', 'product_count' => '120'],
             'page'       => ['name' => $pick($page, 'name') ?: 'О компании'],
             'store_info' => ['name' => (string) ($all['store_name'] ?? 'Tomobuv'), 'phone' => (string) ($all['store_phone'] ?? '')],

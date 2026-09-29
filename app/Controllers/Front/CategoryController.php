@@ -18,7 +18,9 @@ use App\Services\SeoVars;
  * Страница категории /category/{url}/ — список товаров с фильтрами, сортировкой и пагинацией.
  * SEO — как на старом сайте (плагин SEO Webasyst): свои meta категории, иначе шаблоны seo.category_*
  * (переменные — App\Services\SeoVars, длина под норму — App\Core\Seo::pick),
- * на ?page=N — шаблоны seo.category_pagination_* и « | Страница N», canonical на первую страницу.
+ * на ?page=N — « | Страница N» к title и description первой страницы (как основная форма на старом сайте), canonical на первую
+ * страницу; шаблоны seo.category_pagination_* — только если включены (по умолчанию выключены: SeoFix), номер страницы в них
+ * уже есть — второго суффикса нет (Seo::pageSuffix).
  */
 final class CategoryController
 {

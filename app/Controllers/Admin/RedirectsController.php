@@ -9,6 +9,7 @@ use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Session;
+use App\Services\AdminCatalog;
 
 /**
  * Редиректы со старых адресов (срабатывают в ErrorController::notFound — только для адресов,
@@ -193,14 +194,21 @@ final class RedirectsController extends BaseController
     // ------------------------------------------------------------------ проверки (используются и другими разделами)
 
     /**
-     * Создать/обновить редирект (например, при смене адреса страницы). Возвращает текст для сообщения.
+     * Редирект при смене адреса страницы или статьи (PagesController, BlogController). Пара проверяется (check), 301 на
+     * адрес сайта пишется через AdminCatalog::addRedirect — как у товаров, категорий и брендов: без цепочек (A → B, потом
+     * B → C даёт A → C) и петель (редирект с нового адреса удаляется). Возвращает текст для сообщения.
      */
     public static function put(string $from, string $to, int $code = 301): string
     {
         $res = self::check($from, $to, $code);
         if (isset($res['error'])) return 'Редирект со старого адреса не создан: ' . $res['error'] . '.';
-        self::upsert([[$res['from'], $res['to'], $res['code']]]);
-        return 'Старый адрес ' . $res['from'] . ' перенаправляется на ' . $res['to'] . ' (301).';
+        if ($res['code'] === 301 && $res['toKey'] !== null) {
+            AdminCatalog::addRedirect($res['from'], $res['to']);
+            self::$map = null;                                          // цепочки переписаны — карта для проверки циклов заново
+        } else {
+            self::upsert([[$res['from'], $res['to'], $res['code']]]);
+        }
+        return 'Старый адрес ' . $res['from'] . ' перенаправляется на ' . $res['to'] . ' (' . $res['code'] . ').';
     }
 
     /**

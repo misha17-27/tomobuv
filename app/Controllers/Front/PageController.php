@@ -65,6 +65,19 @@ final class PageController
     }
 
     /**
+     * Основной адрес дубля: /pages/o-kompanii/ (страница приложения «Сайт» на старом сайте) → /o-kompanii/, если такая
+     * страница есть и включена; иначе null. $active — адреса включённых страниц (url => id), как urlMap().
+     * Этим же пользуется SEO-обзор (дубль с canonical не считается отдельной страницей в поиске).
+     */
+    public static function mainPath(string $url, array $active): ?string
+    {
+        $url = ltrim($url, '/');
+        if (!str_starts_with($url, 'pages/')) return null;
+        $main = self::slug($url);
+        return $main !== '' && isset($active[$main]) ? '/' . $main : null;
+    }
+
+    /**
      * SEO как на старом сайте: title = pages.title, иначе шаблон seo.page_meta_title
      * («{$page.name} | интернет-магазин {$store_info.name}»; на /ua/ — seo.page_meta_title.uk);
      * description — свой, иначе отрывок текста страницы (Seo::excerpt: первые связные абзацы, 120–160 символов),
@@ -84,9 +97,10 @@ final class PageController
         $seo = Seo::make($title !== '' ? $title : (string) $page['name'],
             $desc !== '' ? $desc : $pick('', 'seo.page_meta_description'),
             $pick($page['meta_keywords'], 'seo.page_meta_keywords'));
-        // canonical: заданный в админке (например, дубль /pages/… → основная страница), иначе сама страница.
-        // На старом сайте canonical не было — это улучшение; для /ua/ layout сам подставит украинский адрес.
+        // canonical: заданный в админке, иначе у дубля /pages/x/ — основная страница /x/ (та же страница магазина, см. mainPath),
+        // иначе сама страница. На старом сайте canonical не было — это улучшение; для /ua/ layout сам подставит украинский адрес.
         $canon = trim((string) $page['canonical']);
+        if ($canon === '') $canon = (string) self::mainPath($path, self::urlMap());
         $seo->canonical = $canon !== '' ? (preg_match('#^https?://#', $canon) ? $canon : url($canon)) : url('/' . $path);
         $seo->ogImage = self::ogImage((string) $page['content']);
         return $seo;

@@ -91,18 +91,39 @@ final class JongGolf
         return self::on('enabled') && self::cfg('api_key') !== '';
     }
 
-    /** Ключ для показа: «••••1a2b» (последние 4 символа) */
+    /** Ключ для показа: «ключ задан (64 символа)» — без единого символа самого ключа; не задан — '' */
     public static function keyHint(): string
     {
-        $k = self::cfg('api_key');
-        return $k === '' ? '' : '•••••••• ' . (strlen($k) > 8 ? substr($k, -4) : '');
+        $n = strlen(self::cfg('api_key'));
+        if ($n === 0) return '';
+        $w = $n % 10 === 1 && $n % 100 !== 11 ? 'символ' : ($n % 10 >= 2 && $n % 10 <= 4 && ($n % 100 < 12 || $n % 100 > 14) ? 'символа' : 'символов');
+        return 'ключ задан (' . $n . ' ' . $w . ')';
+    }
+
+    /**
+     * Записать ключ API ('' — удалить). Ключ приходит внутри массива и пишется запросом с параметрами-массивом:
+     * при ошибке базы в трассировке исключения (getTraceAsString при zend.exception_ignore_args = Off, журнал ошибок)
+     * будут «Array», а не первые 15 символов ключа, как у Settings::set('jonggolf.api_key', $key). Сообщение ошибки —
+     * без ключа, исходное исключение не прикладывается (в его трассировке — те же «Array», но его текст — от базы).
+     */
+    private static function storeKey(#[\SensitiveParameter] array $secret): void
+    {
+        try {
+            App::db()->upsert('settings', ['name' => 'jonggolf.api_key', 'value' => (string) ($secret['key'] ?? '')], ['value']);
+        } catch (\Throwable $e) {
+            $k = (string) ($secret['key'] ?? '');
+            $msg = $k !== '' ? str_replace([$k, rawurlencode($k)], '***', $e->getMessage()) : $e->getMessage();
+            throw new \RuntimeException('Ключ API не сохранён: ' . $msg);
+        }
+        Settings::reset();
+        Cache::flush();
     }
 
     /**
      * Сохранить настройки из формы. Ключ API: пустое поле — не менять, «-» — удалить.
      * @return array [ошибки по полям]
      */
-    public static function saveSettings(array $post): array
+    public static function saveSettings(#[\SensitiveParameter] array $post): array
     {
         $in = [];
         $err = [];
@@ -130,8 +151,8 @@ final class JongGolf
         foreach ($in as $k => $v) {
             if (($all['jonggolf.' . $k] ?? null) !== $v) Settings::set('jonggolf.' . $k, $v);
         }
-        if ($key === '-') Settings::set('jonggolf.api_key', '');
-        elseif ($key !== '') Settings::set('jonggolf.api_key', $key);
+        if ($key === '-') self::storeKey(['key' => '']);
+        elseif ($key !== '') self::storeKey(['key' => $key]);
         return [];
     }
 
@@ -186,10 +207,13 @@ final class JongGolf
      * Перенос настроек из wa_loader_jonggolf.cfg.php старого загрузчика. Файл НЕ выполняется — присваивания
      * «$имя=значение;» разбираются как текст. Логин и пароль старой админки, восстановление дерева категорий,
      * тип товаров и прочее, чего в новом сайте нет, не переносятся. Автозагрузка при переносе не включается.
+     * Принимает путь к файлу, а не его текст: в тексте — ключ API, а строковый аргумент функции, которая может бросить
+     * исключение (ошибка базы при записи), попал бы в трассировку (PHP 8.1 не знает #[\SensitiveParameter]).
      * @return array{0: array, 1: string[]} [перенесённые настройки => значение (ключ скрыт), не перенесённые переменные]
      */
-    public static function importOldConfig(string $php): array
+    public static function importOldConfig(string $path): array
     {
+        $php = (string) @file_get_contents($path);
         $vars = [];
         if (preg_match_all('/^\s*\$(\w+)\s*=\s*(\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|[^;]*?)\s*;/m', $php, $m, PREG_SET_ORDER)) {
             foreach ($m as $x) {
@@ -224,22 +248,40 @@ final class JongGolf
         }
         if (array_key_exists('s_category_allow_filter_bool', $vars)) $set['category_filter'] = $vars['s_category_allow_filter_bool'] === '1' ? 'always' : 'empty';
         $all = Settings::all();
-        foreach ($set as $k => $v) if (($all['jonggolf.' . $k] ?? null) !== $v) Settings::set('jonggolf.' . $k, $v);
+        foreach ($set as $k => $v) if ($k !== 'api_key' && ($all['jonggolf.' . $k] ?? null) !== $v) Settings::set('jonggolf.' . $k, $v);
+        if (isset($set['api_key']) && ($all['jonggolf.api_key'] ?? null) !== $set['api_key']) self::storeKey(['key' => $set['api_key']]);   // ключ — не аргументом-строкой
         $skipped = array_values(array_merge(array_diff(array_keys($vars), array_keys($map), ['s_category_allow_filter_bool']),
             array_map(static fn($m) => $m . ' (шаблон «{name}» — на сайте SEO-шаблоны)', $machine)));
         if (isset($set['api_key'])) $set['api_key'] = '(задан)';
         return [$set, $skipped];
     }
 
-    /** Список строк настройки (производители, категории): по строке на значение, «/r/n» тоже разделитель */
+    /**
+     * Список строк настройки (производители, категории): по строке на значение, «/r/n» тоже разделитель.
+     * Ключ — нормализованное имя (HTML-сущности раскодированы до конца: «J&amp;amp;G» из старого cfg = «J&G» поставщика)
+     */
     public static function lines(string $k): array
     {
         $out = [];
         foreach (preg_split('~\r\n|\n|/r/n~', self::cfg($k)) ?: [] as $l) {
-            $l = trim($l);
+            $l = self::name($l);
             if ($l !== '') $out[JongGolfMap::norm($l)] = $l;
         }
         return $out;
+    }
+
+    /**
+     * Название из API поставщика (бренд, значение характеристики): HTML-сущности раскодированы до стабильного
+     * результата (поставщик экранирует многократно: «J&amp;amp;amp;G» → «J&G»), пробелы схлопнуты, края обрезаны
+     */
+    public static function name(string $s): string
+    {
+        for ($i = 0; $i < 10 && str_contains($s, '&'); $i++) {
+            $d = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($d === $s) break;
+            $s = $d;
+        }
+        return trim(preg_replace('/\s+/u', ' ', $s) ?? $s);          // null — не UTF-8: как есть
     }
 
     // ================================================================== схема и связи
@@ -373,7 +415,8 @@ final class JongGolf
                     . ', без изменений ' . $p['stats']['same'] . ', скрыто ' . ($p['stats']['hidden_color'] + $p['stats']['hidden_missing']) . ', пропущено ' . $p['stats']['skipped'];
                 if ($line !== $lastLine) { $say($line); $lastLine = $line; }
                 if (!empty($p['done'])) break;
-                if (!empty($p['busy'])) sleep(3);
+                if (!empty($p['wait'])) sleep(5);                           // идёт перестройка индекса каталога
+                elseif (!empty($p['busy'])) sleep(3);
                 if (microtime(true) - $t0 > $maxTime) { $say('Время вышло — продолжение при следующем запуске'); break; }
             }
         }, 30);
@@ -458,7 +501,7 @@ final class JongGolf
             if (!$files) throw new \RuntimeException('Нет файла с товарами поставщика для прогона.');
         }
         $db = App::db();
-        $api = new JongGolfApi(self::cfg('api_key'), $kind === 'run' && $src === 'api');
+        $api = new JongGolfApi($kind === 'run' && $src === 'api');
         $callback = $kind === 'run' && $src === 'api' && $api->canChangeQueue();
         $state = [
             'phase' => 'dict', 'page' => 0, 'pos' => 0, 'files' => 0, 'complete' => false,
@@ -519,12 +562,13 @@ final class JongGolf
                 self::advance($run, $deadline);
             } catch (\Throwable $e) {
                 $msg = $e instanceof JongGolfError || $e instanceof \RuntimeException ? $e->getMessage() : 'Ошибка: ' . $e->getMessage();
-                $msg = (new JongGolfApi(self::cfg('api_key')))->mask($msg);
+                $msg = (new JongGolfApi())->mask($msg);
                 if (!$e instanceof JongGolfError) Log::error('supplier jonggolf run #' . $id . ': ' . $msg . ' @ ' . $e->getFile() . ':' . $e->getLine());
                 $run['stats']['errors']++;
                 self::log($id, 'error', 'Работа завершена аварийно: ' . $msg);
                 self::save($run);
-                self::finishRun($id, 'error', mb_substr($msg, 0, 1000));
+                self::finishRun($id, 'error', mb_substr($msg, 0, 1000));   // остановленный во время шага — остаётся «Остановлен»
+                self::dropPhotoCache($id);
             } finally {
                 self::flushLog();
             }
@@ -534,19 +578,47 @@ final class JongGolf
         return self::progress($res);
     }
 
-    /** Остановить запуск (кнопка «Остановить»): текущая страница поставщику не подтверждается */
-    public static function stop(int $id): void
+    /**
+     * Остановить запуск (кнопка «Остановить»): текущая страница поставщику не подтверждается.
+     * Атомарно: статус «Остановлен» ставится одним условным UPDATE (… AND status = 'running') под блокировкой запусков,
+     * если её удалось взять за 3 с (шага нет). Идёт шаг (другая вкладка, cron/CLI держит блокировку весь прогон) — тот же
+     * условный UPDATE без блокировки: шаг проверяет статус перед каждой порцией, подтверждением страницы и завершением
+     * (stopped()), а свой итоговый статус пишет тоже только поверх «Идёт» (finishRun) — «Готово» или «Ошибка» не
+     * перезапишут «Остановлен». Уже начатая порция (одна транзакция) дописывается целиком. @return bool остановлен сейчас
+     */
+    public static function stop(int $id): bool
     {
         $run = self::run($id);
-        if (!$run || $run['status'] !== 'running') return;
-        self::log($id, 'warn', 'Остановлен вручную' . ($run['state']['callback'] ? ' — текущая страница поставщику не подтверждена, её товары придут снова' : ''));
-        self::flushLog();
-        self::finishRun($id, 'stopped', 'остановлен вручную');
+        if (!$run || $run['status'] !== 'running') return false;
+        $done = false;
+        $write = static function (bool $locked) use ($id, $run, &$done): void {
+            $done = self::finishRun($id, 'stopped', 'остановлен вручную');
+            if (!$done) return;                                             // шаг успел закончить запуск сам
+            self::log($id, 'warn', 'Остановлен вручную' . (!empty($run['state']['callback']) ? ' — текущая страница поставщику не подтверждена, её товары придут снова' : ''));
+            self::flushLog();
+            if ($locked) self::dropPhotoCache($id);                         // идущий шаг уберёт их сам, заметив остановку
+        };
+        if (!self::withLock(static fn() => $write(true), 3)) $write(false);
+        return $done;
     }
 
-    private static function finishRun(int $id, string $status, ?string $error = null): void
+    /** Запуск больше не «Идёт» (остановлен кнопкой или новым запуском) — шаг прекращает работу, ничего не дописывая */
+    private static function stopped(int $id): bool
     {
-        App::db()->update('supplier_runs', ['status' => $status, 'error' => $error, 'finished_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
+        return (string) App::db()->value('SELECT status FROM supplier_runs WHERE id = ?', [$id]) !== 'running';
+    }
+
+    /** Итоговый статус — только поверх «Идёт» (см. stop). @return bool записан */
+    private static function finishRun(int $id, string $status, ?string $error = null): bool
+    {
+        return App::db()->update('supplier_runs', ['status' => $status, 'error' => $error, 'finished_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
+            "id = ? AND status = 'running'", [$id]) > 0;
+    }
+
+    /** Фото, скачанные для отложенной порции (JongGolfSync, photo-*.jpg в папке запуска), — запуск закончен, не нужны */
+    private static function dropPhotoCache(int $id): void
+    {
+        foreach (glob(Importer::dir() . '/' . self::CODE . '/runs/' . $id . '/photo-*.jpg') ?: [] as $f) @unlink($f);
     }
 
     private static function save(array $run): void
@@ -561,8 +633,15 @@ final class JongGolf
         $id = (int) $run['id'];
         $st = &$run['state'];
         $dry = $run['kind'] === 'dry';
-        $api = new JongGolfApi(self::cfg('api_key'), $run['kind'] === 'run' && $run['src'] === 'api');
+        $api = new JongGolfApi($run['kind'] === 'run' && $run['src'] === 'api');
+        unset($st['wait']);
         while (microtime(true) < $deadline) {
+            // остановлен во время шага (stop) — ни порций, ни подтверждения поставщику, ни скрытия отсутствующих, ни статуса
+            if (self::stopped($id)) {
+                self::save($run);
+                self::dropPhotoCache($id);
+                return;
+            }
             switch ($st['phase']) {
                 case 'dict':
                     $dict = self::loadDictionary($run, $api);
@@ -628,11 +707,22 @@ final class JongGolf
                     $dict = self::loadDictionary($run, $api);
                     $sync = new JongGolfSync($id, $dict['answer'], $dry, $run['stats']);
                     $left = $st['limit'] !== null ? max(0, (int) $st['limit'] - (int) $run['stats']['products']) : null;
-                    $st['pos'] = $sync->process($list, (int) $st['pos'], $deadline, $left, static function (int $pos) use (&$run, &$st): void {
+                    $st['pos'] = $sync->process($list, (int) $st['pos'], $deadline, $left, static function (int $pos) use (&$run, &$st, $id): bool {
                         $st['pos'] = $pos;
                         self::save($run);
                         self::flushLog();
+                        return !self::stopped($id);                          // остановлен — следующую порцию не начинать
                     });
+                    if ($sync->deferred()) {
+                        // идёт полная перестройка индекса каталога: порция не записана (фото, если их успели скачать, лежат
+                        // в папке запуска — повтор их не качает); шаг заканчивается, следующий — через 5 с (progress: wait)
+                        if (empty($st['waits'])) self::log($id, 'info', 'Идёт перестройка индекса каталога — запись порции отложена до её окончания');
+                        $st['waits'] = (int) ($st['waits'] ?? 0) + 1;
+                        $st['wait'] = 1;
+                        self::save($run);
+                        self::flushLog();
+                        return;
+                    }
                     if ($st['limit'] !== null && (int) $run['stats']['products'] >= (int) $st['limit']) {
                         self::log($id, 'info', 'Достигнут лимит ' . $st['limit'] . ' товаров — остальное не обрабатывается, скрытие отсутствующих не выполняется');
                         $st['phase'] = 'finish';
@@ -661,7 +751,7 @@ final class JongGolf
 
                 case 'finish':
                     $sync = new JongGolfSync($id, [], $dry, $run['stats']);
-                    $sync->finish(!empty($st['complete']));
+                    $sync->finish(!empty($st['complete']), static fn(): bool => !self::stopped($id));
                     $s = $run['stats'];
                     self::log($id, 'info', '==========');
                     self::log($id, 'info', ($dry ? 'Будет добавлено: ' : 'Количество добавленных товаров: ') . $s['created']);
@@ -670,8 +760,9 @@ final class JongGolf
                     self::log($id, 'info', 'Пропущено цветов: ' . $s['skipped'] . self::skipText($s['skip']));
                     self::log($id, 'info', 'Работа завершена ' . date('d.m.Y H:i:s'));
                     self::save($run);
-                    self::finishRun($id, 'done');
+                    if (!self::finishRun($id, 'done')) self::log($id, 'warn', 'Запуск остановлен во время завершения — статус «Остановлен» сохранён');
                     self::flushLog();
+                    self::dropPhotoCache($id);
                     self::cleanup();
                     return;
             }
@@ -727,7 +818,7 @@ final class JongGolf
         $db = App::db();
         $id = $db->insert('supplier_runs', ['supplier' => self::CODE, 'kind' => 'test', 'src' => 'api', 'origin' => $origin, 'status' => 'running',
             'user_id' => $userId ?: null, 'stats' => '{}', 'state' => '{}', 'started_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
-        $api = new JongGolfApi(self::cfg('api_key'));
+        $api = new JongGolfApi();
         $t = microtime(true);
         try {
             $d = $api->dictionary();
@@ -765,8 +856,10 @@ final class JongGolf
             default => self::STATUSES[$run['status']] ?? $run['status'],
         };
         $pct = ($st['phase'] ?? '') === 'items' && !empty($st['count']) ? (int) floor((int) $st['pos'] / (int) $st['count'] * 100) : ($run['status'] === 'running' ? 0 : 100);
+        $wait = $run['status'] === 'running' && !empty($st['wait']);      // порция отложена: перестройка индекса — следующий шаг через 5 с
+        if ($wait) $label .= ' — ждёт окончания перестройки индекса каталога';
         return ['ok' => $run['status'] !== 'error', 'id' => (int) $run['id'], 'status' => $run['status'], 'kind' => $run['kind'], 'label' => $label,
-            'percent' => $pct, 'page' => (int) ($st['page'] ?? 0), 'done' => $run['status'] !== 'running', 'error' => $run['error'], 'stats' => $run['stats']];
+            'percent' => $pct, 'page' => (int) ($st['page'] ?? 0), 'done' => $run['status'] !== 'running', 'wait' => $wait, 'error' => $run['error'], 'stats' => $run['stats']];
     }
 
     /** «: нет в наличии у поставщика 12, категория не сопоставлена 3…» */

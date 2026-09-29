@@ -8,7 +8,8 @@
  *   php bin/i18n-seed-uk.php products   — только один шаг
  *   php bin/i18n-seed-uk.php --force    — перезаписать и то, что уже переведено вручную в админке
  *
- * Без --force заполняются только пустые *_uk (ручные правки в админке не затираются).
+ * Без --force заполняются только пустые *_uk (ручные правки в админке не затираются). Пустыми считаются и SEO-поля *_uk,
+ * которые перенос заполнил сам по русскому тексту, пока перевода не было (SeoFix::autoFilledUk), — их заменяет перевод.
  * В конце — SEO-стандарт title/description (App\Services\SeoFix, как php bin/seo-autofix.php; «seo» — только он).
  */
 declare(strict_types=1);
@@ -17,6 +18,7 @@ require __DIR__ . '/../app/bootstrap.php';
 use App\Core\App;
 use App\Core\Cache;
 use App\Services\ProductName;
+use App\Services\SeoFix;
 
 ini_set('memory_limit', '1024M');
 if (function_exists('set_time_limit')) set_time_limit(0);
@@ -32,14 +34,14 @@ $data = static function (string $name) use ($dir): array {
     $f = "$dir/$name.php";
     return is_file($f) ? (array) include $f : [];
 };
-/** UPDATE только пустых колонок (или всех при --force) */
-$setCols = static function (string $table, string $where, array $params, array $cols) use ($db, $force): int {
+/** UPDATE только пустых колонок (или всех при --force); $auto — [колонка => true], заполненные автоисправлением без перевода */
+$setCols = static function (string $table, string $where, array $params, array $cols, array $auto = []) use ($db, $force): int {
     $cols = array_filter($cols, static fn($v) => $v !== null && $v !== '');
     if (!$cols) return 0;
     $set = [];
     $vals = [];
     foreach ($cols as $c => $v) {
-        $set[] = $force ? "`$c` = ?" : "`$c` = IF(`$c` IS NULL OR `$c` = '', ?, `$c`)";
+        $set[] = ($force || isset($auto[$c])) ? "`$c` = ?" : "`$c` = IF(`$c` IS NULL OR `$c` = '', ?, `$c`)";
         $vals[] = $v;
     }
     return $db->query("UPDATE `$table` SET " . implode(', ', $set) . " WHERE $where", array_merge($vals, $params))->rowCount();
@@ -99,19 +101,24 @@ $steps['settings'] = function () use ($db, $data, $force, $say) {
 
 $steps['categories'] = function () use ($data, $setCols, $say) {
     $n = 0;
-    foreach ($data('categories') as $id => $f) $n += $setCols('categories', 'id = ?', [(int) $id], $f);
+    $auto = SeoFix::autoFilledUk('category');
+    foreach ($data('categories') as $id => $f) $n += $setCols('categories', 'id = ?', [(int) $id], $f, $auto[(int) $id] ?? []);
     $say("Категории: $n");
 };
 
-$steps['pages'] = function () use ($data, $setCols, $say) {
+$steps['pages'] = function () use ($db, $data, $setCols, $say) {
     $n = 0;
-    foreach ($data('pages') as $url => $f) $n += $setCols('pages', 'url = ?', [(string) $url], $f);
+    $auto = SeoFix::autoFilledUk('page');
+    $ids = $auto ? $db->pairs('SELECT url, id FROM pages') : [];
+    foreach ($data('pages') as $url => $f) $n += $setCols('pages', 'url = ?', [(string) $url], $f, $auto[(int) ($ids[$url] ?? 0)] ?? []);
     $say("Страницы: $n");
 };
 
-$steps['blog'] = function () use ($data, $setCols, $say) {
+$steps['blog'] = function () use ($db, $data, $setCols, $say) {
     $n = 0;
-    foreach ($data('blog') as $url => $f) $n += $setCols('blog_posts', 'url = ?', [(string) $url], $f);
+    $auto = SeoFix::autoFilledUk('blog');
+    $ids = $auto ? $db->pairs('SELECT url, id FROM blog_posts') : [];
+    foreach ($data('blog') as $url => $f) $n += $setCols('blog_posts', 'url = ?', [(string) $url], $f, $auto[(int) ($ids[$url] ?? 0)] ?? []);
     $say("Статьи: $n");
 };
 
@@ -123,7 +130,8 @@ $steps['banners'] = function () use ($data, $setCols, $say) {
 
 $steps['brands'] = function () use ($db, $data, $setCols, $force, $say) {
     $n = 0;
-    foreach ($data('brands') as $id => $f) $n += $setCols('brands', 'id = ?', [(int) $id], $f);
+    $auto = SeoFix::autoFilledUk('brand');
+    foreach ($data('brands') as $id => $f) $n += $setCols('brands', 'id = ?', [(int) $id], $f, $auto[(int) $id] ?? []);
     // название бренда — это и значение характеристики «Бренд» (id совпадают): фильтр и характеристики товара на /ua/
     $v = 0;
     $bf = (int) $db->value("SELECT id FROM features WHERE code = 'brand'");
@@ -151,6 +159,7 @@ $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
     // Названия и мета товаров: перевод типовых слов (Кроссовки → Кросівки) + шаблоны старого сайта
     $last = 0; $upd = 0;
     ProductName::reset();                     // категории и бренды — с name_uk из шагов выше
+    $auto = SeoFix::autoFilledUk('product');  // title/description *_uk, которые перенос заполнил по русскому тексту, — как пустые
     while (true) {
         $rows = $db->all('SELECT id, name, sku, category_id, brand_id, meta_title, meta_description, meta_keywords, name_uk, meta_title_uk, meta_description_uk, meta_keywords_uk
             FROM products WHERE id > ? ORDER BY id LIMIT 3000', [$last]);
@@ -165,11 +174,12 @@ $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
             $new = [];
             if ($nameUk !== $p['name'] && ($force || !$p['name_uk'])) $new['name_uk'] = $nameUk;
             $n = $new['name_uk'] ?? ($p['name_uk'] ?: $nameUk);
-            if ($p['meta_title'] !== null && ($force || !$p['meta_title_uk'])) {
+            $autoUk = $auto[(int) $p['id']] ?? [];
+            if ($p['meta_title'] !== null && ($force || !$p['meta_title_uk'] || isset($autoUk['meta_title_uk']))) {
                 $mt = trim((string) $p['meta_title']) === trim((string) $p['name']) ? $n : $trWords($p['meta_title']);
                 if ($mt !== $p['meta_title']) $new['meta_title_uk'] = $mt;
             }
-            if ($p['meta_description'] !== null && ($force || !$p['meta_description_uk'])) {
+            if ($p['meta_description'] !== null && ($force || !$p['meta_description_uk'] || isset($autoUk['meta_description_uk']))) {
                 $md = preg_match('/^\s*купить\s+(.+?)\s+в\s+Одессе\s*$/u', (string) $p['meta_description'])
                     ? 'купити ' . $n . ' в Одесі' : $trWords($p['meta_description']);
                 if ($md !== $p['meta_description']) $new['meta_description_uk'] = $md;

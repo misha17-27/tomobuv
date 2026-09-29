@@ -302,10 +302,15 @@ final class SeoAudit
             'uk' => [self::filled($raw['seo.home_page_meta_title.uk'] ?? ''), self::filled($raw['seo.home_page_meta_description.uk'] ?? '')],
             'tpl' => ['site_title', '']]);
 
-        foreach ($db->all('SELECT id, url, name, name_uk, title, title_uk, meta_description, meta_description_uk, status, canonical, content, content_uk FROM pages ORDER BY (url LIKE \'pages/%\'), sort, id') as $p) {
+        $pages = $db->all('SELECT id, url, name, name_uk, title, title_uk, meta_description, meta_description_uk, status, canonical, content, content_uk FROM pages ORDER BY (url LIKE \'pages/%\'), sort, id');
+        $active = [];
+        foreach ($pages as $p) if ((int) $p['status']) $active[(string) $p['url']] = (int) $p['id'];
+        foreach ($pages as $p) {
             $path = '/' . $p['url'];
             ['title' => $autoTitle, 'desc' => $autoDesc] = self::auto('page', $p);
+            // canonical — как Front\PageController::seo: свой, иначе у дубля /pages/x/ — основная страница /x/
             $canon = trim((string) $p['canonical']);
+            if ($canon === '') $canon = (string) \App\Controllers\Front\PageController::mainPath((string) $p['url'], $active);
             $canonPath = $canon !== '' ? (string) (parse_url($canon, PHP_URL_PATH) ?? '') : '';
             $closed = !(int) $p['status'] ? 'скрыта'
                 : ($canon !== '' && rtrim($canonPath, '/') !== rtrim($path, '/') ? 'canonical → ' . $canon : $closedBy($path));
@@ -386,17 +391,29 @@ final class SeoAudit
 
     // ======================================================================= товары
 
+    /**
+     * Колонка без пробельных символов по краям — как trim() в PHP (state(), listCells(), витрина): TRIM() в SQL снимает
+     * только пробелы, поэтому табуляция, переводы строк и \v сначала заменяются пробелом (длина от этого не меняется —
+     * символ на символ). Иначе значение «\n» или с переводом строки в конце в SQL не пустое и на 1–2 символа длиннее,
+     * чем в PHP: фильтр списка и итоги расходились с точками. Символы — литералами в кавычках (без экранирования и CHAR(),
+     * который дал бы двоичную строку и длину в байтах).
+     */
+    public static function sqlTrim(string $c): string
+    {
+        return "TRIM(REPLACE(REPLACE(REPLACE(REPLACE($c, '\t', ' '), '\n', ' '), '\r', ' '), '\v', ' '))";
+    }
+
     /** Условия для SQL: пусто / неверная длина (пороги — целые константы класса) */
     private static function sql(): array
     {
-        $mt = self::col('meta_title');
-        $md = self::col('meta_description');
-        $t = "CHAR_LENGTH(TRIM($mt))";
-        $d = "CHAR_LENGTH(TRIM($md))";
+        $mt = self::sqlTrim(self::col('meta_title'));
+        $md = self::sqlTrim(self::col('meta_description'));
+        $t = "CHAR_LENGTH($mt)";
+        $d = "CHAR_LENGTH($md)";
         return [
-            't_empty' => "($mt IS NULL OR TRIM($mt) = '')",
+            't_empty' => "($mt IS NULL OR $mt = '')",
             't_warn'  => "($t BETWEEN 1 AND " . (self::TITLE_MIN - 1) . " OR $t > " . self::TITLE_MAX . ')',
-            'd_empty' => "($md IS NULL OR TRIM($md) = '')",
+            'd_empty' => "($md IS NULL OR $md = '')",
             'd_warn'  => "($d BETWEEN 1 AND " . (self::DESC_MIN - 1) . " OR $d > " . self::DESC_MAX . ')',
         ];
     }
@@ -406,14 +423,14 @@ final class SeoAudit
      * и раскладывается по корзинам INTERVAL (0 — пусто, 1 — короче минимума, 2 — норма, 3 — длиннее максимума),
      * дальше GROUP BY на несколько десятков групп (быстрее, чем SUM(CASE …) с повтором выражений; ~0,24 с на 107 тыс., из них ~0,05 с — TRIM).
      * Украинская версия видит meta_*_uk, если заполнено, иначе русское — корзина «uk» = корзина *_uk, а при 0 — русская.
-     * Длина — по TRIM(), как в условиях списка (sql()) и как на витрине: иначе значение с пробелами по краям попадало
+     * Длина — по sqlTrim() (как trim() в PHP), как в условиях списка (sql()) и как на витрине: иначе значение с пробелами по краям попадало
      * в итогах в одну корзину, а в списке — в другую, и дальние страницы отфильтрованного списка съезжали.
      * Возвращает ['ru' => итоги, 'uk' => итоги, 'cover' => покрытие переводов (только товары на сайте)].
      */
     private static function productStats(?string $extraWhere = null, array $params = []): array
     {
-        // без COALESCE: NULL даёт -1, пустая (после TRIM) строка — 0, обе — «пусто»
-        $b = static fn(string $c, int $min, int $max): string => "INTERVAL(CHAR_LENGTH(TRIM($c)), 1, $min, " . ($max + 1) . ')';
+        // без COALESCE: NULL даёт -1, пустая (после trim, sqlTrim) строка — 0, обе — «пусто»
+        $b = static fn(string $c, int $min, int $max): string => 'INTERVAL(CHAR_LENGTH(' . self::sqlTrim($c) . "), 1, $min, " . ($max + 1) . ')';
         $rows = App::db()->all('SELECT status = 1 AS live, '
             . $b('meta_title', self::TITLE_MIN, self::TITLE_MAX) . ' AS t, '
             . $b('meta_description', self::DESC_MIN, self::DESC_MAX) . ' AS d, '
@@ -689,15 +706,15 @@ final class SeoAudit
     }
 
     /**
-     * Условие SQL фильтра ?seo= (пороги — как у state(), длина — по TRIM, как в sql()); '' — без условия.
+     * Условие SQL фильтра ?seo= (пороги — как у state(), длина — по sqlTrim, как в sql()); '' — без условия.
      * $t, $d — колонки своих title/description из кода вызывающего ('p.meta_title'), не из запроса.
-     * Длина — корзинами INTERVAL, как в productStats (TRIM один раз на колонку: 1 — короче минимума, 3 — длиннее максимума;
+     * Длина — корзинами INTERVAL, как в productStats (sqlTrim один раз на колонку: 1 — короче минимума, 3 — длиннее максимума;
      * NULL → -1, пусто → 0). У товаров без индекса: COUNT по 107 тыс. — ~0,1 с, «без своего title» — ~0,05 с.
      */
     public static function listWhere(string $filter, string $t, string $d): string
     {
-        $empty = static fn(string $c): string => "($c IS NULL OR TRIM($c) = '')";
-        $warn = static fn(string $c, int $min, int $max): string => "INTERVAL(CHAR_LENGTH(TRIM($c)), 1, $min, " . ($max + 1) . ') IN (1, 3)';
+        $empty = static fn(string $c): string => "($c IS NULL OR " . self::sqlTrim($c) . " = '')";
+        $warn = static fn(string $c, int $min, int $max): string => 'INTERVAL(CHAR_LENGTH(' . self::sqlTrim($c) . "), 1, $min, " . ($max + 1) . ') IN (1, 3)';
         return match ($filter) {
             'notitle' => $empty($t),
             'nodesc'  => $empty($d),
@@ -927,8 +944,8 @@ final class SeoAudit
             foreach ($items as [$field, $key, $vars, $kind, $used]) {
                 $tpl = trim((string) Settings::get($key, ''));
                 $res = $tpl !== '' ? Seo::pick('', $key, $vars) : '';
-                // страницы 2, 3… категории: витрина дописывает « | Страница N» и к результату шаблона (Seo::paginate)
-                if ($res !== '' && isset($vars['page_number'])) $res .= ' | ' . t('Страница') . ' ' . $vars['page_number'];
+                // страницы 2, 3… категории: витрина дописывает « | Страница N» и к результату шаблона, если номера в нём нет (Seo::paginate)
+                if ($res !== '' && isset($vars['page_number'])) $res = Seo::pageSuffix($res, (int) $vars['page_number']);
                 $out[] = ['where' => $where, 'field' => $field, 'key' => $key, 'tpl' => $tpl, 'result' => $res, 'used' => $used,
                     'len' => mb_strlen($res), 'state' => $kind !== '' ? self::lengthState($res, $kind) : ($res !== '' ? 'ok' : 'none'), 'kind' => $kind];
             }
