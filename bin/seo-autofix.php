@@ -4,7 +4,9 @@
  *
  *   php bin/seo-autofix.php --dry-run            — показать «было → стало» и итоги по группам, ничего не менять
  *   php bin/seo-autofix.php                      — применить (новый пакет в журнале seo_fix_batches / seo_fix_log)
- *   php bin/seo-autofix.php --revert=N           — откатить пакет N (значения, изменённые после пакета, пропускаются)
+ *   php bin/seo-autofix.php --revert=N           — откатить пакет N (значения, изменённые после пакета, пропускаются);
+ *                                                  пакеты — от последнего к первому: если более поздний неоткаченный пакет
+ *                                                  менял те же поля, откат отклоняется («сначала откатите №…»), флага «всё равно» нет
  *   php bin/seo-autofix.php --list               — пакеты
  * Дополнительно: --part=settings,products,categories,brands,pages,blog — только эти части;
  *   --limit=N — сколько строк «было → стало» печатать на группу (по умолчанию 40, 0 — все); --quiet — только итоги.
@@ -31,8 +33,10 @@ if (!SeoFix::hasTables()) {
 
 if (isset($opt['list'])) {
     foreach (SeoFix::batches(50) as $b) {
+        $later = $b['reverted_at'] ? [] : SeoFix::laterOverlaps((int) $b['id']);   // откат — только после этих пакетов
         printf("№%-4d %s  %-6s  изменений %7s  части: %s%s\n", $b['id'], $b['created_at'], $b['source'], $fmt($b['changes']), $b['parts'],
-            $b['reverted_at'] ? '  — откачен ' . $b['reverted_at'] . ' (возвращено ' . $fmt($b['revert']['restored'] ?? 0) . ', пропущено ' . $fmt($b['revert']['skipped'] ?? 0) . ')' : '');
+            $b['reverted_at'] ? '  — откачен ' . $b['reverted_at'] . ' (возвращено ' . $fmt($b['revert']['restored'] ?? 0) . ', пропущено ' . $fmt($b['revert']['skipped'] ?? 0) . ')'
+            : ($later ? '  — откат после №' . implode(', №', array_reverse(array_keys($later))) : ''));
     }
     exit(0);
 }

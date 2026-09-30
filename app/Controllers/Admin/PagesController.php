@@ -186,12 +186,13 @@ final class PagesController extends BaseController
         $page = $db->row('SELECT id, url, name FROM pages WHERE id = ?', [(int) $id]);
         if (!$page) return $this->notFoundPage();
         $db->delete('pages', 'id = ?', [(int) $page['id']]);
+        // редиректы, которые вели на эту страницу, вели бы на 404 — убираем, как у товара, категории и бренда
+        // (AdminCatalog::dropRedirectsTo: в любом написании — «/x/», «/x», %XX, /ua, ?…, #…). Дубль /pages/x/ — своя строка pages, не трогаем.
+        $dropped = AdminCatalog::dropRedirectsTo(['/' . $page['url']]);
         Cache::flush();
-        $this->log('page_delete', 'page', (int) $page['id'], ['url' => $page['url'], 'name' => $page['name']]);
+        $this->log('page_delete', 'page', (int) $page['id'], ['url' => $page['url'], 'name' => $page['name'], 'redirects_dropped' => $dropped]);
         $msg = 'Страница «' . $page['name'] . '» удалена. Чтобы адрес /' . $page['url'] . ' не отдавал 404, добавьте редирект.';
-        // редиректы, которые вели на эту страницу, теперь ведут на 404
-        $to = (int) $db->value('SELECT COUNT(*) FROM redirects WHERE to_url = ?', ['/' . $page['url']]);
-        if ($to) $msg .= ' Внимание: на этот адрес ведут редиректы (' . $to . ') — измените их в разделе «Редиректы».';
+        if ($dropped) $msg .= ' Удалены редиректы, которые вели на эту страницу: ' . $dropped . '.';
         $this->flash($msg);
         return Response::redirect('/admin/pages/');
     }

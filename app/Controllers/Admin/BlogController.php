@@ -156,9 +156,12 @@ final class BlogController extends BaseController
         $post = $db->row('SELECT id, url, title FROM blog_posts WHERE id = ?', [(int) $id]);
         if (!$post) return $this->missing();
         $db->delete('blog_posts', 'id = ?', [(int) $post['id']]);
+        // редиректы, которые вели на статью, вели бы на 404 — убираем, как у страницы, товара, категории и бренда
+        $dropped = AdminCatalog::dropRedirectsTo(['/blog/' . $post['url'] . '/']);
         Cache::flush();
-        $this->log('blog_delete', 'blog_post', (int) $post['id'], ['url' => $post['url'], 'title' => $post['title']]);
-        $this->flash('Статья «' . $post['title'] . '» удалена.');
+        $this->log('blog_delete', 'blog_post', (int) $post['id'], ['url' => $post['url'], 'title' => $post['title'], 'redirects_dropped' => $dropped]);
+        $this->flash('Статья «' . $post['title'] . '» удалена. Чтобы адрес /blog/' . $post['url'] . '/ не отдавал 404, добавьте редирект.'
+            . ($dropped ? ' Удалены редиректы, которые вели на эту статью: ' . $dropped . '.' : ''));
         return Response::redirect('/admin/blog/');
     }
 

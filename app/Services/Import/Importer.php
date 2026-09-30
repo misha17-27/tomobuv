@@ -8,6 +8,7 @@ use App\Core\Cache;
 use App\Core\Image;
 use App\Core\Log;
 use App\Core\Str;
+use App\Services\AdminCatalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
 use App\Services\ProductName;
@@ -1341,7 +1342,10 @@ final class Importer
             foreach (self::TEXT_COLS as $c => $_) if ($c !== 'name_uk' && ($f[$c] ?? '') !== '') $set($c, $f[$c]);
             foreach (['box_qty', 'min_qty', 'status'] as $c) if (isset($f[$c])) $set($c, $f[$c], 'i');
             if ($newUrl === false) $it['warn'][] = 'адрес «' . $f['url'] . '» занят другим товаром — не изменён';
-            elseif (is_string($newUrl)) $set('url', $newUrl);
+            elseif (is_string($newUrl)) {
+                $set('url', $newUrl);
+                if (isset($upd['url'])) $changes[count($changes) - 1] .= ' (301 со старого)';   // редирект пишет apply
+            }
             $supplier = ($f['supplier'] ?? '') !== '' ? $f['supplier'] : (trim((string) $opt['supplier']) !== '' && trim((string) $ex['supplier']) === '' ? trim((string) $opt['supplier']) : null);
             if ($supplier !== null) $set('supplier', $supplier);
             if (($f['brand'] ?? '') !== '') {
@@ -1518,6 +1522,15 @@ final class Importer
             $upd[(int) $it['id']] = $u + ['updated_at' => $now];
         }
         self::bulkUpdate($upd);
+        // смена адреса (колонка «Адрес» — прайс поставщика или своя выгрузка): 301 со старого, как в админке —
+        // AdminCatalog::addRedirects, без цепочек и петель; путь без /ua — на /ua/ редирект тот же (/ua/старый → /ua/новый)
+        $moved = [];
+        foreach ($items as $it) {
+            if ($it['action'] === 'update' && isset($it['upd']['url']) && (string) $it['ex']['url'] !== '') {
+                $moved[] = ['/product/' . $it['ex']['url'] . '/', '/product/' . $it['upd']['url'] . '/'];
+            }
+        }
+        AdminCatalog::addRedirects($moved);
         $touched = [];
         foreach ($items as $it) {
             if ($it['action'] === 'update' && !$it['upd'] && ($it['feat'] || $it['texts'])) $touched[] = (int) $it['id'];

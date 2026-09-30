@@ -132,6 +132,12 @@ final class SeoController extends BaseController
                 Cache::set('seo.autofix.preview', $report, SeoAudit::TTL);
             }
         }
+        $batches = $ready ? SeoFix::batches(20) : [];
+        // откат — от последнего к первому: пакет, поля которого меняли более поздние неоткаченные, откатить пока нельзя
+        $later = [];
+        foreach ($batches as $b) {
+            if ($b['reverted_at'] === null && ($x = SeoFix::laterOverlaps((int) $b['id']))) $later[(int) $b['id']] = array_reverse(array_keys($x));
+        }
         return $this->render('admin/seo/autofix', [
             'title'    => 'SEO: исправить автоматически',
             'back'     => ['/admin/seo/', 'SEO-обзор'],
@@ -139,7 +145,8 @@ final class SeoController extends BaseController
             'ready'    => $ready,
             'report'   => $report,
             'examples' => $report ? SeoFix::examples($report, 50) : [],
-            'batches'  => $ready ? SeoFix::batches(20) : [],
+            'batches'  => $batches,
+            'later'    => $later,
         ]);
     }
 

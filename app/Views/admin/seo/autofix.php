@@ -156,7 +156,10 @@ $rulesLine = static function (array $rules) use ($fmt): string {
               пропущено <?= $fmt($rv['skipped'] ?? 0) ?><?php if (!empty($rv['skipped_list'])): ?>
               (<?= e(implode(', ', array_map(static fn($s) => ($s['entity'] ?? '') . ' №' . ($s['id'] ?? 0) . ' ' . ($s['field'] ?? ''), array_slice($rv['skipped_list'], 0, 10)))) ?><?= count($rv['skipped_list']) > 10 ? '…' : '' ?>)<?php endif; ?></small><?php endif; ?></td>
           <td class="right">
-            <?php if (!$b['reverted_at']): ?>
+            <?php if (!$b['reverted_at'] && !empty($later[(int) $b['id']])): ?>
+              <button class="btn btn-sm" type="button" disabled>Откатить</button>
+              <small>сначала откатите №<?= e(implode(', затем №', $later[(int) $b['id']])) ?> — меняли те же поля позже</small>
+            <?php elseif (!$b['reverted_at']): ?>
               <form method="post" action="/admin/seo/autofix/<?= (int) $b['id'] ?>/revert/" class="inline"
                     data-confirm="Откатить пакет № <?= (int) $b['id'] ?>? Вернутся прежние значения (<?= $fmt($b['changes']) ?>), кроме изменённых после пакета.">
                 <?= BaseController::tokenField() ?><button class="btn btn-sm btn-d" type="submit">Откатить</button></form>

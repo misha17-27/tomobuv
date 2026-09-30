@@ -37,6 +37,14 @@ final class Seo
 
     private const VAR_RE = '/\{\$([a-z_]+)(?:\.([a-z_]+))?((?:\|[^}]*)?)\}/i';
 
+    /**
+     * Единица «пар» (RU и UA: пар, пара, пары, пари…) — целым словом: после неё не буква Unicode (шаблон с /u), иначе
+     * «партия», «парка» считались бы единицей. Так же «шт» (шт, штук, штуки — не «штиблеты», «штучний»), «р-р», «см», «мм».
+     */
+    private const PAIR = 'пар(?:а|ы|и|у|ой|ою|ами)?(?!\p{L})';
+    /** Отрезанное начинается с единицы («пары:36;37», «шт.», «р-р 36», «размер», «см»): число перед обрезкой без неё — обрывок */
+    private const UNIT = '/^\s*(?:(?:' . self::PAIR . ')|(?:шт(?:ук[аи]?)?|р-?р|см|мм)(?!\p{L})|разм|розм|%)/iu';
+
     public string $title = '';
     public string $description = '';
     public string $keywords = '';
@@ -228,7 +236,7 @@ final class Seo
     public static function cutTail(string $s, string $rest, int $min = 0): string
     {
         $s = self::cleanTail($s);
-        $unit = (bool) preg_match('/^\s*(?:пар|шт|р-?р|разм|розм|см\b|мм\b|%)/iu', $rest);
+        $unit = (bool) preg_match(self::UNIT, $rest);
         $list = (bool) preg_match('/^[\s;,.!]*\d/u', $rest);
         for ($i = 0; $i < 6; $i++) {
             $prev = $s;
@@ -241,7 +249,7 @@ final class Seo
                     : self::cleanTail((string) preg_replace('/\s+/u', ' ', mb_substr($s, 0, $pos) . ' ' . mb_substr($s, $pos + 1)));
             }
             // «N пар:36;37» / «4пари:23» — перечень оборван: отрезанное начинается с числа
-            if ($list && preg_match('/\s\d+\s?пар\p{L}*\s?:?[\d\s,.;:!]*$/u', $s, $m, PREG_OFFSET_CAPTURE)) {
+            if ($list && preg_match('/\s\d+\s?' . self::PAIR . '\s?:?[\d\s,.;:!]*$/u', $s, $m, PREG_OFFSET_CAPTURE)) {
                 $head = self::cleanTail(substr($s, 0, $m[0][1]));
                 if ($head !== '' && mb_strlen($head) >= $min) $s = $head;
             }
@@ -265,7 +273,7 @@ final class Seo
         $s = trim($s);
         return mb_substr_count($s, '(') > mb_substr_count($s, ')')
             || (bool) preg_match('/(?<![;,:])\s\d{1,3}$/u', $s)
-            || (bool) preg_match('/\s\d+\s?пар\p{L}*\s?:?\s*\d*$/u', $s);
+            || (bool) preg_match('/\s\d+\s?' . self::PAIR . '\s?:?\s*\d*$/u', $s);
     }
 
     /** Позиция (в символах) последней незакрытой открывающей скобки $open или null */

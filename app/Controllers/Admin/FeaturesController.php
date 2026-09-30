@@ -348,8 +348,9 @@ final class FeaturesController extends BaseController
                 $this->flash('Отметьте минимум два значения и выберите, какое оставить.', true);
                 return Response::redirect($back);
             }
-            $n = $this->merge($f, $target, $src);
-            $this->done($f, 'values_merge', 'Объединено значений: ' . (count($src) + 1) . ', товаров затронуто: ' . $n . '.');
+            $n = $this->merge($f, $target, $src, $moved);
+            $this->done($f, 'values_merge', 'Объединено значений: ' . (count($src) + 1) . ', товаров затронуто: ' . $n . '.'
+                . ($moved ? ' Страницы брендов-источников перенаправлены (301) на оставшийся бренд: ' . $moved . '.' : ''));
             return Response::redirect($back);
         }
 
@@ -405,9 +406,13 @@ final class FeaturesController extends BaseController
         return Response::redirect($back);
     }
 
-    /** Объединение значений: товары получают $target, остальные значения удаляются. Возвращает число товаров. */
-    private function merge(array $f, int $target, array $src): int
+    /**
+     * Объединение значений: товары получают $target, остальные значения удаляются. Возвращает число товаров;
+     * $moved — сколько страниц брендов-источников получили 301 на оставшийся бренд.
+     */
+    private function merge(array $f, int $target, array $src, ?int &$moved = 0): int
     {
+        $moved = 0;
         $db = App::db();
         $fid = (int) $f['id'];
         [$ph, $vals] = $db->in($src);
@@ -416,15 +421,26 @@ final class FeaturesController extends BaseController
         // значение фильтра или бренд — товары переиндексируются точечно; снимок их фильтров и брендов — до слияния
         $index = $pids && ((int) $f['is_filter'] || $f['code'] === 'brand');
         $snap = $index ? CatalogIndexer::snapshot($pids) : null;
-        $db->transaction(static function ($db) use ($fid, $target, $ph, $vals, $f, $pids, $targetName) {
+        $db->transaction(static function ($db) use ($fid, $target, $ph, $vals, $f, $pids, $targetName, &$moved) {
             $db->query("INSERT IGNORE INTO product_features (product_id, feature_id, value_id)
                 SELECT product_id, ?, ? FROM product_features WHERE feature_id = ? AND value_id IN ($ph)", array_merge([$fid, $target, $fid], $vals));
             $db->query("DELETE FROM product_features WHERE feature_id = ? AND value_id IN ($ph)", array_merge([$fid], $vals));
             $db->query("DELETE FROM feature_values WHERE feature_id = ? AND id IN ($ph)", array_merge([$fid], $vals));
             if ($f['code'] === 'brand') {
+                $srcUrls = $db->col("SELECT url FROM brands WHERE id IN ($ph) FOR UPDATE", $vals);   // адреса брендов-источников — до удаления
                 $db->query("UPDATE products SET brand_id = ? WHERE brand_id IN ($ph)", array_merge([$target], $vals));
                 $db->query("DELETE FROM brands WHERE id IN ($ph)", $vals);
                 AdminCatalog::ensureBrand($target, $targetName);
+                // страницы брендов-источников → 301 на оставшийся бренд, как при смене адреса бренда (BrandsController::form):
+                // from_url — раскодированный путь (как Request::path), to_url и прежние ссылки на источник — /brand/Mona+Lisa/
+                $to = Catalog::brandUrl(['url' => (string) $db->value('SELECT url FROM brands WHERE id = ?', [$target])]);
+                $moves = [];
+                foreach ($srcUrls as $u) {
+                    $link = Catalog::brandUrl(['url' => (string) $u]);
+                    if (trim((string) $u) !== '' && $link !== $to) $moves[] = [rawurldecode($link), $to, [$link]];
+                }
+                AdminCatalog::addRedirects($moves);
+                $moved = count($moves);
             }
             if ($f['code'] === 'size' && $pids) {
                 foreach (array_chunk($pids, 1000) as $part) {

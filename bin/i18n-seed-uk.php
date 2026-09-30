@@ -10,6 +10,11 @@
  *
  * Без --force заполняются только пустые *_uk (ручные правки в админке не затираются). Пустыми считаются и SEO-поля *_uk,
  * которые перенос заполнил сам по русскому тексту, пока перевода не было (SeoFix::autoFilledUk), — их заменяет перевод.
+ * «Машинные» title/description (= название, «купити … в Одесі», набор ключевых слов) вне нормы при пустом русском своём
+ * не пишутся и с --force (SeoFix::seedSkipsUk): автоисправление в конце всё равно очистило бы их — повторный запуск
+ * сида ничего не меняет. Название товара, перевод которого совпадает с русским (Угги, Дутики, Балетки… — одинаковые
+ * в обоих языках, бренды, коды), в name_uk НЕ копируется: пустое name_uk на /ua/ показывает актуальное русское название,
+ * а копия устарела бы после переименования товара. В отчёте — названия с русскими словами, которых нет в словаре.
  * В конце — SEO-стандарт title/description (App\Services\SeoFix, как php bin/seo-autofix.php; «seo» — только он).
  */
 declare(strict_types=1);
@@ -17,6 +22,7 @@ require __DIR__ . '/../app/bootstrap.php';
 
 use App\Core\App;
 use App\Core\Cache;
+use App\Core\Seo;
 use App\Services\ProductName;
 use App\Services\SeoFix;
 
@@ -34,9 +40,20 @@ $data = static function (string $name) use ($dir): array {
     $f = "$dir/$name.php";
     return is_file($f) ? (array) include $f : [];
 };
-/** UPDATE только пустых колонок (или всех при --force); $auto — [колонка => true], заполненные автоисправлением без перевода */
-$setCols = static function (string $table, string $where, array $params, array $cols, array $auto = []) use ($db, $force): int {
+/**
+ * UPDATE только пустых колонок (или всех при --force); $auto — [колонка => true], заполненные автоисправлением без перевода;
+ * $seo — [сущность SeoFix, текущая строка]: «машинные» title/description *_uk, которые автоисправление очистило бы, не пишутся
+ */
+$setCols = static function (string $table, string $where, array $params, array $cols, array $auto = [], ?array $seo = null) use ($db, $force): int {
     $cols = array_filter($cols, static fn($v) => $v !== null && $v !== '');
+    if ($seo !== null) {
+        [$entity, $row] = $seo;
+        $nc = $entity === 'blog' ? 'title' : 'name';                // название объекта (у статьи — заголовок)
+        $names = [$row[$nc] ?? '', $row[$nc . '_uk'] ?? '', $cols[$nc . '_uk'] ?? ''];
+        foreach ($cols as $c => $v) {
+            if (str_ends_with($c, '_uk') && SeoFix::seedSkipsUk($entity, $c, (string) $v, $row[substr($c, 0, -3)] ?? null, $names)) unset($cols[$c]);
+        }
+    }
     if (!$cols) return 0;
     $set = [];
     $vals = [];
@@ -64,12 +81,44 @@ $trWords = static function (?string $s) use ($wordRe, $words, $lower): ?string {
     return preg_replace_callback($wordRe . 'i', static function ($m) use ($words, $lower) {
         $w = ($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '');
         $uk = $words[$w] ?? $lower[mb_strtolower($w)] ?? $w;
+        if (mb_strtolower($uk) === mb_strtolower($w)) return $w;   // одинаковое в обоих языках — написание как в названии («УГГИ»)
         // сохранить регистр первой буквы
         $first = mb_substr($w, 0, 1);
         if ($first === mb_strtoupper($first)) $uk = mb_strtoupper(mb_substr($uk, 0, 1)) . mb_substr($uk, 1);
         else $uk = mb_strtolower(mb_substr($uk, 0, 1)) . mb_substr($uk, 1);
         return $uk;
     }, $s);
+};
+/**
+ * Название (после перевода) без русских слов — уже украинское: каждое кириллическое слово — из переводов словаря (в том
+ * числе одинаковые в обоих языках: Угги, Дутики, Балетки…), из названия бренда (не переводятся), с украинской буквой
+ * (і, ї, є, ґ — слова поставщика «шкіра», «білий») или сокращение/код до 3 букв («БП», «шт», «нат.», «ТА2301G»),
+ * кроме русских «с», «со», «от»; код заглавными вплотную к сокращению — по частям («НКчор.» = «НК» + «чор»).
+ * Слово с ы/э/ё/ъ не из бренда или незнакомое длиннее 3 букв — нет ($unknown — какие).
+ */
+$ukKnown = [];
+$ruOnly = ['с' => true, 'со' => true, 'от' => true];   // короткие русские слова: не принимаются за сокращение или код
+foreach ($words as $ru => $uk) {
+    foreach (preg_split("/[^\\p{L}'ʼ]+/u", mb_strtolower((string) $uk), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $w) $ukKnown[$w] = true;
+    if (mb_strtolower((string) $ru) !== mb_strtolower((string) $uk)) $ruOnly[mb_strtolower((string) $ru)] = true;   // «мех», «дет», «из»
+}
+$ukName = static function (string $s, array $brandWords, array &$unknown = []) use ($ukKnown, $ruOnly): bool {
+    $known = static function (string $lw, bool $short = true) use ($ukKnown, $ruOnly, $brandWords): bool {
+        if (isset($ukKnown[$lw]) || isset($brandWords[$lw])) return true;
+        if (preg_match('/[ыэёъ]/u', $lw)) return false;
+        return (bool) preg_match('/[іїєґ]/u', $lw) || ($short && mb_strlen($lw) <= 3 && !isset($ruOnly[$lw]));
+    };
+    preg_match_all("/\\p{Cyrillic}[\\p{Cyrillic}'ʼ]*/u", $s, $m);
+    $ok = true;
+    foreach ($m[0] as $w) {
+        $w = (string) preg_replace("/['ʼ]+$/u", '', $w);                   // не rtrim: он режет байты (ʼ = CA BC, «м» = D0 BC)
+        if ($known(mb_strtolower($w))) continue;
+        // «НКчор» — код заглавными + сокращение из словаря («чор»): сокращение — только известное, не любое до 3 букв
+        if (preg_match('/^(\p{Lu}{2,3})(\p{Ll}+)$/u', $w, $p) && $known(mb_strtolower($p[1])) && $known($p[2], false)) continue;
+        $unknown[] = mb_strtolower($w);
+        $ok = false;
+    }
+    return $ok;
 };
 
 $steps = [];
@@ -99,26 +148,37 @@ $steps['settings'] = function () use ($db, $data, $force, $say) {
     $say("Настройки: $n");
 };
 
-$steps['categories'] = function () use ($data, $setCols, $say) {
+$steps['categories'] = function () use ($db, $data, $setCols, $say) {
     $n = 0;
     $auto = SeoFix::autoFilledUk('category');
-    foreach ($data('categories') as $id => $f) $n += $setCols('categories', 'id = ?', [(int) $id], $f, $auto[(int) $id] ?? []);
+    $rows = $db->keyed('SELECT id, name, name_uk, meta_title, meta_description FROM categories');
+    foreach ($data('categories') as $id => $f) {
+        if (isset($rows[(int) $id])) $n += $setCols('categories', 'id = ?', [(int) $id], $f, $auto[(int) $id] ?? [], ['category', $rows[(int) $id]]);
+    }
     $say("Категории: $n");
 };
 
 $steps['pages'] = function () use ($db, $data, $setCols, $say) {
     $n = 0;
     $auto = SeoFix::autoFilledUk('page');
-    $ids = $auto ? $db->pairs('SELECT url, id FROM pages') : [];
-    foreach ($data('pages') as $url => $f) $n += $setCols('pages', 'url = ?', [(string) $url], $f, $auto[(int) ($ids[$url] ?? 0)] ?? []);
+    $rows = [];                                   // url без учёта регистра — как «url = ?» в базе
+    foreach ($db->all('SELECT url, id, name, name_uk, title, meta_description FROM pages') as $r) $rows[mb_strtolower((string) $r['url'])] ??= $r;
+    foreach ($data('pages') as $url => $f) {
+        $r = $rows[mb_strtolower((string) $url)] ?? null;
+        if ($r) $n += $setCols('pages', 'url = ?', [(string) $url], $f, $auto[(int) $r['id']] ?? [], ['page', $r]);
+    }
     $say("Страницы: $n");
 };
 
 $steps['blog'] = function () use ($db, $data, $setCols, $say) {
     $n = 0;
     $auto = SeoFix::autoFilledUk('blog');
-    $ids = $auto ? $db->pairs('SELECT url, id FROM blog_posts') : [];
-    foreach ($data('blog') as $url => $f) $n += $setCols('blog_posts', 'url = ?', [(string) $url], $f, $auto[(int) ($ids[$url] ?? 0)] ?? []);
+    $rows = [];
+    foreach ($db->all('SELECT url, id, title, title_uk, meta_title, meta_description FROM blog_posts') as $r) $rows[mb_strtolower((string) $r['url'])] ??= $r;
+    foreach ($data('blog') as $url => $f) {
+        $r = $rows[mb_strtolower((string) $url)] ?? null;
+        if ($r) $n += $setCols('blog_posts', 'url = ?', [(string) $url], $f, $auto[(int) $r['id']] ?? [], ['blog', $r]);
+    }
     $say("Статьи: $n");
 };
 
@@ -131,7 +191,10 @@ $steps['banners'] = function () use ($data, $setCols, $say) {
 $steps['brands'] = function () use ($db, $data, $setCols, $force, $say) {
     $n = 0;
     $auto = SeoFix::autoFilledUk('brand');
-    foreach ($data('brands') as $id => $f) $n += $setCols('brands', 'id = ?', [(int) $id], $f, $auto[(int) $id] ?? []);
+    $rows = $db->keyed('SELECT id, name, name_uk, title, meta_description FROM brands');
+    foreach ($data('brands') as $id => $f) {
+        if (isset($rows[(int) $id])) $n += $setCols('brands', 'id = ?', [(int) $id], $f, $auto[(int) $id] ?? [], ['brand', $rows[(int) $id]]);
+    }
     // название бренда — это и значение характеристики «Бренд» (id совпадают): фильтр и характеристики товара на /ua/
     $v = 0;
     $bf = (int) $db->value("SELECT id FROM features WHERE code = 'brand'");
@@ -155,11 +218,15 @@ $steps['features'] = function () use ($db, $data, $setCols, $say) {
     $say("Характеристики: $n, значений: $v");
 };
 
-$steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
+$steps['products'] = function () use ($db, $data, $trWords, $ukName, $force, $say) {
     // Названия и мета товаров: перевод типовых слов (Кроссовки → Кросівки) + шаблоны старого сайта
-    $last = 0; $upd = 0;
+    $last = 0; $upd = 0; $same = 0; $left = 0; $skipped = 0; $unknown = [];
     ProductName::reset();                     // категории и бренды — с name_uk из шагов выше
     $auto = SeoFix::autoFilledUk('product');  // title/description *_uk, которые перенос заполнил по русскому тексту, — как пустые
+    $brandWords = [];                         // слова названий брендов — в названиях товаров не переводятся
+    foreach ($db->col('SELECT name FROM brands') as $b) {
+        foreach (preg_split('/[^\p{L}]+/u', mb_strtolower((string) $b), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $w) $brandWords[$w] = true;
+    }
     while (true) {
         $rows = $db->all('SELECT id, name, sku, category_id, brand_id, meta_title, meta_description, meta_keywords, name_uk, meta_title_uk, meta_description_uk, meta_keywords_uk
             FROM products WHERE id > ? ORDER BY id LIMIT 3000', [$last]);
@@ -172,7 +239,14 @@ $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
             $gen = ProductName::generated($p);
             $nameUk = $gen ? $gen[1] : $trWords($p['name']);
             $new = [];
-            if ($nameUk !== $p['name'] && ($force || !$p['name_uk'])) $new['name_uk'] = $nameUk;
+            if ($nameUk !== $p['name']) {
+                if ($force || !$p['name_uk']) $new['name_uk'] = $nameUk;
+            } elseif (!$p['name_uk'] && (string) $nameUk !== '') {
+                // перевод совпал с русским: не копируем (на /ua/ и так русское = украинское название, и оно не устареет
+                // при переименовании); считаем только названия с русскими словами не из словаря — их стоит перевести
+                if ($ukName((string) $nameUk, $brandWords, $unknown)) $same++;
+                else $left++;
+            }
             $n = $new['name_uk'] ?? ($p['name_uk'] ?: $nameUk);
             $autoUk = $auto[(int) $p['id']] ?? [];
             if ($p['meta_title'] !== null && ($force || !$p['meta_title_uk'] || isset($autoUk['meta_title_uk']))) {
@@ -187,6 +261,11 @@ $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
             if ($p['meta_keywords'] !== null && ($force || !$p['meta_keywords_uk'])) {
                 $mk = $trWords($p['meta_keywords']);
                 if ($mk !== $p['meta_keywords']) $new['meta_keywords_uk'] = $mk;
+            }
+            // «машинные» title/description, которые автоисправление очистило бы (русское своё пусто или тоже машинное), не пишем
+            $names = [$p['name'], $n, Seo::machineName((string) $p['meta_description']), Seo::machineName((string) ($new['meta_description_uk'] ?? $p['meta_description_uk']))];
+            foreach (['meta_title_uk' => 'meta_title', 'meta_description_uk' => 'meta_description'] as $c => $ru) {
+                if (isset($new[$c]) && SeoFix::seedSkipsUk('product', $c, $new[$c], $p[$ru], $names)) { unset($new[$c]); $skipped++; }
             }
             if ($new) $batch[] = ['id' => (int) $p['id']] + $new + ['name_uk' => null, 'meta_title_uk' => null, 'meta_description_uk' => null, 'meta_keywords_uk' => null];
         }
@@ -210,7 +289,14 @@ $steps['products'] = function () use ($db, $data, $trWords, $force, $say) {
                 [$uk, $r['description']])->rowCount();
         }
     }
-    $say("Товары: обновлено $upd, описаний: $d");
+    $say("Товары: обновлено $upd (UA-название совпадает с русским, оставлено пустым: $same), описаний: $d"
+        . ($skipped ? ", машинных title/description UA не записано: $skipped" : ''));
+    if ($unknown) {
+        $cnt = array_count_values($unknown);
+        arsort($cnt);
+        $say("UA-название пустое у $left (слова не из словаря database/i18n/uk/product_words.php, на /ua/ — русское название): "
+            . implode(', ', array_map(static fn($w, $k) => "$w ($k)", array_slice(array_keys($cnt), 0, 20), array_slice($cnt, 0, 20))));
+    }
 };
 
 foreach ($steps as $name => $fn) {

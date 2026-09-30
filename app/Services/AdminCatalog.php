@@ -119,33 +119,96 @@ final class AdminCatalog
      */
     public static function addRedirect(string $from, string $to, array $oldTargets = []): void
     {
-        $enc = static fn(string $u): string => preg_replace_callback("#[^A-Za-z0-9\\-._~!$&'()*+,;=:@/%]#u", static fn($m) => rawurlencode($m[0]), $u) ?? $u;
-        $to = $enc($to);
-        $toPath = rawurldecode($to);
-        if ($from === '' || $from === $toPath) return;
-        $db = App::db();
-        $db->query('DELETE FROM redirects WHERE from_url = ?', [$toPath]);
-        $old = [];
-        foreach (array_merge([$from, $enc($from)], $oldTargets) as $u) {
-            if ($u === '') continue;
-            $old[$u] = 1;
-            if ($u !== '/' && str_ends_with($u, '/')) $old[rtrim($u, '/')] = 1;
-        }
-        [$ph, $vals] = $db->in(array_keys($old));
-        $db->query("UPDATE redirects SET to_url = ? WHERE to_url IN ($ph)", array_merge([$to], $vals));
-        $db->upsert('redirects', ['from_url' => $from, 'to_url' => $to, 'code' => 301], ['to_url', 'code']);
+        self::addRedirects([[$from, $to, $oldTargets]]);
     }
 
-    /** Удалённая страница: редиректы на неё вели бы на 404 — убираем их */
-    public static function dropRedirectsTo(array $targets): void
+    /**
+     * То же пачкой — [[from, to, oldTargets], …] (импорт прайсов меняет адреса многих товаров): несколько запросов на пачку,
+     * а не на каждый адрес. Пары одной пачки независимы: новый адрес каждой свободен (не адрес другого товара и не старый
+     * адрес другой пары — так проверяет импорт), поэтому результат тот же, что у addRedirect по очереди.
+     */
+    public static function addRedirects(array $pairs): void
     {
-        $targets = array_values(array_unique(array_filter($targets, 'strlen')));
-        if (!$targets) return;
-        $db = App::db();
-        foreach (array_chunk($targets, 500) as $part) {
-            [$ph, $vals] = $db->in($part);
-            $db->query("DELETE FROM redirects WHERE to_url IN ($ph)", $vals);
+        $retarget = [];                                  // написание старого адреса в to_url → новый to_url
+        $drop = [];                                      // новые адреса: редирект с них удаляется
+        $rows = [];                                      // from_url → to_url
+        foreach ($pairs as $p) {
+            [$from, $to] = [(string) $p[0], self::linkUrl((string) $p[1])];
+            $toPath = rawurldecode($to);
+            if ($from === '' || $from === $toPath) continue;
+            $drop[$toPath] = 1;
+            foreach (array_merge([$from, self::linkUrl($from)], (array) ($p[2] ?? [])) as $u) {
+                if ($u === '') continue;
+                $retarget[$u] = $to;
+                if ($u !== '/' && str_ends_with($u, '/')) $retarget[rtrim($u, '/')] = $to;
+            }
+            $rows[$from] = $to;
         }
+        if (!$rows) return;
+        $db = App::db();
+        foreach (array_chunk(array_keys($drop), 500) as $part) {
+            [$ph, $vals] = $db->in($part);
+            $db->query("DELETE FROM redirects WHERE from_url IN ($ph)", $vals);
+        }
+        foreach (array_chunk($retarget, 300, true) as $part) {
+            $case = '';
+            $params = [];
+            foreach ($part as $old => $new) { $case .= ' WHEN ? THEN ?'; $params[] = $old; $params[] = $new; }
+            [$ph, $vals] = $db->in(array_map('strval', array_keys($part)));
+            $db->query("UPDATE redirects SET to_url = CASE to_url$case ELSE to_url END WHERE to_url IN ($ph)", array_merge($params, $vals));
+        }
+        foreach (array_chunk($rows, 300, true) as $part) {
+            $params = [];
+            foreach ($part as $from => $to) array_push($params, $from, $to, 301);
+            $db->query('INSERT INTO redirects (from_url, to_url, code) VALUES ' . implode(',', array_fill(0, count($part), '(?,?,?)'))
+                . ' ON DUPLICATE KEY UPDATE to_url = VALUES(to_url), code = VALUES(code)', $params);
+        }
+    }
+
+    /** Адрес как ссылка для to_url: символы вне RFC 3986 (кириллица, пробел) — в %XX, уже закодированное («%26», «+») — как есть */
+    private static function linkUrl(string $u): string
+    {
+        return preg_replace_callback("#[^A-Za-z0-9\\-._~!$&'()*+,;=:@/%]#u", static fn($m) => rawurlencode($m[0]), $u) ?? $u;
+    }
+
+    /**
+     * Удалённая страница: редиректы на неё вели бы на 404 — убираем их. Адрес — в любом написании to_url, как у
+     * addRedirect: раскодированный, %XX и без «/» в конце (редирект, добавленный вручную на «/o-kompanii»), а также
+     * с /ua, ?параметрами или #якорем («/ua/o-kompanii/», «/o-kompanii/?utm=1» — раздел «Редиректы» такие допускает).
+     * Возвращает число удалённых редиректов.
+     */
+    public static function dropRedirectsTo(array $targets): int
+    {
+        $all = [];
+        foreach ($targets as $u) {
+            $u = (string) $u;
+            if ($u === '') continue;
+            foreach ([$u, self::linkUrl($u)] as $v) {
+                $all[$v] = 1;
+                if ($v !== '/' && str_ends_with($v, '/')) $all[rtrim($v, '/')] = 1;
+            }
+        }
+        if (!$all) return 0;
+        $db = App::db();
+        $n = 0;
+        foreach (array_chunk(array_map('strval', array_keys($all)), 500) as $part) {
+            [$ph, $vals] = $db->in($part);
+            $n += $db->query("DELETE FROM redirects WHERE to_url IN ($ph)", $vals)->rowCount();
+        }
+        // /ua, ?… и #… в to_url — редкость: такие строки сверяются в PHP без них (без учёта регистра, как сравнивает база)
+        $low = [];
+        foreach (array_keys($all) as $v) $low[mb_strtolower((string) $v)] = true;
+        $ids = [];
+        foreach ($db->query('SELECT id, to_url FROM redirects WHERE to_url LIKE ? OR to_url LIKE ? OR to_url LIKE ?', ['/ua/%', '%?%', '%#%'])->fetchAll() as $r) {
+            $u = (string) preg_replace('/[?#].*$/s', '', (string) $r['to_url']);
+            if (preg_match('#^/ua(?=/|$)#i', $u)) $u = substr($u, 3) ?: '/';
+            if (isset($low[mb_strtolower($u)])) $ids[] = (int) $r['id'];
+        }
+        foreach (array_chunk($ids, 500) as $part) {
+            [$ph, $vals] = $db->in($part);
+            $n += $db->query("DELETE FROM redirects WHERE id IN ($ph)", $vals)->rowCount();
+        }
+        return $n;
     }
 
     /**

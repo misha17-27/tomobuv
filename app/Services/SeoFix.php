@@ -34,7 +34,8 @@ use App\Core\Settings;
  *      владельца (refix) — новые правила исправляют и прежний пакет, не откатывая его.
  *
  * Каждое применение — пакет в журнале (seo_fix_batches + seo_fix_log: объект, поле, язык, было, стало, время);
- * откат пакета (revert) возвращает «было», только если значение с тех пор не меняли. Повторный запуск ничего не меняет.
+ * откат пакета (revert) возвращает «было», только если значение с тех пор не меняли; пакеты откатываются от последнего
+ * к первому (более поздний неоткаченный пакет менял те же поля — отказ, laterOverlaps). Повторный запуск ничего не меняет.
  * Вызовы: bin/seo-autofix.php, админка «SEO → Исправить автоматически», последний шаг bin/import-webasyst.php
  * и bin/i18n-seed-uk.php (перенос не откатывает тексты к старым).
  */
@@ -850,6 +851,29 @@ final class SeoFix
         return $out;
     }
 
+    /**
+     * Украинское SEO-значение, которое сид переводов (bin/i18n-seed-uk.php) не записывает в пустой *_uk: автоисправление
+     * сразу очистило бы его (правило б, decideUk) — «машинное» (title = название, «купити … в Одесі») или набор ключевых
+     * слов вне нормы, а русское своё пусто или само такое же (очищается). Иначе сид и автоисправление переписывали бы одни
+     * и те же поля при каждом запуске («сид → автоисправление» — пакет из десятков очисток). Русское своё остаётся —
+     * значение пишется: автоисправление заменит его текстом украинского шаблона (uk_tpl), и /ua/ не покажет русский текст.
+     * $col — колонка *_uk сущности ENTITIES (не title/description — false), $names — названия объекта на обоих языках
+     * (как names: у товара и название из «купить X в Одессе»).
+     */
+    public static function seedSkipsUk(string $entity, string $col, ?string $value, ?string $ruOwn, array $names): bool
+    {
+        if (!isset(self::ENTITIES[$entity])) return false;
+        [, $cT, $cD] = self::ENTITIES[$entity];
+        $field = $col === $cT . '_uk' ? 'title' : ($col === $cD . '_uk' ? 'description' : null);
+        if ($field === null) return false;
+        $names = array_values(array_filter(array_map(static fn($v) => trim((string) $v), $names), 'strlen'));
+        $cleared = static fn(string $v): bool => $v !== '' && !Seo::inNorm($v, $field)
+            && (Seo::isMachine($v, $names, $field) || self::isKeywordSet($v, $field));
+        if (!$cleared(trim((string) $value))) return false;
+        $ru = trim((string) $ruOwn);
+        return $ru === '' || $cleared($ru);
+    }
+
     /** Русское своё значение: [final — что останется своим ('' — пусто, работает шаблон), change — null или [new, rule]] */
     private function decideRu(string $f, string $raw, array $names, callable $auto): array
     {
@@ -1238,8 +1262,50 @@ final class SeoFix
     }
 
     /**
+     * Более поздние неоткаченные пакеты, которые меняли те же поля (объект + колонка или настройка), что пакет $batchId:
+     * [№ пакета => сколько таких полей], по возрастанию. Откат $batchId раньше них запрещён (revert): их «было» — это «стало»
+     * пакета $batchId (refix, dedupe поверх его правки), и после отката раньше них журнал стал бы неверным — прежние правки
+     * автоисправления считались бы значениями владельца (ourValues), а откат более позднего пакета вернул бы уже откаченное.
+     */
+    public static function laterOverlaps(int $batchId): array
+    {
+        if (!self::hasTables()) return [];
+        $db = App::db();
+        $later = array_map('intval', $db->pairs('SELECT id, changes FROM seo_fix_batches WHERE id > ? AND reverted_at IS NULL', [$batchId]));
+        if (!$later) return [];
+        [$ph, $vals] = $db->in(array_keys($later));
+        // идём от меньшей стороны (пакет №1 — 370 тыс. строк, поздние — сотни): её строки по индексу batch,
+        // те же поля другой стороны — по индексу entity (объект), а не перебором всех строк большого пакета
+        $own = (int) $db->value('SELECT changes FROM seo_fix_batches WHERE id = ?', [$batchId]);
+        $sql = $own <= array_sum($later)
+            ? "SELECT l2.batch_id, COUNT(DISTINCT l2.entity, l2.entity_id, l2.field) FROM seo_fix_log l1 FORCE INDEX (`batch`)
+                JOIN seo_fix_log l2 FORCE INDEX (`entity`) ON l2.entity = l1.entity AND l2.entity_id = l1.entity_id AND l2.field = l1.field
+                WHERE l1.batch_id = ? AND l2.batch_id IN ($ph) GROUP BY l2.batch_id"
+            : "SELECT l2.batch_id, COUNT(DISTINCT l2.entity, l2.entity_id, l2.field) FROM seo_fix_log l2 FORCE INDEX (`batch`)
+                JOIN seo_fix_log l1 FORCE INDEX (`entity`) ON l1.entity = l2.entity AND l1.entity_id = l2.entity_id AND l1.field = l2.field AND l1.batch_id = ?
+                WHERE l2.batch_id IN ($ph) GROUP BY l2.batch_id";
+        $rows = array_map('intval', $db->pairs($sql, array_merge([$batchId], $vals)));
+        ksort($rows);
+        return $rows;
+    }
+
+    /** Текст отказа в откате (null — откатывать можно): «сначала откатите №7, затем №6» — от последнего к первому */
+    public static function revertBlocker(int $batchId, ?array $later = null): ?string
+    {
+        $later ??= self::laterOverlaps($batchId);
+        if (!$later) return null;
+        $order = array_reverse(array_keys($later));
+        $fields = array_sum($later);
+        return "Пакет №$batchId нельзя откатить раньше более поздних: " . (count($order) > 1 ? 'пакеты №' . implode(', №', array_keys($later)) . ' меняли' : 'пакет №' . $order[0] . ' менял')
+            . ' те же поля (' . $fields . ' ' . plural($fields, 'поле', 'поля', 'полей') . ') после него. Сначала откатите №'
+            . implode(', затем №', $order) . '.';
+    }
+
+    /**
      * Откатить пакет: вернуть «было» там, где сейчас всё ещё «стало»; значения, изменённые с тех пор (вручную, импортом,
      * другим пакетом), пропускаются и перечисляются. $dry — только посчитать. Возвращает [restored, skipped, skipped_list].
+     * Пакеты откатываются от последнего к первому: если более поздний неоткаченный пакет менял те же поля — отказ
+     * (revertBlocker, «сначала откатите №…»); флага «всё равно» нет — такой откат оставил бы журнал противоречивым.
      */
     public static function revert(int $batchId, ?int $userId = null, bool $dry = false): array
     {
@@ -1249,6 +1315,12 @@ final class SeoFix
         if ($b['reverted_at'] !== null) throw new \RuntimeException("Пакет №$batchId уже откачен " . date('d.m.Y H:i', strtotime((string) $b['reverted_at'])) . '.');
         if (!$dry && (int) $db->value('SELECT GET_LOCK(?, 10)', [self::LOCK]) !== 1) {
             throw new \RuntimeException('Автоисправление SEO уже выполняется — повторите позже.');
+        }
+        // проверка — под той же блокировкой, что и применение: новый пакет не появится между проверкой и откатом
+        $blocker = self::revertBlocker($batchId);
+        if ($blocker !== null) {
+            if (!$dry) $db->value('SELECT RELEASE_LOCK(?)', [self::LOCK]);
+            throw new \RuntimeException($blocker);
         }
         $res = ['batch' => $batchId, 'restored' => 0, 'skipped' => 0, 'skipped_list' => [], 'by_entity' => []];
         try {
