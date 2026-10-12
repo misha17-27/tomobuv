@@ -19,7 +19,7 @@ app/
   Services/          ← бизнес-логика: Catalog (справочники из кэша), Products (карточки), CatalogIndexer, …
   Controllers/Front/ ← витрина;  Controllers/Admin/ ← админка (наследуют BaseController)
   Views/layouts/     ← front.php, admin.php;  Views/front/, Views/admin/, Views/errors/, Views/emails/
-bin/                 ← CLI: install, import-webasyst, reindex, cache-clear, cron, create-admin, build-assets, product-names, supplier-jonggolf, seo-autofix
+bin/                 ← CLI: install, import-webasyst, reindex, cache-clear, cron, create-admin, build-assets, product-names, supplier-jonggolf, supplier-hitobuvi, seo-autofix
 config/              ← config.php (секреты, не в git) и config.example.php
 database/schema.sql  ← схема БД
 storage/             ← кэш, логи, сессии, загрузки (не в git, закрыта от веба)
@@ -223,13 +223,46 @@ UA-название заполняется, только если пустое �
 `php bin/product-names.php [--dry-run]` — для уже заведённых. Массовые действия названий не трогают.
 `bin/i18n-seed-uk.php` для таких товаров (`ProductName::generated`) берёт UA-название из той же сборки, а не из словаря.
 
-## Автозагрузка поставщиков (Jong•Golf)
+## Автозагрузка поставщиков (каркас, Jong•Golf, «Хит обуви»)
+
+Общий каркас — `app/Services/Suppliers`, админка «Каталог → Поставщики» (`/admin/suppliers/` — список, `/admin/suppliers/{код}/` —
+страница поставщика; только администратор), установка и включение — docs/INSTALL.md.
+- `Supplier` (абстрактный, методы вызываются на классе адаптера — `static::`): настройки `settings` «{код}.*» (`cfg`, `on`, `lines`),
+  расписание (окно часов + период: `due`, `nextRun`; `cron` — продолжить прерванный запуск или начать новый), запуски `supplier_runs`
+  (`createRun` под блокировкой запусков поставщика `withLock` — GET_LOCK, общий для админки, cron и CLI; `step` — шаг в бюджете
+  времени → `advance` адаптера; `stop` — условный UPDATE «Остановлен»; итог `finishRun` только поверх «Идёт»; «зависший» — `STALE`),
+  отчёт `supplier_run_log` (пачкой: `log` → `flushLog`), уборка (`cleanup`: отчёты «{код}.log_days», журнал изменений
+  «{код}.history_days», связи с удалёнными товарами). `enabled()` — включено и выполнены условия адаптера; `manualAllowed()` —
+  можно ли «Запустить сейчас» (по умолчанию = `enabled()`).
+- `SupplierSync` — общая запись порции: одна транзакция под `CatalogIndexer::locked` (взятой до транзакции) с повтором при
+  взаимной блокировке (`transact` → `apply` наследника), бренды и значения характеристик без дублей (`brandRef`, `valueIds`),
+  пакетный UPDATE по белому списку `UPDATABLE`, адреса новых товаров, фото через GD в холст (`frame`, `storePhoto` →
+  `Image::originalPath`), встреченные коды запуска `supplier_run_seen`, журнал изменений (`journal`, `journalHidden`).
+- `Suppliers` — реестр «код → класс»; `bin/cron.php` обходит всех (каждый — в своём try). `SupplierOverview` + `admin/suppliers/overview`
+  + трейт `SupplierPages` (контроллеры) — вкладка «Обзор» одна на всех: сводка по `supplier_links` (связано, на сайте, скрыто,
+  `missed` — нет в последних полных проходах), журнал `supplier_changes` (new / price — цена поставщика `old_cost→new_cost`
+  и наша `old_price→new_price` / hidden / back; пишут только боевые запуски и только реальные изменения), последние запуски,
+  ход запуска (GET …/progress/ — опрос раз в 4 с, шаги — POST …/runs/{id}/step/, suppliers.js), кнопки «Запустить сейчас» /
+  «Остановить» в шапке (`headerActions`). Блок «Цена у поставщика: история» в карточке товара — `admin/suppliers/price-history`.
+- Таблицы: `supplier_links (supplier, code → product_id, ext_id, hidden, missed, seen_at, cost)`, `supplier_runs`,
+  `supplier_run_log`, `supplier_run_seen`, `supplier_category_map` (kind: '' — сочетание Jong•Golf, 'cat' — категория поставщика,
+  'type' — тип из названия; mode, by_size), `supplier_changes` — database/migrations/suppliers.sql (колонки — через information_schema).
+
+**Как добавить поставщика**: класс `X extends Supplier` (CODE, TITLE, DEFAULTS, `enabled`, `start` → `createRun`, `advance` — фазы
+со состоянием в `$run['state']`, продолжение после обрыва; при необходимости `manualAllowed`, `phaseLabel`, `percent`, `skipReasons`,
+`CHECKS_MISSING` / `COUNTS_REQUESTS` для «Обзора»), `XSync extends SupplierSync` (`SUPPLIER`, `apply`; в `$items` — `id`, `code`,
+`action` create|update|same|hide, `ex` — строка товара до записи, `upd`, `cost`/`old_cost`, `returned`, `hide_note` — для журнала),
+строка в `Suppliers::LIST` и `ABOUT`, контроллер с `use SupplierPages` (`sup()`, `supBase()`, вкладка «Обзор» — `overviewData()`
++ партиал `admin/suppliers/overview`), маршруты в `app/routes/admin_suppliers.php`, CLI `bin/supplier-x.php`, раздел в INSTALL.md.
+Записываемый товар — `products.supplier = код`, `supplier_code` и связь `supplier_links`; скрывать пропавших — только после
+полного прохода, с защитой «больше 50 % активных — отмена»; неполный/остановленный запуск ничего не скрывает.
+
+### Jong•Golf (API)
 
 Замена `wa_loader_jonggolf.php` старого сайта: `App\Services\Suppliers\JongGolf` — настройки (`settings` «jonggolf.*», по умолчанию выключено),
-расписание (окно часов + период, `bin/cron.php`), запуски `supplier_runs` с отчётом `supplier_run_log` и машиной шагов
-(dict → page → items → confirm → finish, продолжение после обрыва); `JongGolfSync` — порция товаров; `JongGolfApi` — 3 метода API;
-`JongGolfMap` — таблица соответствия `supplier_category_map` (XLS читает `BiffReader`). Админка — `SuppliersController`
-(`/admin/suppliers/jonggolf/`, только администратор), CLI — `bin/supplier-jonggolf.php`, установка и переключение — docs/INSTALL.md.
+расписание (окно часов + период, `bin/cron.php`), машина шагов (dict → page → items → confirm → finish, продолжение после обрыва);
+`JongGolfSync` — порция товаров; `JongGolfApi` — 3 метода API; `JongGolfMap` — таблица соответствия `supplier_category_map`
+(XLS читает `BiffReader`). Админка — `SuppliersController` (`/admin/suppliers/jonggolf/`), CLI — `bin/supplier-jonggolf.php`.
 - Товар поставщика (id_product) × цвет (images[].aid) = товар сайта: `products.supplier = 'jonggolf'`, `supplier_code` = id_product
   (общий для цветов), связь `supplier_links (supplier, code → product_id, hidden)`. Поиск: связь → название старого загрузчика
   «{категория поставщика} {бренд} {код}» → код в артикуле и конце названия у товаров без поставщика (заведённые вручную;
@@ -255,6 +288,31 @@ UA-название заполняется, только если пустое �
   скрытые загрузчиком (`supplier_links.hidden`) показываются снова, когда цвет вернулся.
 - Новые товары: название — `ProductName::build` («Категория Бренд Код», RU и UA) или как старый загрузчик (настройка),
   адрес — `JongGolf::translit` (1-в-1 со старым), SEO — шаблоны сайта, если в настройках пусто.
+
+### «Хит обуви» (страницы сайта поставщика)
+
+`HitObuvi` (адаптер, «hitobuvi.*»), `HitObuviClient` (только GET, один поток, пауза ≥ 1,5 с общая для всех процессов —
+GET_LOCK + метка `storage/import/hitobuvi/last-request`, User-Agent `TomobuvLoader/1.0`, robots.txt на сутки, лимит запросов
+на запуск; 429/5xx → `HitObuviError('retry')` — пауза 60 с с удвоением, 3 подряд — ошибка; 403 и Cloudflare-проверка →
+`blocked` — сразу ошибка, без обхода; режим без сети — папка сохранённых ответов), `HitObuviParser` (список JoomShopping:
+`productitem_{ID}`, цены ящика и пары, короткое описание RU/UA, меню, производители, forsage-код из «машинного» алиаса),
+`HitObuviMap` (таблица `supplier_category_map` kind cat/type, черновик `database/suppliers/hitobuvi.php`, детские ряды
+по размерам), `HitObuviSync` (порции по 40), `App\Services\UkWords` (словарь UA-названий — общий с `bin/i18n-seed-uk.php`).
+- Фазы: start (проверки) → page (страница раздела `?limit=100&start=N` → `storage/import/hitobuvi/runs/N/page-K.html`, после
+  обрыва повторно не качается; на первой — меню: новые категории поставщика — в таблицу без категории сайта) → items → finish.
+  full — все страницы 4 разделов; quick — сверху, пока внизу страницы есть товары новее связанных (не больше `quick_pages`).
+  Страница без `productitem_` и без признаков пустой категории — останов (сменился шаблон), товары не скрываются.
+- Поиск: R1 связь → R2 forsage-код из адреса (товар `supplier = 'forsage'`) → R3 точное название + ряд (без поставщика, forsage,
+  hitobuvi; jonggolf — никогда) → R4 тип + бренд + «хвост» названия (кириллица = латиница) + ряд, только единственный.
+  Найденный чужой (Forsage, вручную) без «брать под загрузчик» не меняется и не дублируется (строка «есть на сайте»).
+- Цена за пару = цена ящика ÷ пар × k + надбавка с округлением (`HitObuvi::price`); пар = цена ящика ÷ цена пары; закупочная —
+  `purchase_price`, цена поставщика за пару — `supplier_links.cost` (история «Обзора»). Новый товар — только id ≥ порога,
+  с сопоставленной категорией, рядом и скачанным фото (`full_` из адреса миниатюры, по одному через клиент → GD 700×700);
+  название поставщика (тип по-русски), «голое» — `ProductName`, UA — `UkWords`, бренд — из названия по брендам сайта
+  и производителям поставщика (иначе фабрика без страны), характеристики по настройке, SEO — шаблоны сайта.
+- Скрытие — только полный проход по всем страницам (раздел с 404 или пустым списком, отбор `ids` — проход неполный; прерванный
+  запуск по расписанию cron продолжает, только пока автозагрузка включена): связанные товары, которых не было `missing_runs` (2) полных проходов подряд
+  (`supplier_links.missed`), → status 0 и `hidden = 1`; вернувшийся — показывается снова (журнал back).
 
 ## Опт
 

@@ -1,6 +1,7 @@
 <?php
 /**
- * «Поставщики → Jong•Golf»: вкладки Настройки | Категории | Цены | Журнал.
+ * «Поставщики → Jong•Golf»: вкладки Обзор (по умолчанию, общий с другими поставщиками) | Настройки | Категории | Цены | Журнал.
+ * Кнопки «Запустить сейчас» / «Остановить» — в шапке (SupplierPages::headerActions) и на «Обзоре».
  * @var string $tab @var string $base @var array $cfg @var bool $enabled @var string $keyHint @var bool $debug @var array $due @var ?int $next
  * @var ?array $active @var ?array $last @var ?array $lastFinished @var array $mapCount @var array $products @var int $manual
  * @var bool $hasDict @var ?int $dictTime @var bool $hasPages
@@ -28,20 +29,20 @@ $unmappedCount = count($lastFinished['stats']['unmapped'] ?? []);
 <?php if ($debug): ?>
 <div class="flash warn">Режим разработки (config <code>debug = true</code>): подтверждения поставщику (callback) и полная выгрузка (clean_export) не отправляются никогда — запуск записывает только первую страницу очереди.</div>
 <?php endif; ?>
-<?php if ($active): ?>
-<div class="flash warn">Идёт <?= e(mb_strtolower(JongGolf::KINDS[$active['kind']])) ?> №<?= (int) $active['id'] ?> — <a href="<?= e($base . 'runs/' . (int) $active['id'] . '/') ?>">открыть</a>.</div>
+<?php if ($active && $tab !== 'overview'): ?>
+<div class="flash warn">Идёт <?= e(mb_strtolower(JongGolf::KINDS[$active['kind']])) ?> №<?= (int) $active['id'] ?> — <a href="<?= e($base) ?>">ход на «Обзоре»</a> · <a href="<?= e($base . 'runs/' . (int) $active['id'] . '/') ?>">отчёт</a>.</div>
 <?php endif; ?>
 
-<div class="stats">
-  <div class="stat<?= $enabled ? ' hot' : ' warn' ?>"><span><?= $enabled ? 'Вкл.' : 'Выкл.' ?></span>Автозагрузка</div>
-  <a class="stat" href="<?= e($base . '?tab=runs') ?>"><span><?= $last ? e(date('d.m H:i', strtotime((string) $last['started_at']))) : '—' ?></span>
-    <?= $last ? e(JongGolf::KINDS[$last['kind']] . ': ' . mb_strtolower(JongGolf::STATUSES[$last['status']] ?? $last['status'])) : 'Запусков ещё не было' ?></a>
-  <div class="stat"><span><?= $fmt($products['active'] ?? 0) ?> / <?= $fmt($products['total'] ?? 0) ?></span>Товаров Jong•Golf на сайте (активных / всего)</div>
-  <a class="stat<?= $mapCount['unresolved'] ? ' warn' : '' ?>" href="<?= e($base . '?tab=map') ?>"><span><?= $fmt($mapCount['total']) ?></span>Сочетаний в таблице категорий<?= $mapCount['unresolved'] ? ' (без категории: ' . $fmt($mapCount['unresolved']) . ')' : '' ?></a>
-  <a class="stat<?= $unmappedCount ? ' warn' : '' ?>" href="<?= e($base . '?tab=map') ?>"><span><?= $fmt($unmappedCount) ?></span>Несопоставленных сочетаний в последнем прогоне</a>
-</div>
+<nav class="subtabs" aria-label="Разделы">
+  <?php foreach (SuppliersController::TABS as $k => $label): ?>
+    <a href="<?= e($base . ($k === 'overview' ? '' : '?tab=' . $k)) ?>" class="<?= $tab === $k ? 'on' : '' ?>"><?= e($label) ?><?= $k === 'map' ? ' <i>' . $fmt($mapCount['total']) . '</i>' : '' ?></a>
+  <?php endforeach; ?>
+</nav>
 
+<?php if ($tab === 'overview'): ?>
+<?php ob_start(); ?>
 <div class="card jg-acts">
+  <h2 class="sup-acts-h">Проверка и пробный прогон</h2>
   <div class="jg-actrow">
     <button class="btn" type="button" id="jg-test" data-url="<?= e($base . 'test/') ?>"<?= $cfg['api_key'] === '' ? ' disabled title="Сначала укажите ключ API"' : '' ?>>Проверить подключение</button>
     <form class="jg-dry" id="jg-dry" action="<?= e($base . 'start/') ?>" method="post" enctype="multipart/form-data">
@@ -54,19 +55,23 @@ $unmappedCount = count($lastFinished['stats']['unmapped'] ?? []);
       <input type="file" name="feed" accept=".json,application/json" hidden>
       <button class="btn" type="submit">Пробный прогон</button>
     </form>
-    <form id="jg-run" action="<?= e($base . 'start/') ?>" method="post" data-ask="Запустить загрузку сейчас? Товары будут записаны на сайт<?= $debug || !$enabled ? '' : ', поставщику уйдут подтверждения обработанных страниц' ?>.">
-      <input type="hidden" name="mode" value="run">
-      <button class="btn btn-p" type="submit"<?= $enabled ? '' : ' disabled title="Автозагрузка выключена"' ?>>Запустить сейчас</button>
-    </form>
   </div>
-  <p class="hint jg-res" id="jg-res" role="status">Проверка связи — только справочники (export_product_setting): у поставщика ничего не меняется. Пробный прогон ничего не пишет в каталог и не подтверждает поставщику — показывает, что будет добавлено, изменено и скрыто.</p>
+  <p class="hint jg-res" id="jg-res" role="status">Проверка связи — только справочники (export_product_setting): у поставщика ничего не меняется. Пробный прогон ничего не пишет в каталог и не подтверждает поставщику — показывает, что будет добавлено, изменено и скрыто.
+    «Запустить сейчас» — только при включённой автозагрузке<?= $debug || !$enabled ? '' : ': поставщику уйдут подтверждения обработанных страниц' ?>.</p>
 </div>
+<?php $actionsCard = (string) ob_get_clean(); ?>
+<?= $view->partial('admin/suppliers/overview', ['actionsCard' => $actionsCard]) ?>
 
-<nav class="subtabs" aria-label="Разделы">
-  <?php foreach (SuppliersController::TABS as $k => $label): ?>
-    <a href="<?= e($base . ($k === 'settings' ? '' : '?tab=' . $k)) ?>" class="<?= $tab === $k ? 'on' : '' ?>"><?= e($label) ?><?= $k === 'map' ? ' <i>' . $fmt($mapCount['total']) . '</i>' : '' ?></a>
-  <?php endforeach; ?>
-</nav>
+<?php else: ?>
+<div class="stats">
+  <div class="stat<?= $enabled ? ' hot' : ' warn' ?>"><span><?= $enabled ? 'Вкл.' : 'Выкл.' ?></span>Автозагрузка</div>
+  <a class="stat" href="<?= e($base . '?tab=runs') ?>"><span><?= $last ? e(date('d.m H:i', strtotime((string) $last['started_at']))) : '—' ?></span>
+    <?= $last ? e(JongGolf::KINDS[$last['kind']] . ': ' . mb_strtolower(JongGolf::STATUSES[$last['status']] ?? $last['status'])) : 'Запусков ещё не было' ?></a>
+  <div class="stat"><span><?= $fmt($products['active'] ?? 0) ?> / <?= $fmt($products['total'] ?? 0) ?></span>Товаров Jong•Golf на сайте (активных / всего)</div>
+  <a class="stat<?= $mapCount['unresolved'] ? ' warn' : '' ?>" href="<?= e($base . '?tab=map') ?>"><span><?= $fmt($mapCount['total']) ?></span>Сочетаний в таблице категорий<?= $mapCount['unresolved'] ? ' (без категории: ' . $fmt($mapCount['unresolved']) . ')' : '' ?></a>
+  <a class="stat<?= $unmappedCount ? ' warn' : '' ?>" href="<?= e($base . '?tab=map') ?>"><span><?= $fmt($unmappedCount) ?></span>Несопоставленных сочетаний в последнем прогоне</a>
+</div>
+<?php endif; ?>
 
 <?php if ($tab === 'settings'): ?>
 <form method="post" action="<?= e($base . 'settings/') ?>" class="setform" autocomplete="off">
@@ -151,9 +156,10 @@ $unmappedCount = count($lastFinished['stats']['unmapped'] ?? []);
         <p class="hint">Фото вписывается в холст по центру на белом фоне (0 — сохранить как есть) и пересохраняется через GD в папку фото сайта (как у Webasyst).</p>
         <label class="check"><input type="checkbox" name="photo_replace" value="1"<?= $on('photo_replace') ? ' checked' : '' ?>> Заменять имеющиеся фото</label>
         <label class="check"><input type="checkbox" name="photo_check_file" value="1"<?= $on('photo_check_file') ? ' checked' : '' ?>> Проверять, что файл главного фото есть на диске (иначе скачать заново)</label>
-        <div class="pair">
+        <div class="row3">
           <label class="fld"><span>Фильтр категории</span><select name="category_filter"><?php foreach (JongGolf::FILTER_MODES as $k => $label): ?><option value="<?= e($k) ?>"<?= $cfg['category_filter'] === $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
           <label class="fld"><span>Хранить отчёты, дней</span><input name="log_days" type="number" min="1" max="90" value="<?= e($cfg['log_days']) ?>"></label>
+          <label class="fld"><span>Историю цен и наличия («Обзор»), дней</span><input name="history_days" type="number" min="30" max="3650" value="<?= e($cfg['history_days']) ?>"></label>
         </div>
       </div>
       <div class="savebar"><button class="btn btn-p">Сохранить</button><span class="hint">Настройки применяются со следующего запуска.</span></div>
@@ -272,7 +278,7 @@ $unmappedCount = count($lastFinished['stats']['unmapped'] ?? []);
   <?php else: ?><div class="empty-card"><h2>Нет категорий</h2><p>Сначала загрузите таблицу соответствия.</p></div><?php endif; ?>
 </form>
 
-<?php else: ?>
+<?php elseif ($tab === 'runs'): ?>
 <?php /** @var array $runs */ ?>
 <div class="card">
   <?php if ($runs): ?>

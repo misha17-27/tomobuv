@@ -46,3 +46,47 @@
   .jg-dry select,.jg-dry input[type=file]{max-width:100%}
   .jg-facts > div{grid-template-columns:1fr}
 }
+/* список поставщиков и «Хит обуви» (префикс sup-) */
+.sup-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:16px}
+.sup-item .card-hd h2 a{color:inherit;text-decoration:none}
+.sup-item .card-hd h2 a:hover{text-decoration:underline}
+.sup-about{margin:0 0 10px}
+.sup-map td small{display:block}
+.sup-map tr.sup-root th{background:var(--line-2);text-align:left;font-size:13px;padding-top:10px;padding-bottom:10px}
+.sup-map select{min-width:180px}
+.sup-map td:nth-child(2) select{min-width:150px}
+.sup-unm{margin:8px 0 0;padding-left:18px;columns:2 320px;font-size:13.5px}
+.sup-addtype input[name=type]{width:200px;max-width:100%}
+@media (max-width:760px){
+  .sup-list{grid-template-columns:1fr}
+  .sup-map select,.sup-map td:nth-child(2) select{min-width:140px}
+  .sup-addtype input[name=type]{width:100%}
+}
+/* «Обзор» поставщика (admin/suppliers/overview) и кнопки в шапке */
+.sup-head{display:inline-flex;gap:8px;flex-wrap:wrap}
+.sup-live .card-hd .st{white-space:nowrap}
+.sup-live-label{margin:0 0 12px;font-weight:600}
+.jg-acts .sup-acts-h{font-size:1.02rem;margin:0 0 12px}
+.sup-pass{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13.5px;color:var(--steel);min-width:0;max-width:100%}
+.sup-pass select{width:auto;min-width:0;max-width:100%}
+.sup-ov-stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.sup-ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:20px;margin-bottom:20px;align-items:start}
+.sup-ov-grid > .card{margin-bottom:0;min-width:0}
+.sup-h3{font-size:14.5px;margin:14px 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sup-h3:first-child{margin-top:0}
+.sup-h3 a{font-weight:500;font-size:13px;margin-left:auto}
+.sup-mini td,.sup-mini th{padding:7px 10px;font-size:13.5px;vertical-align:top}
+.sup-mini td small,.sup-ov-grid td small{display:block}
+.sup-up{color:var(--bad);font-weight:600}
+.sup-down{color:var(--ok);font-weight:600}
+.sup-chips{margin-bottom:10px;flex-wrap:wrap}
+.sup-filter{padding:12px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.sup-period{display:flex;gap:8px;align-items:center;font-size:13.5px;color:var(--steel)}
+.sup-period select{width:auto}
+.sup-skip{margin:0;padding-left:18px;display:grid;gap:6px;font-size:14px}
+@media (max-width:760px){
+  .sup-head{width:100%}
+  .sup-head .btn{flex:1 1 auto}
+  .sup-ov-stats{grid-template-columns:1fr 1fr}
+  .sup-h3 a{margin-left:0}
+}

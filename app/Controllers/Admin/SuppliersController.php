@@ -12,33 +12,54 @@ use App\Core\Str;
 use App\Services\Import\Importer;
 use App\Services\Suppliers\JongGolf;
 use App\Services\Suppliers\JongGolfMap;
+use App\Services\Suppliers\Suppliers;
 
 /**
+ * «Каталог → Поставщики»: список поставщиков (home) и страница Jong•Golf; «Хит обуви» — HitObuviController.
  * «Каталог → Поставщики → Jong•Golf» (только администратор): настройки автозагрузки по API (как cfg старого
  * загрузчика), таблица соответствия категорий, коэффициенты цен, проверка связи, пробный прогон, запуск, журнал.
  * Шаги запуска выполняет suppliers.js (POST …/runs/{id}/step/), как задания импорта.
  */
 final class SuppliersController extends BaseController
 {
+    use SupplierPages;
+
     protected const MANAGER_ALLOWED = false;
 
     private const BASE = '/admin/suppliers/jonggolf/';
     private const MAP_PER_PAGE = 50;
     private const LOG_PER_PAGE = 100;
-    public const TABS = ['settings' => 'Настройки', 'map' => 'Категории', 'prices' => 'Цены', 'runs' => 'Журнал'];
+    public const TABS = ['overview' => 'Обзор', 'settings' => 'Настройки', 'map' => 'Категории', 'prices' => 'Цены', 'runs' => 'Журнал'];
     public const LEVELS = ['all' => 'Все', 'add' => 'Добавлено', 'update' => 'Изменено', 'hide' => 'Скрыто', 'same' => 'Без изменений',
         'skip' => 'Пропущено', 'problem' => 'Ошибки и предупреждения', 'info' => 'Сообщения'];
 
+    protected static function sup(): string
+    {
+        return JongGolf::class;
+    }
+
+    protected static function supBase(): string
+    {
+        return self::BASE;
+    }
+
+    /** Список поставщиков: состояние загрузки, последний запуск, товары на сайте — по каждому адаптеру (Suppliers::all) */
     public function home(): Response
     {
-        return Response::redirect(self::BASE);
+        $list = [];
+        foreach (Suppliers::all() as $code => $cls) {
+            $cls::ensureSchema();
+            $list[$code] = ['cls' => $cls, 'title' => $cls::TITLE, 'about' => Suppliers::ABOUT[$code] ?? '', 'enabled' => $cls::enabled(), 'on' => $cls::on('enabled'),
+                'due' => $cls::due(), 'next' => $cls::nextRun(), 'last' => $cls::runs(1)[0] ?? null, 'active' => $cls::active(), 'products' => $cls::productCounts()];
+        }
+        return $this->render('admin/suppliers/index', ['title' => 'Поставщики', 'styles' => ['admin/suppliers.css'], 'list' => $list]);
     }
 
     public function index(): Response
     {
         JongGolf::ensureSchema();
-        $tab = Request::get('tab', 'settings');
-        if (!isset(self::TABS[$tab])) $tab = 'settings';
+        $tab = Request::get('tab', 'overview');
+        if (!isset(self::TABS[$tab])) $tab = 'overview';
         $db = App::db();
         $cfg = array_combine(array_keys(JongGolf::DEFAULTS), array_map([JongGolf::class, 'cfg'], array_keys(JongGolf::DEFAULTS)));
         $cfg['api_key'] = $cfg['api_key'] !== '' ? '1' : '';                 // сам ключ в шаблон не передаётся — только «задан»
@@ -54,7 +75,9 @@ final class SuppliersController extends BaseController
             'hasDict' => is_file(JongGolf::dir() . '/product_setting.json'), 'dictTime' => @filemtime(JongGolf::dir() . '/product_setting.json') ?: null,
             'hasPages' => (bool) $this->lastPages(), 'errors' => [], 'post' => null,
         ];
-        if ($tab === 'settings') {
+        if ($tab === 'overview') {
+            $data += $this->overviewData();
+        } elseif ($tab === 'settings') {
             [$attr, $attrErr] = JongGolf::attributes();
             $data += ['attrErr' => $attrErr];
         } elseif ($tab === 'map') {
@@ -69,6 +92,7 @@ final class SuppliersController extends BaseController
         } else {
             $data += ['runs' => JongGolf::runs(60)];
         }
+        $data['actions'] = $this->headerActions($data['live'] ?? null);
         return $this->render('admin/suppliers/jonggolf', $data);
     }
 
@@ -77,11 +101,11 @@ final class SuppliersController extends BaseController
         $errors = JongGolf::saveSettings($_POST);
         if ($errors) {
             $this->flash('Проверьте поля формы: ' . implode('; ', array_map(static fn($k, $v) => $k . ' — ' . $v, array_keys($errors), $errors)), true);
-            return Response::redirect(self::BASE);
+            return Response::redirect(self::BASE . '?tab=settings');
         }
         $this->log('jonggolf_settings', 'settings', null, ['enabled' => JongGolf::on('enabled')]);
         $this->flash('Настройки сохранены.' . (JongGolf::enabled() ? ' Автозагрузка ВКЛЮЧЕНА — cron старого сайта должен быть отключён.' : ' Автозагрузка выключена.'));
-        return Response::redirect(self::BASE);
+        return Response::redirect(self::BASE . '?tab=settings');
     }
 
     /** Перенос настроек из wa_loader_jonggolf.cfg.php (файл только читается как текст) */
@@ -90,7 +114,7 @@ final class SuppliersController extends BaseController
         $f = $_FILES['cfg'] ?? null;
         if (!is_array($f) || (int) ($f['error'] ?? 1) !== UPLOAD_ERR_OK || !is_uploaded_file((string) $f['tmp_name']) || (int) $f['size'] > 200000) {
             $this->flash('Выберите файл wa_loader_jonggolf.cfg.php (до 200 КБ).', true);
-            return Response::redirect(self::BASE);
+            return Response::redirect(self::BASE . '?tab=settings');
         }
         [$set, $skipped] = JongGolf::importOldConfig((string) $f['tmp_name']);
         @unlink((string) $f['tmp_name']);
@@ -98,7 +122,7 @@ final class SuppliersController extends BaseController
         $this->flash($set ? 'Перенесено настроек: ' . count($set) . (isset($set['api_key']) ? ', в том числе ключ API' : '')
             . '. Логин и пароль старой админки не переносятся. Автозагрузка по-прежнему ' . (JongGolf::on('enabled') ? 'включена' : 'выключена') . '.'
             : 'В файле не найдено настроек загрузчика Jong•Golf.', !$set);
-        return Response::redirect(self::BASE);
+        return Response::redirect(self::BASE . '?tab=settings');
     }
 
     /** Справочники поставщика (product_setting.json из tmp/ старого загрузчика) — для пробного прогона по файлу без связи с API */
@@ -107,17 +131,17 @@ final class SuppliersController extends BaseController
         $f = $_FILES['dict'] ?? null;
         if (!is_array($f) || (int) ($f['error'] ?? 1) !== UPLOAD_ERR_OK || !is_uploaded_file((string) $f['tmp_name']) || (int) $f['size'] > 2000000) {
             $this->flash('Выберите файл product_setting.json (до 2 МБ).', true);
-            return Response::redirect(self::BASE);
+            return Response::redirect(self::BASE . '?tab=settings');
         }
         $raw = (string) file_get_contents((string) $f['tmp_name']);
         $j = json_decode($raw, true);
         if (!is_array($j) || ($j['type'] ?? '') !== 'success' || !is_array($j['answer']['seasons'] ?? null)) {
             $this->flash('Это не справочники Jong•Golf (нужен ответ export_product_setting: type = success, answer.seasons).', true);
-            return Response::redirect(self::BASE);
+            return Response::redirect(self::BASE . '?tab=settings');
         }
         file_put_contents(JongGolf::dir() . '/product_setting.json', $raw);
         $this->flash('Справочники сохранены: сезонов ' . count($j['answer']['seasons']) . '.');
-        return Response::redirect(self::BASE);
+        return Response::redirect(self::BASE . '?tab=settings');
     }
 
     public function test(): Response
@@ -155,7 +179,8 @@ final class SuppliersController extends BaseController
             return Response::json(['ok' => false, 'error' => $e->getMessage()]);
         }
         $this->log($mode === 'run' ? 'jonggolf_run' : 'jonggolf_dry', 'settings', $id);
-        return Response::json(['ok' => true, 'id' => $id, 'redirect' => self::BASE . 'runs/' . $id . '/?go=1']);
+        // боевой — на «Обзор» (страница сама делает шаги; закрыли — продолжит cron), пробный — на страницу запуска с отчётом
+        return Response::json(['ok' => true, 'id' => $id, 'redirect' => $mode === 'run' ? self::BASE . '?go=' . $id : self::BASE . 'runs/' . $id . '/?go=1']);
     }
 
     public function showRun(string $id): Response
@@ -170,6 +195,8 @@ final class SuppliersController extends BaseController
         $p = [(int) $run['id']];
         if ($level === 'problem') $where .= " AND level IN ('error', 'warn')";
         elseif ($level !== 'all') { $where .= ' AND level = ?'; $p[] = $level; }
+        [$whySql, $whyParam, $why] = $this->whyFilter();
+        if ($why !== '') { $where .= $whySql; $p[] = $whyParam; }
         $total = (int) $db->value("SELECT COUNT(*) FROM supplier_run_log WHERE $where", $p);
         $pg = new Paginator($total, self::LOG_PER_PAGE, Request::page());
         $lines = $db->all("SELECT id, level, product_id, message, data, created_at FROM supplier_run_log WHERE $where ORDER BY id LIMIT " . self::LOG_PER_PAGE . ' OFFSET ' . $pg->offset, $p);
@@ -178,7 +205,7 @@ final class SuppliersController extends BaseController
         return $this->render('admin/suppliers/run', [
             'title' => JongGolf::KINDS[$run['kind']] . ' №' . $run['id'], 'back' => [self::BASE . '?tab=runs', 'Журнал запусков ' . JongGolf::TITLE],
             'styles' => ['admin/suppliers.css'], 'scripts' => ['admin/suppliers.js'], 'base' => self::BASE,
-            'run' => $run, 'progress' => JongGolf::progress($run), 'lines' => $lines, 'level' => $level, 'counts' => $counts, 'pg' => $pg,
+            'run' => $run, 'progress' => JongGolf::progress($run), 'lines' => $lines, 'level' => $level, 'why' => $why, 'sup' => JongGolf::class, 'counts' => $counts, 'pg' => $pg,
             'autostart' => Request::get('go') === '1' && $run['status'] === 'running',
         ]);
     }

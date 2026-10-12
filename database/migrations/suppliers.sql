@@ -77,6 +77,81 @@ CREATE TABLE IF NOT EXISTS `supplier_run_seen` (
   KEY `product` (`run_id`, `product_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ------------------------------------------------ общий каркас поставщиков (Хит обуви и следующие)
+-- Колонки — через проверку information_schema (в MySQL нет ADD COLUMN IF NOT EXISTS), как admin-import.sql.
+-- supplier_links.missed  — подряд полных проходов, в которых товара не было у поставщика (скрытие после N — сбой одной
+--                          страницы не скрывает товары); seen_at — когда товар последний раз был у поставщика.
+-- supplier_category_map  — kind: '' — сочетание Jong•Golf (сезон|категория|пол|ряд); 'cat' — категория поставщика
+--                          (ext_id — её id у поставщика); 'type' — тип из названия («шлепки») в разделе season;
+--                          mode: '' — категория сайта, 'skip' — не загружать, 'fallback' — тип только для категорий
+--                          без своей категории сайта; by_size — раскладывать по размерным рядам (12-26, 26-32 …).
+SET @db = DATABASE();
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_links' AND COLUMN_NAME = 'missed') = 0, 'ALTER TABLE `supplier_links` ADD COLUMN `missed` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `hidden`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_links' AND COLUMN_NAME = 'seen_at') = 0, 'ALTER TABLE `supplier_links` ADD COLUMN `seen_at` DATETIME NULL AFTER `missed`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_category_map' AND COLUMN_NAME = 'kind') = 0, 'ALTER TABLE `supplier_category_map` ADD COLUMN `kind` VARCHAR(8) NOT NULL DEFAULT '''' AFTER `supplier`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_category_map' AND COLUMN_NAME = 'ext_id') = 0, 'ALTER TABLE `supplier_category_map` ADD COLUMN `ext_id` VARCHAR(64) NULL AFTER `kind`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_category_map' AND COLUMN_NAME = 'by_size') = 0, 'ALTER TABLE `supplier_category_map` ADD COLUMN `by_size` TINYINT(1) NOT NULL DEFAULT 0 AFTER `category_id`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_category_map' AND COLUMN_NAME = 'note') = 0, 'ALTER TABLE `supplier_category_map` ADD COLUMN `note` VARCHAR(255) NOT NULL DEFAULT '''' AFTER `by_size`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_category_map' AND COLUMN_NAME = 'mode') = 0, 'ALTER TABLE `supplier_category_map` ADD COLUMN `mode` VARCHAR(8) NOT NULL DEFAULT '''' AFTER `by_size`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+-- ------------------------------------------------ «Обзор» поставщика: журнал изменений и история цен
+-- supplier_links.cost — цена поставщика за пару в последнем проходе (закупочная, без наценки): «было → стало» у поставщика.
+-- supplier_changes   — что загрузчик реально записал (пробные прогоны не пишут): kind new — добавлен, price — цена
+--                      поставщика или наша цена изменилась (old/new_cost — у поставщика за пару, old/new_price — на сайте),
+--                      hidden — скрыт загрузчиком (пропал у поставщика / цвет закончился), back — снова есть у поставщика.
+--                      Хранится «{код}.history_days» дней (по умолчанию 365) — Supplier::cleanup.
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_links' AND COLUMN_NAME = 'cost') = 0, 'ALTER TABLE `supplier_links` ADD COLUMN `cost` DECIMAL(12,2) NULL AFTER `seen_at`', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+CREATE TABLE IF NOT EXISTS `supplier_changes` (
+  `id`         INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  `supplier`   VARCHAR(32)   NOT NULL,
+  `run_id`     INT UNSIGNED  NULL,
+  `product_id` INT UNSIGNED  NOT NULL,
+  `code`       VARCHAR(100)  NOT NULL DEFAULT '',     -- товар у поставщика (supplier_links.code)
+  `kind`       VARCHAR(8)    NOT NULL,                -- new | price | hidden | back
+  `old_cost`   DECIMAL(12,2) NULL,                    -- цена поставщика за пару: было / стало
+  `new_cost`   DECIMAL(12,2) NULL,
+  `old_price`  DECIMAL(12,2) NULL,                    -- цена на сайте за пару (с наценкой): было / стало
+  `new_price`  DECIMAL(12,2) NULL,
+  `note`       VARCHAR(255)  NOT NULL DEFAULT '',
+  `created_at` DATETIME      NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `sup_kind` (`supplier`, `kind`, `created_at`),
+  KEY `product` (`product_id`, `created_at`),
+  KEY `run` (`run_id`, `kind`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Первое заполнение связей из перенесённых товаров (bin/import-webasyst.php: supplier = 'jonggolf',
 -- supplier_code = id_jonggolf). Название старого загрузчика — «{категория} {бренд} {код цвета}»: код — последнее слово.
 -- Только пока связей Jong•Golf нет; после повторного переноса их пересобирает JongGolf::relink() (с приведением

@@ -25,6 +25,7 @@ use App\Core\Cache;
 use App\Core\Seo;
 use App\Services\ProductName;
 use App\Services\SeoFix;
+use App\Services\UkWords;
 
 ini_set('memory_limit', '1024M');
 if (function_exists('set_time_limit')) set_time_limit(0);
@@ -65,30 +66,10 @@ $setCols = static function (string $table, string $where, array $params, array $
 };
 
 // ---------------------------------------------------------------- словарь слов для названий товаров
-$words = $data('product_words');           // ['Кроссовки' => 'Кросівки', …]
-uksort($words, static fn($a, $b) => mb_strlen($b) <=> mb_strlen($a));   // длинные фразы раньше
-// Слова от 3 букв меняются и вплотную к цифрам («99377-9чёрные», «Туфли68131A», «5пары»),
-// короткие («и», «из») — только отдельно стоящие, чтобы не трогать артикулы вида «465И».
-$reList = static fn(array $l) => implode('|', array_map(static fn($w) => preg_quote((string) $w, '/'), $l));
-$longWords = array_filter(array_keys($words), static fn($w) => mb_strlen((string) $w) >= 3);
-$shortWords = array_filter(array_keys($words), static fn($w) => mb_strlen((string) $w) < 3);
-$wordRe = $words ? '/' . ($longWords ? '(?<!\p{L})(' . $reList($longWords) . ')(?!\p{L})' : '(?!)')
-    . ($shortWords ? '|(?<![\p{L}\p{N}])(' . $reList($shortWords) . ')(?![\p{L}\p{N}])' : '') . '/u' : null;
-$lower = [];
-foreach ($words as $ru => $uk) $lower[mb_strtolower($ru)] = $uk;
-$trWords = static function (?string $s) use ($wordRe, $words, $lower): ?string {
-    if ($s === null || $s === '' || !$wordRe) return $s;
-    return preg_replace_callback($wordRe . 'i', static function ($m) use ($words, $lower) {
-        $w = ($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '');
-        $uk = $words[$w] ?? $lower[mb_strtolower($w)] ?? $w;
-        if (mb_strtolower($uk) === mb_strtolower($w)) return $w;   // одинаковое в обоих языках — написание как в названии («УГГИ»)
-        // сохранить регистр первой буквы
-        $first = mb_substr($w, 0, 1);
-        if ($first === mb_strtoupper($first)) $uk = mb_strtoupper(mb_substr($uk, 0, 1)) . mb_substr($uk, 1);
-        else $uk = mb_strtolower(mb_substr($uk, 0, 1)) . mb_substr($uk, 1);
-        return $uk;
-    }, $s);
-};
+// Перевод — App\Services\UkWords (та же логика у загрузчиков поставщиков): слова от 3 букв меняются и вплотную к цифрам
+// («99377-9чёрные», «Туфли68131A», «5пары»), короткие («и», «из») — только отдельно стоящие (артикулы вида «465И» не трогаются).
+$words = UkWords::words();                 // ['Кроссовки' => 'Кросівки', …], длинные фразы раньше
+$trWords = static fn(?string $s): ?string => UkWords::translate($s);
 /**
  * Название (после перевода) без русских слов — уже украинское: каждое кириллическое слово — из переводов словаря (в том
  * числе одинаковые в обоих языках: Угги, Дутики, Балетки…), из названия бренда (не переводятся), с украинской буквой

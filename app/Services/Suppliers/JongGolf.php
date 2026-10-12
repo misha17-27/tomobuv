@@ -5,12 +5,12 @@ namespace App\Services\Suppliers;
 
 use App\Core\App;
 use App\Core\Cache;
-use App\Core\Log;
 use App\Core\Settings;
 use App\Services\Import\Importer;
 
 /**
  * Автозагрузка товаров Jong•Golf по API — замена коммерческого wa_loader_jonggolf.php старого сайта (FinBoss).
+ * Адаптер общего каркаса поставщиков (Supplier: настройки, расписание, запуски, блокировки, отчёт).
  *
  * Запуск (supplier_runs) идёт шагами, каждый укладывается в бюджет времени (админка — ~12 с на AJAX-шаг,
  * cron/CLI — дольше), после обрыва продолжается с того же места (state):
@@ -27,7 +27,7 @@ use App\Services\Import\Importer;
  * В режиме разработки (config debug = true), при выключенной автозагрузке и в пробном прогоне clean_export и callback
  * не отправляются никогда (проверка — в JongGolfApi).
  */
-final class JongGolf
+final class JongGolf extends Supplier
 {
     public const CODE = 'jonggolf';
     public const TITLE = 'Jong•Golf';
@@ -47,7 +47,7 @@ final class JongGolf
         'meta_title_uk' => '', 'meta_description_uk' => '', 'meta_keywords_uk' => '',
         'attributes' => "gender=Пол\nsize=Размер\nmaterial>outside=Материал внешний\nmaterial>inside=Материал внутри\nmaterial>bottom=Материал\nmaterial>outsole=Материал подошвы\nbrand=Бренд",
         'photo_width' => '700', 'photo_height' => '700', 'photo_quality' => '90', 'photo_replace' => '0', 'photo_check_file' => '0',
-        'category_filter' => 'empty', 'log_days' => '5', 'prices' => '{}',
+        'category_filter' => 'empty', 'log_days' => '5', 'history_days' => '365', 'prices' => '{}',
     ];
     public const BOOLS = ['enabled', 'full_update', 'add_new', 'add_without_photo', 'update_category', 'update_name', 'update_features',
         'update_description', 'keep_manual_hidden', 'adopt_manual', 'photo_replace', 'photo_check_file'];
@@ -61,29 +61,7 @@ final class JongGolf
     public const FIELDS = ['gender' => 'пол', 'size' => 'размерный ряд', 'brand' => 'бренд', 'material>outside' => 'материал верха',
         'material>inside' => 'материал внутри', 'material>bottom' => 'материал стельки', 'material>outsole' => 'материал подошвы'];
 
-    public const KINDS = ['run' => 'Запуск', 'dry' => 'Пробный прогон', 'test' => 'Проверка связи'];
-    public const STATUSES = ['running' => 'Идёт', 'done' => 'Готово', 'error' => 'Ошибка', 'stopped' => 'Остановлен'];
-
-    /** Запуск без движения дольше стольких секунд считается прерванным (как busy.txt старого загрузчика — 15 мин) */
-    public const STALE = 900;
-    private const LOG_MAX = 20000;
-
-    private static bool $schemaOk = false;
-    private static int $held = 0;
-    private static array $logBuf = [];
-
     // ================================================================== настройки
-
-    public static function cfg(string $k): string
-    {
-        $v = Settings::all()['jonggolf.' . $k] ?? null;
-        return $v === null ? (string) (self::DEFAULTS[$k] ?? '') : (string) $v;
-    }
-
-    public static function on(string $k): bool
-    {
-        return self::cfg($k) === '1';
-    }
 
     /** Автозагрузка включена владельцем и задан ключ */
     public static function enabled(): bool
@@ -132,7 +110,7 @@ final class JongGolf
             $in[$k] = in_array($k, self::BOOLS, true) ? (!empty($post[$k]) ? '1' : '0') : trim(str_replace("\r\n", "\n", (string) ($post[$k] ?? $def)));
         }
         foreach (['window_from' => [0, 23], 'window_to' => [0, 23], 'period' => [1, 24], 'photo_width' => [0, 3000], 'photo_height' => [0, 3000],
-                     'photo_quality' => [30, 100], 'log_days' => [1, 90]] as $k => [$min, $max]) {
+                     'photo_quality' => [30, 100], 'log_days' => [1, 90], 'history_days' => [30, 3650]] as $k => [$min, $max]) {
             if (!preg_match('/^\d{1,4}$/', $in[$k]) || (int) $in[$k] < $min || (int) $in[$k] > $max) $err[$k] = "Число от $min до $max";
         }
         if (!isset($err['window_from'], $err['window_to']) && (int) $in['window_from'] > (int) $in['window_to']) $err['window_to'] = 'Конец окна раньше начала';
@@ -147,10 +125,7 @@ final class JongGolf
         if ($key !== '' && $key !== '-' && !preg_match('/^[\x21-\x7E]{8,200}$/', $key)) $err['api_key'] = 'Ключ — латинские буквы, цифры и знаки, без пробелов (8–200 символов)';
         if ($in['enabled'] === '1' && !$hasKey) $err['enabled'] = 'Чтобы включить автозагрузку, укажите ключ API';
         if ($err) return $err;
-        $all = Settings::all();
-        foreach ($in as $k => $v) {
-            if (($all['jonggolf.' . $k] ?? null) !== $v) Settings::set('jonggolf.' . $k, $v);
-        }
+        self::store($in);
         if ($key === '-') self::storeKey(['key' => '']);
         elseif ($key !== '') self::storeKey(['key' => $key]);
         return [];
@@ -162,7 +137,12 @@ final class JongGolf
      */
     public static function attributes(?string $text = null): array
     {
-        $text ??= self::cfg('attributes');
+        return self::featureLines($text ?? self::cfg('attributes'), self::FIELDS);
+    }
+
+    /** Разбор строк «поле=Характеристика» по списку полей поставщика $fields (общий для адаптеров) */
+    public static function featureLines(string $text, array $fields): array
+    {
         $features = App::db()->all('SELECT id, code, name, type FROM features');
         $byName = [];
         foreach ($features as $f) { $byName[Importer::nk((string) $f['name'])] ??= $f; $byName['code:' . strtolower((string) $f['code'])] = $f; }
@@ -171,7 +151,7 @@ final class JongGolf
             $line = trim($line);
             if ($line === '' || !str_contains($line, '=')) continue;
             [$l, $r] = array_map('trim', explode('=', $line, 2));
-            if (!isset(self::FIELDS[$l])) { $err[] = 'неизвестное поле поставщика «' . $l . '» (есть: ' . implode(', ', array_keys(self::FIELDS)) . ')'; continue; }
+            if (!isset($fields[$l])) { $err[] = 'неизвестное поле поставщика «' . $l . '» (есть: ' . implode(', ', array_keys($fields)) . ')'; continue; }
             $f = $byName[Importer::nk($r)] ?? $byName['code:' . strtolower($r)] ?? null;
             if (!$f) { $err[] = 'на сайте нет характеристики «' . $r . '»'; continue; }
             $out[$l] = $f;
@@ -256,50 +236,7 @@ final class JongGolf
         return [$set, $skipped];
     }
 
-    /**
-     * Список строк настройки (производители, категории): по строке на значение, «/r/n» тоже разделитель.
-     * Ключ — нормализованное имя (HTML-сущности раскодированы до конца: «J&amp;amp;G» из старого cfg = «J&G» поставщика)
-     */
-    public static function lines(string $k): array
-    {
-        $out = [];
-        foreach (preg_split('~\r\n|\n|/r/n~', self::cfg($k)) ?: [] as $l) {
-            $l = self::name($l);
-            if ($l !== '') $out[JongGolfMap::norm($l)] = $l;
-        }
-        return $out;
-    }
-
-    /**
-     * Название из API поставщика (бренд, значение характеристики): HTML-сущности раскодированы до стабильного
-     * результата (поставщик экранирует многократно: «J&amp;amp;amp;G» → «J&G»), пробелы схлопнуты, края обрезаны
-     */
-    public static function name(string $s): string
-    {
-        for ($i = 0; $i < 10 && str_contains($s, '&'); $i++) {
-            $d = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            if ($d === $s) break;
-            $s = $d;
-        }
-        return trim(preg_replace('/\s+/u', ' ', $s) ?? $s);          // null — не UTF-8: как есть
-    }
-
-    // ================================================================== схема и связи
-
-    /** Таблицы раздела (database/migrations/suppliers.sql) — создать, если install.php ещё не запускали */
-    public static function ensureSchema(): void
-    {
-        if (self::$schemaOk) return;
-        Cache::remember('suppliers.schema.1', 86400, static function (): int {
-            $db = App::db();
-            if (!(int) $db->value("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'supplier_run_seen'")) {
-                $sql = (string) preg_replace('/^\s*--.*$/m', '', (string) file_get_contents(ROOT . '/database/migrations/suppliers.sql'));
-                foreach (preg_split('/;\s*\n/', $sql) ?: [] as $stmt) if (trim($stmt) !== '') $db->pdo()->exec($stmt);
-            }
-            return 1;
-        });
-        self::$schemaOk = true;
-    }
+    // ================================================================== связи
 
     /** Код товара у поставщика для поиска: без пробелов, верхний регистр, кириллические С/А/В/Е/Н/К/М/О/Р/Т/Х → латиница */
     public static function code(string $aid): string
@@ -332,143 +269,7 @@ final class JongGolf
         return count($rows);
     }
 
-    // ================================================================== расписание
-
-    /**
-     * Пора ли боевому запуску по расписанию: включено, час в окне [с; по] (Europe/Kiev, включительно) и с прошлого
-     * запуска прошло не меньше периода (−10 мин: cron раз в час не сдвигает 01 → 06 → 11 → 16 на час). [да/нет, почему]
-     */
-    public static function due(?int $now = null): array
-    {
-        $now ??= time();
-        if (!self::enabled()) return [false, 'автозагрузка выключена'];
-        return self::dueAt($now, (int) self::cfg('window_from'), (int) self::cfg('window_to'), (int) self::cfg('period'), self::lastStart());
-    }
-
-    /** Начало последнего боевого запуска по API (timestamp) или null */
-    private static function lastStart(): ?int
-    {
-        $last = App::db()->value("SELECT MAX(started_at) FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'api'", [self::CODE]);
-        return $last ? (int) strtotime((string) $last) : null;
-    }
-
-    /** Правило расписания без базы (для проверки): час $now в [$from; $to] и с $last прошло не меньше $period ч − 10 мин */
-    public static function dueAt(int $now, int $from, int $to, int $period, ?int $last): array
-    {
-        $h = (int) date('G', $now);
-        if ($h < $from || $h > $to) return [false, sprintf('вне окна запуска (%02d:00–%02d:59)', $from, $to)];
-        if ($last && $now - $last < $period * 3600 - 600) return [false, 'после запуска ' . date('d.m H:i', $last) . ' не прошло ' . $period . ' ч'];
-        return [true, ''];
-    }
-
-    /** Время следующего запуска по расписанию (для экрана) или null */
-    public static function nextRun(): ?int
-    {
-        if (!self::enabled()) return null;
-        $last = self::lastStart();                                          // один запрос, а не на каждый шаг цикла
-        $t = time();
-        for ($i = 0; $i < 48 * 6; $i++, $t += 600) {
-            if (self::dueAt($t, (int) self::cfg('window_from'), (int) self::cfg('window_to'), (int) self::cfg('period'), $last)[0]) return $i === 0 ? time() : $t - $t % 3600;
-        }
-        return null;
-    }
-
-    /**
-     * Из cron (bin/cron.php раз в час, bin/supplier-jonggolf.php без параметров): продолжить прерванный боевой запуск
-     * или начать новый по расписанию и довести до конца. $say — вывод строк в консоль.
-     */
-    public static function cron(callable $say, float $maxTime = 3000.0): void
-    {
-        self::ensureSchema();
-        self::cleanup();
-        $db = App::db();
-        $stale = $db->row("SELECT * FROM supplier_runs WHERE supplier = ? AND status = 'running' ORDER BY id DESC LIMIT 1", [self::CODE]);
-        if ($stale && strtotime((string) ($stale['updated_at'] ?? $stale['started_at'])) > time() - self::STALE) {
-            $say('Запуск №' . $stale['id'] . ' уже идёт — пропуск');
-            return;
-        }
-        if ($stale && $stale['kind'] === 'run' && self::enabled()) {
-            $say('Продолжаю прерванный запуск №' . $stale['id']);
-            self::log((int) $stale['id'], 'info', 'Продолжение после обрыва (cron)');
-            self::flushLog();
-            $id = (int) $stale['id'];
-        } else {
-            if ($stale) self::finishRun((int) $stale['id'], 'stopped', 'прерван: не было движения больше ' . intdiv(self::STALE, 60) . ' мин');
-            [$due, $why] = self::due();
-            if (!$due) { $say('Автозагрузка ' . self::TITLE . ': не запускаю — ' . $why); return; }
-            $id = self::start('run', ['src' => 'api', 'origin' => 'cron']);
-            $say('Запуск №' . $id . ' начат');
-        }
-        self::drive($id, $say, $maxTime);
-    }
-
-    /** Довести запуск до конца (CLI): шаги подряд под общей блокировкой */
-    public static function drive(int $id, callable $say, float $maxTime = 3000.0): array
-    {
-        $t0 = microtime(true);
-        $p = ['busy' => true];
-        $lastLine = '';
-        $ok = self::withLock(static function () use ($id, $say, $t0, $maxTime, &$p, &$lastLine): void {
-            while (true) {
-                $p = self::step($id, 60.0);
-                $line = $p['label'] . ': товаров ' . $p['stats']['products'] . ', добавлено ' . $p['stats']['created'] . ', изменено ' . $p['stats']['updated']
-                    . ', без изменений ' . $p['stats']['same'] . ', скрыто ' . ($p['stats']['hidden_color'] + $p['stats']['hidden_missing']) . ', пропущено ' . $p['stats']['skipped'];
-                if ($line !== $lastLine) { $say($line); $lastLine = $line; }
-                if (!empty($p['done'])) break;
-                if (!empty($p['wait'])) sleep(5);                           // идёт перестройка индекса каталога
-                elseif (!empty($p['busy'])) sleep(3);
-                if (microtime(true) - $t0 > $maxTime) { $say('Время вышло — продолжение при следующем запуске'); break; }
-            }
-        }, 30);
-        if (!$ok) $say('Запуски ' . self::TITLE . ' заняты другим процессом — повтор при следующем cron');
-        return $p;
-    }
-
-    /** Одна блокировка на запуски поставщика (GET_LOCK — общий для админки, cron и CLI) */
-    public static function withLock(callable $fn, int $wait = 0): bool
-    {
-        if (self::$held > 0) { self::$held++; try { $fn(); } finally { self::$held--; } return true; }
-        $db = App::db();
-        $name = 'tomobuv_sup_' . substr(md5((string) $db->value('SELECT DATABASE()') . self::CODE), 0, 16);
-        try { $got = (int) $db->value('SELECT GET_LOCK(?, ?)', [$name, $wait]); } catch (\PDOException) { $got = 1; }
-        if ($got !== 1) return false;
-        self::$held++;
-        try {
-            $fn();
-        } finally {
-            self::$held--;
-            try { $db->value('SELECT RELEASE_LOCK(?)', [$name]); } catch (\PDOException) {}
-        }
-        return true;
-    }
-
     // ================================================================== запуски
-
-    /** Папка файлов раздела (вне public): storage/import/jonggolf[/runs/N] */
-    public static function dir(?int $runId = null): string
-    {
-        $d = Importer::dir() . '/' . self::CODE . ($runId ? '/runs/' . $runId : '');
-        if (!is_dir($d)) @mkdir($d, 0775, true);
-        return $d;
-    }
-
-    public static function run(int $id): ?array
-    {
-        self::ensureSchema();
-        $r = App::db()->row('SELECT * FROM supplier_runs WHERE id = ? AND supplier = ?', [$id, self::CODE]);
-        if (!$r) return null;
-        foreach (['stats', 'state'] as $k) { $v = json_decode((string) $r[$k], true); $r[$k] = is_array($v) ? $v : []; }
-        $r['stats'] += self::emptyStats();
-        return $r;
-    }
-
-    /** Идущий запуск (не прерванный) или null */
-    public static function active(): ?array
-    {
-        self::ensureSchema();
-        $r = App::db()->row("SELECT id, updated_at, started_at FROM supplier_runs WHERE supplier = ? AND status = 'running' ORDER BY id DESC LIMIT 1", [self::CODE]);
-        return $r && strtotime((string) ($r['updated_at'] ?? $r['started_at'])) > time() - self::STALE ? self::run((int) $r['id']) : null;
-    }
 
     public static function emptyStats(): array
     {
@@ -490,10 +291,7 @@ final class JongGolf
         $origin = in_array($o['origin'] ?? '', ['cron', 'cli'], true) ? $o['origin'] : 'admin';
         if ($kind === 'run' && $src === 'api' && !self::enabled()) throw new \RuntimeException('Автозагрузка выключена — включите её в настройках (после отключения cron старого сайта) или сделайте пробный прогон.');
         if ($kind === 'run' && $src === 'file' && $origin !== 'cli') throw new \RuntimeException('Запись по сохранённому файлу — только из командной строки (bin/supplier-jonggolf.php --write).');
-        $busy = static function (): void {
-            if (($a = self::active()) !== null) throw new \RuntimeException('Уже идёт запуск №' . $a['id'] . ' (' . self::KINDS[$a['kind']] . ') — дождитесь окончания или остановите его.');
-        };
-        $busy();
+        self::assertIdle();
         if ($src === 'api' && self::cfg('api_key') === '') throw new \RuntimeException('Не задан ключ API.');
         $files = [];
         if ($src === 'file') {
@@ -510,18 +308,9 @@ final class JongGolf
             'dict_file' => isset($o['dict_file']) && is_file((string) $o['dict_file']) ? (string) $o['dict_file'] : null,
             'debug' => App::isDebug(),
         ];
-        // «уже идёт?» и создание запуска — под блокировкой запусков поставщика: два одновременных старта (cron и «Запустить
-        // сейчас») не создают двух запусков, которые делят одну очередь поставщика (каждый увидел бы только часть выгрузки)
-        $id = 0;
-        $locked = self::withLock(static function () use (&$id, $db, $kind, $src, $origin, $o, $state, $busy): void {
-            $busy();
-            // старые «зависшие» запуски — остановлены (новый начнётся с начала; поставщику они ничего не подтвердили после обрыва)
-            $db->query("UPDATE supplier_runs SET status = 'stopped', error = 'прерван', finished_at = NOW() WHERE supplier = ? AND status = 'running'", [self::CODE]);
-            $id = $db->insert('supplier_runs', ['supplier' => self::CODE, 'kind' => $kind, 'src' => $src, 'origin' => $origin, 'status' => 'running',
-                'user_id' => !empty($o['user_id']) ? (int) $o['user_id'] : null, 'stats' => json_encode(self::emptyStats()), 'state' => json_encode($state),
-                'started_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
-        }, 10);
-        if (!$locked) throw new \RuntimeException('Запуски ' . self::TITLE . ' заняты другим процессом — повторите через минуту.');
+        // «уже идёт?» и создание запуска — под блокировкой запусков поставщика (createRun): очередь поставщика одна —
+        // два запуска разделили бы её, и каждый увидел бы только часть выгрузки
+        $id = self::createRun($kind, $src, $origin, !empty($o['user_id']) ? (int) $o['user_id'] : null, $state);
         $dir = self::dir($id);
         if ($src === 'file') {
             $n = 0;
@@ -543,92 +332,20 @@ final class JongGolf
         return $id;
     }
 
-    /**
-     * Шаг запуска (AJAX из админки или цикл CLI) не дольше $budget секунд. Параллельный шаг того же поставщика
-     * (другая вкладка, cron) — ['busy' => true]. Ошибка поставщика или базы — запуск в статусе error.
-     */
-    public static function step(int $id, float $budget = 12.0): array
+    /** Ошибка шага: ключ API замаскирован; ошибка обмена с поставщиком (JongGolfError) — не в журнал ошибок сайта */
+    protected static function failure(\Throwable $e): array
     {
-        self::ensureSchema();
-        $res = null;
-        $ok = self::withLock(static function () use ($id, $budget, &$res): void {
-            if (function_exists('set_time_limit')) @set_time_limit((int) $budget + 90);
-            @ini_set('memory_limit', '512M');
-            $run = self::run($id);
-            if (!$run || $run['status'] !== 'running') { $res = $run; return; }
-            $deadline = microtime(true) + max(3.0, $budget);
-            $db = App::db();
-            try {
-                self::advance($run, $deadline);
-            } catch (\Throwable $e) {
-                $msg = $e instanceof JongGolfError || $e instanceof \RuntimeException ? $e->getMessage() : 'Ошибка: ' . $e->getMessage();
-                $msg = (new JongGolfApi())->mask($msg);
-                if (!$e instanceof JongGolfError) Log::error('supplier jonggolf run #' . $id . ': ' . $msg . ' @ ' . $e->getFile() . ':' . $e->getLine());
-                $run['stats']['errors']++;
-                self::log($id, 'error', 'Работа завершена аварийно: ' . $msg);
-                self::save($run);
-                self::finishRun($id, 'error', mb_substr($msg, 0, 1000));   // остановленный во время шага — остаётся «Остановлен»
-                self::dropPhotoCache($id);
-            } finally {
-                self::flushLog();
-            }
-            $res = self::run($id);
-        });
-        if (!$ok) return ['busy' => true] + self::progress(self::run($id));
-        return self::progress($res);
+        $msg = $e instanceof JongGolfError || $e instanceof \RuntimeException ? $e->getMessage() : 'Ошибка: ' . $e->getMessage();
+        return [(new JongGolfApi())->mask($msg), $e instanceof JongGolfError];
     }
 
-    /**
-     * Остановить запуск (кнопка «Остановить»): текущая страница поставщику не подтверждается.
-     * Атомарно: статус «Остановлен» ставится одним условным UPDATE (… AND status = 'running') под блокировкой запусков,
-     * если её удалось взять за 3 с (шага нет). Идёт шаг (другая вкладка, cron/CLI держит блокировку весь прогон) — тот же
-     * условный UPDATE без блокировки: шаг проверяет статус перед каждой порцией, подтверждением страницы и завершением
-     * (stopped()), а свой итоговый статус пишет тоже только поверх «Идёт» (finishRun) — «Готово» или «Ошибка» не
-     * перезапишут «Остановлен». Уже начатая порция (одна транзакция) дописывается целиком. @return bool остановлен сейчас
-     */
-    public static function stop(int $id): bool
+    protected static function stopNote(array $run): string
     {
-        $run = self::run($id);
-        if (!$run || $run['status'] !== 'running') return false;
-        $done = false;
-        $write = static function (bool $locked) use ($id, $run, &$done): void {
-            $done = self::finishRun($id, 'stopped', 'остановлен вручную');
-            if (!$done) return;                                             // шаг успел закончить запуск сам
-            self::log($id, 'warn', 'Остановлен вручную' . (!empty($run['state']['callback']) ? ' — текущая страница поставщику не подтверждена, её товары придут снова' : ''));
-            self::flushLog();
-            if ($locked) self::dropPhotoCache($id);                         // идущий шаг уберёт их сам, заметив остановку
-        };
-        if (!self::withLock(static fn() => $write(true), 3)) $write(false);
-        return $done;
-    }
-
-    /** Запуск больше не «Идёт» (остановлен кнопкой или новым запуском) — шаг прекращает работу, ничего не дописывая */
-    private static function stopped(int $id): bool
-    {
-        return (string) App::db()->value('SELECT status FROM supplier_runs WHERE id = ?', [$id]) !== 'running';
-    }
-
-    /** Итоговый статус — только поверх «Идёт» (см. stop). @return bool записан */
-    private static function finishRun(int $id, string $status, ?string $error = null): bool
-    {
-        return App::db()->update('supplier_runs', ['status' => $status, 'error' => $error, 'finished_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
-            "id = ? AND status = 'running'", [$id]) > 0;
-    }
-
-    /** Фото, скачанные для отложенной порции (JongGolfSync, photo-*.jpg в папке запуска), — запуск закончен, не нужны */
-    private static function dropPhotoCache(int $id): void
-    {
-        foreach (glob(Importer::dir() . '/' . self::CODE . '/runs/' . $id . '/photo-*.jpg') ?: [] as $f) @unlink($f);
-    }
-
-    private static function save(array $run): void
-    {
-        App::db()->update('supplier_runs', ['stats' => json_encode($run['stats'], JSON_UNESCAPED_UNICODE), 'state' => json_encode($run['state'], JSON_UNESCAPED_UNICODE),
-            'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [(int) $run['id']]);
+        return !empty($run['state']['callback']) ? ' — текущая страница поставщику не подтверждена, её товары придут снова' : '';
     }
 
     /** Машина состояний запуска (см. описание класса) */
-    private static function advance(array &$run, float $deadline): void
+    protected static function advance(array &$run, float $deadline): void
     {
         $id = (int) $run['id'];
         $st = &$run['state'];
@@ -841,127 +558,22 @@ final class JongGolf
         }
     }
 
-    /** Состояние запуска для экрана и CLI */
-    public static function progress(?array $run): array
+    /** Подпись идущей фазы */
+    protected static function phaseLabel(array $st): string
     {
-        if (!$run) return ['ok' => false, 'error' => 'Запуск не найден', 'done' => true, 'label' => '—', 'stats' => self::emptyStats()];
-        $st = $run['state'];
-        $label = match ($run['status']) {
-            'running' => match ($st['phase'] ?? '') {
-                'dict' => 'Справочники поставщика', 'page' => 'Запрос страницы ' . ((int) ($st['page'] ?? 0) + 1),
-                'items' => 'Страница ' . (int) $st['page'] . ': товар ' . (int) $st['pos'] . ' из ' . (int) ($st['count'] ?? 0),
-                'confirm' => 'Подтверждение страницы ' . (int) $st['page'], 'finish' => 'Завершение', default => 'Идёт',
-            },
-            'done' => 'Итоги',
-            default => self::STATUSES[$run['status']] ?? $run['status'],
+        return match ($st['phase'] ?? '') {
+            'dict' => 'Справочники поставщика', 'page' => 'Запрос страницы ' . ((int) ($st['page'] ?? 0) + 1),
+            'items' => 'Страница ' . (int) $st['page'] . ': товар ' . (int) $st['pos'] . ' из ' . (int) ($st['count'] ?? 0),
+            'confirm' => 'Подтверждение страницы ' . (int) $st['page'], 'finish' => 'Завершение', default => 'Идёт',
         };
-        $pct = ($st['phase'] ?? '') === 'items' && !empty($st['count']) ? (int) floor((int) $st['pos'] / (int) $st['count'] * 100) : ($run['status'] === 'running' ? 0 : 100);
-        $wait = $run['status'] === 'running' && !empty($st['wait']);      // порция отложена: перестройка индекса — следующий шаг через 5 с
-        if ($wait) $label .= ' — ждёт окончания перестройки индекса каталога';
-        return ['ok' => $run['status'] !== 'error', 'id' => (int) $run['id'], 'status' => $run['status'], 'kind' => $run['kind'], 'label' => $label,
-            'percent' => $pct, 'page' => (int) ($st['page'] ?? 0), 'done' => $run['status'] !== 'running', 'wait' => $wait, 'error' => $run['error'], 'stats' => $run['stats']];
     }
 
-    /** «: нет в наличии у поставщика 12, категория не сопоставлена 3…» */
-    public static function skipText(array $skip): string
+    public static function skipReasons(): array
     {
-        if (!$skip) return '';
-        $parts = [];
-        arsort($skip);
-        foreach ($skip as $k => $n) $parts[] = (JongGolfSync::SKIP[$k] ?? $k) . ' — ' . $n;
-        return ' (' . implode(', ', $parts) . ')';
-    }
-
-    // ================================================================== журнал
-
-    /** Строка отчёта (как write_to_log старого загрузчика). Пишется пачкой — flushLog() */
-    public static function log(int $runId, string $level, string $msg, ?int $pid = null, ?array $data = null): void
-    {
-        static $count = [];
-        $count[$runId] = ($count[$runId] ?? (int) App::db()->value('SELECT COUNT(*) FROM supplier_run_log WHERE run_id = ?', [$runId])) + 1;
-        if ($count[$runId] > self::LOG_MAX && !in_array($level, ['error', 'info'], true)) return;
-        self::$logBuf[] = ['run_id' => $runId, 'level' => $level, 'product_id' => $pid, 'message' => mb_substr($msg, 0, 1000),
-            'data' => $data !== null ? json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) : null, 'created_at' => date('Y-m-d H:i:s')];
-        if (count(self::$logBuf) >= 300) self::flushLog();
-    }
-
-    /** Отметка буфера отчёта (порция, которую придётся повторить, не должна оставить строк) */
-    public static function logMark(): int
-    {
-        return count(self::$logBuf);
-    }
-
-    public static function logRollback(int $mark): void
-    {
-        self::$logBuf = array_slice(self::$logBuf, 0, $mark);
-    }
-
-    public static function flushLog(): void
-    {
-        if (!self::$logBuf) return;
-        $buf = self::$logBuf;
-        self::$logBuf = [];
-        App::db()->insertMany('supplier_run_log', $buf, false, 300);
-    }
-
-    public static function runs(int $limit = 50): array
-    {
-        self::ensureSchema();
-        $rows = App::db()->all('SELECT id, kind, src, origin, status, stats, error, started_at, finished_at, updated_at FROM supplier_runs WHERE supplier = ? ORDER BY id DESC LIMIT ' . max(1, $limit), [self::CODE]);
-        foreach ($rows as &$r) { $s = json_decode((string) $r['stats'], true); $r['stats'] = (is_array($s) ? $s : []) + self::emptyStats(); }
-        unset($r);
-        return $rows;
-    }
-
-    /** Последний завершённый запуск (боевой или пробный) — для «несопоставленных сочетаний» */
-    public static function lastFinished(): ?array
-    {
-        self::ensureSchema();
-        $id = App::db()->value("SELECT id FROM supplier_runs WHERE supplier = ? AND kind IN ('run', 'dry') AND status = 'done' ORDER BY id DESC LIMIT 1", [self::CODE]);
-        return $id ? self::run((int) $id) : null;
-    }
-
-    /**
-     * Уборка: отчёты и файлы запусков старше «Хранить отчёты, дней» (как save_log_int старого загрузчика);
-     * последние 5 запусков остаются всегда. Загруженные для прогона файлы — через сутки.
-     */
-    public static function cleanup(): void
-    {
-        self::ensureSchema();
-        $db = App::db();
-        $days = max(1, (int) self::cfg('log_days'));
-        $keep = array_map('intval', $db->col('SELECT id FROM supplier_runs WHERE supplier = ? ORDER BY id DESC LIMIT 5', [self::CODE]));
-        $old = array_map('intval', $db->col("SELECT id FROM supplier_runs WHERE supplier = ? AND status <> 'running' AND started_at < DATE_SUB(NOW(), INTERVAL ? DAY)", [self::CODE, $days]));
-        $old = array_values(array_diff($old, $keep));
-        foreach (array_chunk($old, 200) as $part) {
-            [$ph, $v] = $db->in($part);
-            foreach (['supplier_run_log', 'supplier_run_seen'] as $t) $db->query("DELETE FROM `$t` WHERE run_id IN ($ph)", $v);
-            $db->query("DELETE FROM supplier_runs WHERE id IN ($ph)", $v);
-        }
-        foreach ($old as $id) {
-            $d = Importer::dir() . '/' . self::CODE . '/runs/' . $id;
-            if (!is_dir($d)) continue;
-            foreach (glob($d . '/*') ?: [] as $f) if (is_file($f)) @unlink($f);
-            @rmdir($d);
-        }
-        foreach (glob(self::dir() . '/upload-*') ?: [] as $f) if (is_file($f) && filemtime($f) < time() - 86400) @unlink($f);
-        // связи с удалёнными товарами (товар удалили в админке — следующий запуск создаст его заново и свяжет)
-        $db->query('DELETE l FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [self::CODE]);
+        return JongGolfSync::SKIP;
     }
 
     // ================================================================== как старый загрузчик
-
-    /** translit() старого загрузчика — 1-в-1 (адреса новых товаров: «Кросівки Jong•Golf B11751-12» → krosivki-jonggolf-b11751-12) */
-    public static function translit(string $text): string
-    {
-        static $ru = null, $en = null;
-        $ru ??= explode('-', 'А-а-Б-б-В-в-Ґ-ґ-Г-г-Д-д-Е-е-Ё-ё-Є-є-Ж-ж-З-з-И-и-І-і-Ї-ї-Й-й-К-к-Л-л-М-м-Н-н-О-о-П-п-Р-р-С-с-Т-т-У-у-Ф-ф-Х-х-Ц-ц-Ч-ч-Ш-ш-Щ-щ-Ъ-ъ-Ы-ы-Ь-ь-Э-э-Ю-ю-Я-я');
-        $en ??= explode('-', 'A-a-B-b-V-v-G-g-G-g-D-d-E-e-E-e-E-e-ZH-zh-Z-z-I-i-I-i-I-i-J-j-K-k-L-l-M-m-N-n-O-o-P-p-R-r-S-s-T-t-U-u-F-f-H-h-TS-ts-CH-ch-SH-sh-SCH-sch---Y-y---E-e-YU-yu-YA-ya');
-        $text = str_replace(['>', '/'], '-', $text);
-        $res = str_replace($ru, $en, $text);
-        $res = (string) preg_replace('/[\s]+/ui', '-', $res);
-        return strtolower((string) preg_replace('/[^0-9a-zа-я\-]+/ui', '', $res));
-    }
 
     /** Мета-тег по шаблону ({name}); keywords — как старый загрузчик: без ( ) , . * " и через «, » */
     public static function meta(string $tpl, string $name, bool $keywords = false): string

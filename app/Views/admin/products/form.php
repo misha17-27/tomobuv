@@ -107,6 +107,8 @@ $paths = AdminCatalog::paths($cats);
       <?php endif; ?>
     </section>
 
+    <?= $view->partial('admin/suppliers/price-history', ['supLinks' => $supLinks ?? [], 'supHistory' => $supHistory ?? []]) ?>
+
     <section class="card" aria-labelledby="h-cats">
       <h2 id="h-cats">Категории</h2>
       <label class="fld"><span>Основная категория</span>

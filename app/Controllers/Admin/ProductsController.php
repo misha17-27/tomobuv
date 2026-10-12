@@ -15,6 +15,7 @@ use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
 use App\Services\ProductName;
 use App\Services\SeoAudit;
+use App\Services\Suppliers\SupplierOverview;
 
 /** Админка → Товары: список с фильтрами и массовыми действиями, карточка товара, фото. */
 final class ProductsController extends BaseController
@@ -484,6 +485,9 @@ final class ProductsController extends BaseController
             'seoUk'    => $seoUk,
             'badges'   => AdminCatalog::BADGES,
             'maxUpload' => ini_get('upload_max_filesize'),
+            // «Цена у поставщика: история» — товар связан с поставщиком автозагрузки (Jong•Golf, Хит обуви)
+            'supLinks'   => $id ? SupplierOverview::productLinks($id) : [],
+            'supHistory' => $id ? SupplierOverview::productHistory($id) : [],
         ]);
     }
 

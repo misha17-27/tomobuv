@@ -142,3 +142,12 @@ button.btn.btn-d:hover{background:#fef1f1;border-color:var(--bad)}
 /* ---------- бренды: список категорий с условием */
 .ac-list{margin:0;padding-left:18px;display:grid;gap:6px;font-size:13.5px}
 .ac-brands .ac-pname small{overflow-wrap:anywhere}
+
+/* ---------- карточка товара: «Цена у поставщика: история» (admin/suppliers/price-history) */
+.sup-ph .ac-small{margin:0 0 8px;line-height:1.5}
+.sup-ph .sup-warn{color:var(--bad);font-weight:600}
+.sup-ph .sup-mini td,.sup-ph .sup-mini th{padding:6px 8px;font-size:13px}
+.sup-ph .sup-mini small{display:block}
+.sup-ph .sup-up{color:var(--bad)}
+.sup-ph .sup-down{color:var(--ok)}
+.sup-ph .hint{margin:8px 0 0}

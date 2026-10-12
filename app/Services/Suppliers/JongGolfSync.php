@@ -29,19 +29,14 @@ use App\Services\ProductName;
  * Пропуски считаются по причинам (SKIP) — в отчёте видно, почему товар не попал на сайт.
  * Порция — одна транзакция под блокировкой записи индекса (CatalogIndexer::locked, до транзакции) со снимком
  * характеристик до записи и точечной переиндексацией (CatalogIndexer::products) — как Importer::processRows.
+ * Общая часть (транзакция порции, бренды, значения характеристик, фото, пакетный UPDATE) — SupplierSync.
  */
-final class JongGolfSync
+final class JongGolfSync extends SupplierSync
 {
+    protected const SUPPLIER = JongGolf::class;
     private const PORTION = 20;                 // товаров поставщика (≈80 цветов) за транзакцию
-    private const MIN_LEFT = 5.0;               // следующая порция шага — только если до конца бюджета осталось столько секунд
-    private const LOCK_WAIT = 10.0;             // ждать блокировку индекса не дольше (и не дольше остатка бюджета шага)
-    private const PRECHECK = 2.0;               // проверка «не идёт ли перестройка» до скачивания фото — ждать не дольше
-    private const IMG_MAX = 10485760;
     private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext, meta_title, meta_description, meta_keywords, meta_title_uk, meta_description_uk, meta_keywords_uk';
-    /** Колонки products, которые может менять загрузчик (белый список UPDATE) */
-    private const UPDATABLE = ['name', 'name_uk', 'sku', 'supplier', 'supplier_code', 'category_id', 'brand_id', 'price', 'compare_price', 'size',
-        'stock', 'in_stock', 'status', 'meta_title', 'meta_description', 'meta_keywords', 'meta_title_uk', 'meta_description_uk', 'meta_keywords_uk', 'updated_at'];
     private const CHANGE_NAMES = ['price' => 'цена', 'compare_price' => 'старая цена', 'status' => 'на сайте', 'in_stock' => 'наличие', 'stock' => 'остаток',
         'sku' => 'артикул (размерный ряд)', 'supplier' => 'поставщик', 'supplier_code' => 'код поставщика', 'category_id' => 'категория', 'name' => 'название',
         'name_uk' => 'название (укр.)', 'size' => 'размер', 'brand_id' => 'бренд', 'meta_title' => 'SEO title', 'meta_description' => 'SEO description', 'meta_keywords' => 'SEO keywords'];
@@ -56,22 +51,11 @@ final class JongGolfSync
         'dup' => 'повтор кода цвета', 'ambiguous' => 'код совпал с несколькими товарами',
     ];
 
-    private int $runId;
     private array $dict;
-    private bool $dry;
-    private array $stats;
-    private array $cfg = [];
-    private array $attr = [];
     private array $prices = [];
-    private array $ci = [];
-    private array $brandByNk = [];
-    private array $values = [];                 // [fid => [нормализованное значение => id]]
-    private array $brandByNorm = [];            // [ключ раскодированного названия => [id, …]] — «J&amp;amp;G» на сайте = «J&G»
-    private int $brandFeature = 0;
     private int $sizeFeature = 0;
     private array $skipBrands = [];
     private array $skipCats = [];
-    private bool $deferred = false;             // порция отложена: блокировка индекса занята (идёт полная перестройка)
 
     public function __construct(int $runId, array $dict, bool $dry, array &$stats)
     {
@@ -115,33 +99,6 @@ final class JongGolfSync
         return $pos;
     }
 
-    /** Последняя порция process() отложена (блокировка индекса занята) — шаг заканчивается и повторяется позже */
-    public function deferred(): bool
-    {
-        return $this->deferred;
-    }
-
-    /**
-     * Бренды сайта: [ключ названия как в базе => id] и [ключ раскодированного названия => [id, …]] (JongGolf::name —
-     * «J&amp;amp;G» и «J&amp;G» из старой базы оба «J&G»); значения характеристик — заново (после отката транзакции
-     * в кэше могли остаться несуществующие id)
-     */
-    private function loadBrands(): void
-    {
-        $this->brandByNk = [];
-        $this->brandByNorm = [];
-        $this->values = [];
-        $norm = [];
-        foreach (App::db()->all('SELECT id, name, product_count FROM brands ORDER BY id') as $b) {
-            $this->brandByNk[Importer::nk((string) $b['name'])] ??= (int) $b['id'];
-            $norm[Importer::nk(JongGolf::name((string) $b['name']))][(int) $b['id']] = (int) $b['product_count'];
-        }
-        foreach ($norm as $k => $list) {                                    // больше товаров — первым, при равенстве — меньший id
-            uksort($list, static fn($a, $b) => [$list[$b], $a] <=> [$list[$a], $b]);
-            $this->brandByNorm[$k] = array_keys($list);
-        }
-    }
-
     /** Одна порция. false — блокировка индекса занята (порция не записана, повторится; скачанные фото остаются в папке запуска) */
     private function portion(array $slice, float $deadline): bool
     {
@@ -173,32 +130,9 @@ final class JongGolfSync
         if (!CatalogIndexer::locked(static function (): void {}, max(0.0, min(self::PRECHECK, $deadline - microtime(true) - 1.0)), false)) return $defer();
         // фото — до ожидания блокировки; скачанные лежат в папке запуска (photo-*.jpg) и при повторе порции не качаются снова
         $photos = $this->photos($items, $deadline);
-        $done = false;
-        for ($try = 1; ; $try++) {
-            $moved = [];
-            try {
-                // ждать блокировку — не дольше LOCK_WAIT и остатка бюджета шага
-                $ok = CatalogIndexer::locked(function () use (&$items, $photos, &$moved): void {
-                    App::db()->transaction(function () use (&$items, $photos, &$moved): void {
-                        $this->apply($items, $photos, $moved);
-                    });
-                }, max(0.0, min(self::LOCK_WAIT, $deadline - microtime(true) - 1.0)), false);
-                if (!$ok) return $defer();                                  // фото не удаляются — пригодятся следующему шагу
-                $done = true;
-                break;
-            } catch (\PDOException $e) {
-                foreach ($moved as $f) @unlink($f);
-                if ($try >= 3 || !CatalogIndexer::lockError($e)) { $this->dropPhotos($photos); throw $e; }
-                usleep(300000 * $try);                                      // взаимная блокировка — транзакция откачена, повтор
-                foreach ($items as &$it) { $it['id'] = $it['ex']['id'] ?? null; $it['stored'] = []; $it['drop_files'] = []; }
-                unset($it);
-                $this->loadBrands();
-            } catch (\Throwable $e) {
-                foreach ($moved as $f) @unlink($f);
-                $this->dropPhotos($photos);
-                throw $e;
-            }
-        }
+        // транзакция apply() под блокировкой индекса (ждать — не дольше LOCK_WAIT и остатка бюджета шага), повтор при взаимной блокировке
+        if (!$this->transact($items, $photos, $deadline)) return $defer();     // фото не удаляются — пригодятся следующему шагу
+        $done = true;
         foreach ($items as $it) foreach ($it['drop_files'] ?? [] as [$pid, $iid, $ext]) AdminCatalog::deleteImageFiles($pid, $iid, $ext);   // заменённые фото
         $this->dropPhotos($photos);
         if ($done) $this->report($items);
@@ -248,6 +182,7 @@ final class JongGolfSync
         $cost = (float) ($p['cost'] ?? 0);
         $disc = (float) ($p['discount'] ?? 0);
         [$price, $compare] = $disc > 0 ? [$disc, $cost] : [$cost, 0.0];
+        $raw = $price;                                                      // цена поставщика за пару до коэффициента (история цен «Обзора»)
         [$mrow, $mkey] = JongGolfMap::find($season, $cat, $gender, $size);
         $catId = $mrow && $mrow['category_id'] ? (int) $mrow['category_id'] : null;
         if ($catId !== null && !isset($this->ci['cats'][$catId])) $catId = null;          // категорию удалили после загрузки таблицы
@@ -275,6 +210,7 @@ final class JongGolfSync
                 'desc' => (string) ($p['desc'] ?? ''), 'cat_id' => $catId, 'mkey' => $mkey,
                 'supname' => trim($cat . ' ' . $brand . ' ' . $aid),                  // название старого загрузчика
                 'ex' => null, 'via' => '', 'link' => null, 'action' => '', 'msg' => '', 'upd' => [], 'changes' => [], 'id' => null,
+                'cost' => $raw, 'old_cost' => null, 'returned' => '', 'hide_note' => '',
             ];
         }
         return $out;
@@ -290,20 +226,6 @@ final class JongGolfSync
         return [];
     }
 
-    private function skipCount(string $why, string $msg, int $n = 1): void
-    {
-        $this->stats['skip'][$why] = ($this->stats['skip'][$why] ?? 0) + $n;
-        $this->example($why, $msg);
-    }
-
-    /** В отчёт — первые 20 примеров каждой массовой причины пропуска, остальное — только в счётчики */
-    private function example(string $why, string $msg): void
-    {
-        $n = $this->stats['examples'][$why] = (int) ($this->stats['examples'][$why] ?? 0) + 1;
-        if ($n <= 20) JongGolf::log($this->runId, 'skip', $msg);
-        elseif ($n === 21) JongGolf::log($this->runId, 'skip', '…дальше такие пропуски («' . self::SKIP[$why] . '») только считаются');
-    }
-
     // ================================================================== поиск существующих товаров
 
     private function match(array &$items): void
@@ -314,8 +236,8 @@ final class JongGolfSync
         [$ph, $v] = $db->in($codes);
         // 1. связь «код цвета → товар»
         $links = [];
-        foreach ($db->all("SELECT l.code, l.hidden, p.id FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND l.code IN ($ph)",
-            array_merge([JongGolf::CODE], $v)) as $r) $links[(string) $r['code']] = ['id' => (int) $r['id'], 'hidden' => (int) $r['hidden']];
+        foreach ($db->all("SELECT l.code, l.hidden, l.cost, p.id FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND l.code IN ($ph)",
+            array_merge([JongGolf::CODE], $v)) as $r) $links[(string) $r['code']] = ['id' => (int) $r['id'], 'hidden' => (int) $r['hidden'], 'cost' => $r['cost'] !== null ? (float) $r['cost'] : null];
         $ids = array_column($links, 'id');
         // 2. название старого загрузчика (так он искал: WHERE name = ? по всей таблице, без учёта регистра)
         $names = [];
@@ -420,10 +342,12 @@ final class JongGolfSync
         }
         if ($ex) {
             $it['id'] = (int) $ex['id'];
+            $it['old_cost'] = $it['link']['cost'] ?? null;                   // цена поставщика в прошлый раз (история цен «Обзора»)
             $keepSku = JongGolf::code((string) $ex['sku']) === $it['code'];      // артикул = код (товар заведён вручную) — не затираем размерным рядом
             $upd = [];
             if ($it['cstatus'] !== 1) {
                 // цвет закончился: товар скрыт, нет в наличии (старый загрузчик: status = 0, count = 0)
+                $it['hide_note'] = 'цвет закончился у поставщика';
                 $upd = ['status' => 0, 'in_stock' => 0, 'stock' => 0];
                 if ($it['price'] > 0) $upd += ['price' => $it['price'], 'compare_price' => $it['compare']];
                 if ($it['size'] !== '' && !$keepSku) $upd['sku'] = $it['size'];
@@ -438,6 +362,7 @@ final class JongGolfSync
                     'supplier' => JongGolf::CODE, 'supplier_code' => $it['ext']];
                 if ($it['size'] !== '' && !$keepSku) $upd['sku'] = $it['size'];
                 if ($status === 0) $it['warn'][] = 'скрыт вручную — оставлен скрытым (настройка)';
+                if ($status === 1 && (int) $ex['status'] === 0 && (int) ($it['link']['hidden'] ?? 0) === 1) $it['returned'] = 'цвет снова есть у поставщика — показан (был скрыт загрузчиком)';
                 if ($it['cat_id'] !== null && $c['update_category'] === '1' && ((int) $ex['category_id'] !== $it['cat_id'] || $ex['cats'] !== [$it['cat_id']])) {
                     $upd['category_id'] = $it['cat_id'];
                     $it['relink'] = true;
@@ -541,32 +466,6 @@ final class JongGolfSync
         ];
     }
 
-    /**
-     * Бренд: id существующего, «new:Название» (создаётся при записи) или null — не указан. $brand — раскодированное
-     * название (JongGolf::name: «J&G»), $raw — как в ответе поставщика (экранировано многократно: «J&amp;amp;amp;G»).
-     * На сайте такой бренд мог остаться со старого сайта экранированным («J&amp;amp;G», id 72267; есть и «J&amp;G»,
-     * id 71814) — загрузчик его не переименовывает (сменился бы адрес /brand/…/ — решение владельца), а находит:
-     *  1) бренд с раскодированным названием «J&G» (владелец переименовал — берётся он);
-     *  2) название как в базе — от ответа поставщика, раскодируя по одному уровню: первое совпадение (ближайшее
-     *     к ответу поставщика — то, что записывал старый загрузчик: «J&amp;amp;G» = id 72267);
-     *  3) по раскодированному названию: из нескольких — с большим числом товаров, при равенстве — меньший id;
-     *  4) нет — новый бренд с раскодированным названием («J&G»).
-     */
-    private function brandRef(string $brand, string $raw = ''): int|string|null
-    {
-        if ($brand === '') return null;
-        if (isset($this->brandByNk[Importer::nk($brand)])) return $this->brandByNk[Importer::nk($brand)];
-        $s = $raw !== '' ? $raw : $brand;
-        for ($i = 0; $i < 10; $i++) {
-            if (isset($this->brandByNk[Importer::nk($s)])) return $this->brandByNk[Importer::nk($s)];
-            $d = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            if ($d === $s) break;
-            $s = $d;
-        }
-        $ids = $this->brandByNorm[Importer::nk($brand)] ?? [];
-        return $ids ? $ids[0] : 'new:' . $brand;
-    }
-
     private static function show(string $col, $v, self $s): string
     {
         if ($v === null || $v === '') return '—';
@@ -614,51 +513,10 @@ final class JongGolfSync
         return $out;
     }
 
-    /** Готовое фото по ссылке в папке запуска (с параметрами холста: другие настройки — другой файл) */
-    private function photoFile(string $url): string
-    {
-        $c = $this->cfg;
-        return JongGolf::dir($this->runId) . '/photo-' . md5($url . '|' . $c['photo_width'] . 'x' . $c['photo_height'] . 'q' . $c['photo_quality']) . '.jpg';
-    }
-
-    private function frame(string $src, string $dst): array
-    {
-        $info = @getimagesize($src);
-        if (!$info || filesize($src) < 500) return ['error' => 'файл не является картинкой'];
-        [$w, $h] = $info;
-        if ($w < 10 || $h < 10 || $w * $h > 30000000) return ['error' => 'недопустимый размер ' . $w . '×' . $h];
-        $img = match ((string) $info['mime']) {
-            'image/jpeg' => @imagecreatefromjpeg($src),
-            'image/png'  => @imagecreatefrompng($src),
-            'image/gif'  => @imagecreatefromgif($src),
-            'image/webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($src) : false,
-            default      => false,
-        };
-        if (!$img) return ['error' => 'картинка не читается (' . $info['mime'] . ')'];
-        $cw = (int) $this->cfg['photo_width']; $ch = (int) $this->cfg['photo_height'];
-        if ($cw <= 0 || $ch <= 0) { $cw = $w; $ch = $h; }
-        $canvas = imagecreatetruecolor($cw, $ch);
-        imagefill($canvas, 0, 0, (int) imagecolorallocate($canvas, 255, 255, 255));   // поля — белые (у старого загрузчика почти белые #FFFFFA)
-        $scale = min($cw / $w, $ch / $h);                                      // вписать с сохранением пропорций (как старый: и увеличивая)
-        $tw = max(1, (int) round($w * $scale)); $th = max(1, (int) round($h * $scale));
-        imagecopyresampled($canvas, $img, intdiv($cw - $tw, 2), intdiv($ch - $th, 2), 0, 0, $tw, $th, $w, $h);
-        imagedestroy($img);
-        $tmp = $dst . '.part';                                              // целиком или никак: недописанный файл не примется за готовый
-        $ok = imagejpeg($canvas, $tmp, max(30, min(100, (int) $this->cfg['photo_quality'])));
-        imagedestroy($canvas);
-        if (!$ok || !@rename($tmp, $dst)) { @unlink($tmp); return ['error' => 'не удалось сохранить JPEG']; }
-        return ['file' => $dst, 'w' => $cw, 'h' => $ch];
-    }
-
-    private function dropPhotos(array $photos): void
-    {
-        foreach ($photos as $p) if (isset($p['file'])) @unlink($p['file']);
-    }
-
     // ================================================================== запись порции
 
     /** Всё в открытой транзакции (под блокировкой индекса). $moved — перенесённые файлы фото (удаляются при откате) */
-    private function apply(array &$items, array $photos, array &$moved): void
+    protected function apply(array &$items, array $photos, array &$moved): void
     {
         $db = App::db();
         $now = date('Y-m-d H:i:s');
@@ -787,14 +645,15 @@ final class JongGolfSync
         $links = [];
         foreach ($items as $it) {
             if (!$it['id'] || !in_array($it['action'], ['create', 'update', 'same', 'hide'], true)) continue;
-            $links[] = [JongGolf::CODE, $it['code'], (int) $it['id'], mb_substr($it['ext'], 0, 64), (int) ($it['link_set'] ?? 0), $now, $now];
+            $links[] = [JongGolf::CODE, $it['code'], (int) $it['id'], mb_substr($it['ext'], 0, 64), (int) ($it['link_set'] ?? 0), $now, $it['cost'] > 0 ? round((float) $it['cost'], 2) : null, $now, $now];
         }
         foreach (array_chunk($links, 300) as $part) {
-            $db->query('INSERT INTO supplier_links (supplier, code, product_id, ext_id, hidden, created_at, updated_at) VALUES '
-                . implode(',', array_fill(0, count($part), '(?,?,?,?,?,?,?)'))
-                . ' ON DUPLICATE KEY UPDATE product_id = VALUES(product_id), ext_id = VALUES(ext_id), hidden = VALUES(hidden), updated_at = VALUES(updated_at)', array_merge(...$part));
+            $db->query('INSERT INTO supplier_links (supplier, code, product_id, ext_id, hidden, seen_at, cost, created_at, updated_at) VALUES '
+                . implode(',', array_fill(0, count($part), '(?,?,?,?,?,?,?,?,?)'))
+                . ' ON DUPLICATE KEY UPDATE product_id = VALUES(product_id), ext_id = VALUES(ext_id), hidden = VALUES(hidden), seen_at = VALUES(seen_at), cost = VALUES(cost), updated_at = VALUES(updated_at)', array_merge(...$part));
         }
         $this->seen($items);
+        $this->journal($items, $now);                                       // «Обзор»: добавленные, цены, скрытые, вернувшиеся
 
         // 9. фильтр категории (как старый загрузчик: пустой — «price» + характеристики товаров)
         if ($filterCats && $this->cfg['category_filter'] !== 'never') $this->categoryFilters(array_keys(array_filter($filterCats, static fn($v, $k) => $k > 0, ARRAY_FILTER_USE_BOTH)));
@@ -806,74 +665,6 @@ final class JongGolfSync
             $snap['ids'] = array_values(array_unique(array_merge($snap['ids'], $changed)));
             CatalogIndexer::products($changed, $snap, false);              // кэш — один раз в конце запуска
         }
-    }
-
-    /** UPDATE products SET col = CASE id WHEN … END — пачкой по 200 */
-    private function bulkUpdate(array $upd): void
-    {
-        if (!$upd) return;
-        $db = App::db();
-        foreach (array_chunk($upd, 200, true) as $part) {
-            $cols = [];
-            foreach ($part as $id => $u) foreach ($u as $c => $v) $cols[$c][$id] = $v;
-            $set = []; $params = [];
-            foreach ($cols as $c => $vals) {
-                if (!in_array($c, self::UPDATABLE, true)) continue;
-                $sql = "`$c` = CASE id";
-                foreach ($vals as $id => $v) { $sql .= ' WHEN ? THEN ?'; $params[] = (int) $id; $params[] = is_float($v) ? (string) round($v, 2) : $v; }
-                $set[] = $sql . " ELSE `$c` END";
-            }
-            if (!$set) continue;
-            [$ph, $ids] = $db->in(array_keys($part));
-            $db->query('UPDATE products SET ' . implode(', ', $set) . " WHERE id IN ($ph)", array_merge($params, $ids));
-        }
-    }
-
-    /** id характеристик из настройки (без «Бренда» — у него значения = бренды) */
-    private function attrIds(): array
-    {
-        $out = [];
-        foreach ($this->attr as $f) $out[(int) $f['id']] = 1;
-        return $out;
-    }
-
-    /** Ключ значения характеристики: раскодированное (значение сайта «Шкіра &amp;amp; текстиль» = «Шкіра & текстиль» поставщика) */
-    private static function vkey(string $v): string
-    {
-        return Importer::nk(JongGolf::name($v));
-    }
-
-    /**
-     * id значений характеристик: существующее — без учёта регистра и лишних пробелов («велюр» = «Велюр»,
-     * «60% PU,\n 40% Тканина» = «60% PU, 40% Тканина» — фильтр не раздваивается), новое — создаётся в конце списка.
-     * @return [fid => [ключ значения => id]]
-     */
-    private function valueIds(array $want): array
-    {
-        $db = App::db();
-        $out = [];
-        foreach ($want as $fid => $vals) {
-            if (!isset($this->values[$fid])) {
-                $this->values[$fid] = [];
-                foreach ($db->all('SELECT id, value FROM feature_values WHERE feature_id = ? ORDER BY id', [$fid]) as $r) $this->values[$fid][self::vkey((string) $r['value'])] ??= (int) $r['id'];
-            }
-            foreach (array_keys($vals) as $val) {
-                $k = self::vkey((string) $val);
-                if (!isset($this->values[$fid][$k])) {
-                    $clean = mb_substr(trim((string) preg_replace('/\s+/u', ' ', (string) $val)), 0, 255);
-                    $this->values[$fid][$k] = AdminCatalog::valueId((int) $fid, $clean);
-                    JongGolf::log($this->runId, 'info', 'Новое значение характеристики: ' . $this->featureName((int) $fid) . ' = «' . $clean . '»');
-                }
-                $out[$fid][$k] = $this->values[$fid][$k];
-            }
-        }
-        return $out;
-    }
-
-    private function featureName(int $fid): string
-    {
-        foreach ($this->attr as $f) if ((int) $f['id'] === $fid) return (string) $f['name'];
-        return '#' . $fid;
     }
 
     private function categoryFilters(array $cats): void
@@ -892,19 +683,6 @@ final class JongGolfSync
                 $db->update('categories', ['filter' => mb_substr(implode(',', $new), 0, 255)], 'id = ?', [(int) $cid]);
                 JongGolf::log($this->runId, 'info', 'Фильтр категории «' . ($this->ci['path'][(int) $cid] ?? $cid) . '»: ' . implode(',', $new));
             }
-        }
-    }
-
-    /** Встреченные коды и товары запуска (для скрытия отсутствующих и повторов) */
-    private function seen(array $items): void
-    {
-        $rows = [];
-        foreach ($items as $it) {
-            if (!in_array($it['action'], ['create', 'update', 'same', 'hide'], true)) continue;
-            $rows[$it['code']] = [$this->runId, $it['code'], $it['id'] ? (int) $it['id'] : null];
-        }
-        foreach (array_chunk(array_values($rows), 500) as $part) {
-            App::db()->query('INSERT IGNORE INTO supplier_run_seen (run_id, code, product_id) VALUES ' . implode(',', array_fill(0, count($part), '(?,?,?)')), array_merge(...$part));
         }
     }
 
@@ -961,11 +739,6 @@ final class JongGolfSync
         return match ($it['via']) { 'name' => ' [найден по названию]', 'code' => ' [найден по коду, взят под загрузчик]', default => '' };
     }
 
-    private static function num(float $v): string
-    {
-        return rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
-    }
-
     /** Подробности строки для таблицы пробного прогона и сверки: что будет у товара после записи */
     private function data(array $it): array
     {
@@ -1019,14 +792,18 @@ final class JongGolfSync
             } elseif ($missing) {
                 $ids = array_map('intval', array_keys($missing));
                 if (!$this->dry) {
-                    CatalogIndexer::locked(static function () use ($db, $ids): void {
-                        $db->transaction(static function () use ($db, $ids): void {
+                    CatalogIndexer::locked(function () use ($db, $ids): void {
+                        $db->transaction(function () use ($db, $ids): void {
                             $snap = CatalogIndexer::snapshot($ids);
+                            $codes = [];
                             foreach (array_chunk($ids, 500) as $part) {
                                 [$ph, $v] = $db->in($part);
                                 $db->query("UPDATE products SET status = 0, updated_at = NOW() WHERE id IN ($ph)", $v);
                                 $db->query("UPDATE supplier_links SET hidden = 1, updated_at = NOW() WHERE supplier = ? AND product_id IN ($ph)", array_merge([JongGolf::CODE], $v));
+                                $codes += $db->pairs("SELECT product_id, code FROM supplier_links WHERE supplier = ? AND product_id IN ($ph)", array_merge([JongGolf::CODE], $v));
                             }
+                            foreach ($ids as $pid) $codes[$pid] ??= '';
+                            $this->journalHidden($codes, 'нет в полной выгрузке поставщика');
                             CatalogIndexer::products($ids, $snap, false);
                         });
                     });
