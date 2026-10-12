@@ -28,7 +28,7 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
 </div>
 <?php else: ?>
 <div class="flash jg-on">Автозагрузка включена: сверка по расписанию из cron (bin/cron.php) <?= $schedule === '00:00–23:59' ? 'круглые сутки' : 'с ' . e($schedule) ?>, раз в <?= (int) $cfg['period'] ?> ч;
-  полный проход (цены и наличие всех товаров) — не чаще раза в <?= (int) $cfg['full_hours'] ?> ч. <?= $next ? 'Следующий — около ' . e(date('d.m H:i', $next)) . ' (' . e(HitObuvi::MODES[$nextMode]) . ').' : e($due[1]) ?></div>
+  полный проход (цены и наличие всех товаров) — не чаще раза в <?= (int) $cfg['full_hours'] ?> ч, в <?= (int) $cfg['full_from'] ?>:00–<?= (int) $cfg['full_to'] ?>:59. <?= $next ? 'Следующий — около ' . e(date('d.m H:i', $next)) . ' (' . e(HitObuvi::MODES[$nextMode]) . ').' : e($due[1]) ?></div>
 <?php endif; ?>
 <?php if ($active && $tab !== 'overview'): ?>
 <div class="flash warn">Идёт <?= e(mb_strtolower(HitObuvi::KINDS[$active['kind']])) ?> №<?= (int) $active['id'] ?> — <a href="<?= e($base) ?>">ход на «Обзоре»</a> · <a href="<?= e($base . 'runs/' . (int) $active['id'] . '/') ?>">отчёт</a>.</div>
@@ -94,6 +94,10 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
           <label class="fld"><span>Сверка — раз в N часов</span><input name="period" type="number" min="1" max="168" value="<?= e($cfg['period']) ?>"></label>
         </div>
         <label class="fld"><span>Полный проход (цены и наличие всех товаров) — не чаще раза в N часов; остальные запуски — быстрые (только новые товары сверху списков)</span><input name="full_hours" type="number" min="1" max="720" value="<?= e($cfg['full_hours']) ?>"></label>
+        <div class="pair">
+          <label class="fld"><span>Полный проход — с часа</span><input name="full_from" type="number" min="0" max="23" value="<?= e($cfg['full_from']) ?>"></label>
+          <label class="fld"><span>по час (включительно)</span><input name="full_to" type="number" min="0" max="23" value="<?= e($cfg['full_to']) ?>"><span class="hint">Ночью — меньше нагрузка на сайт поставщика и ваш хостинг. Запоздавший больше чем на сутки полный проход идёт и вне окна.</span></label>
+        </div>
         <p class="hint">Время — Europe/Kiev (сейчас на сервере <?= e(date('H:i')) ?>). По умолчанию — сверка каждые 5 ч круглые сутки (окно 0–23), каждый запуск — полный проход:
           ≈1 100 запросов к сайту поставщика и 1,5–2 ч (cron продолжает запуск каждый час, пока не закончит). Быстрый проход — ≈10–20 запросов. Чтобы реже нагружать сайт поставщика,
           поставьте, например, полный проход раз в 24 ч — между ними пойдут быстрые. Нужен cron <code>bin/cron.php</code> раз в час (docs/INSTALL.md).

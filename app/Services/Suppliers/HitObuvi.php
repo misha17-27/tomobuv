@@ -39,9 +39,10 @@ final class HitObuvi extends Supplier
 
     public const DEFAULTS = [
         'enabled' => '0',
-        // сверка каждые 5 ч круглые сутки (cron хостинга раз в час решает, пора ли); полный проход — не чаще раза в full_hours ч
-        // (по умолчанию каждый запуск — полный: цены и наличие всех товаров), остальные — быстрые (только новые сверху списков)
-        'window_from' => '0', 'window_to' => '23', 'period' => '5', 'full_hours' => '5',
+        // сверка каждые 5 ч круглые сутки (cron хостинга раз в час решает, пора ли): быстрая — только новые сверху списков
+        // (до quick_pages страниц), полный проход (цены и наличие всех товаров, ≈1 100 запросов) — раз в full_hours ч и только
+        // ночью, в часы full_from–full_to (решение владельца: быстро каждые 5 ч, полностью раз в сутки — бережно к поставщику)
+        'window_from' => '0', 'window_to' => '23', 'period' => '5', 'full_hours' => '24', 'full_from' => '0', 'full_to' => '6',
         'delay' => '2', 'max_requests' => '2000', 'page_limit' => '100', 'quick_pages' => '5',
         'roots' => "/zhenskaya-obuv\n/muzhskaya-obuv\n/detskaya-obuv\n/podrostkovaya-obuv",
         // наценка: не задана — включить загрузку нельзя (цена поставщика — закупочная)
@@ -126,12 +127,13 @@ final class HitObuvi extends Supplier
         }
         $roots = array_keys(HitObuviMap::roots());
         $in['roots'] = implode("\n", array_values(array_intersect($roots, array_map('strval', (array) ($post['roots'] ?? [])))));
-        foreach (['window_from' => [0, 23], 'window_to' => [0, 23], 'period' => [1, 168], 'full_hours' => [1, 720], 'max_requests' => [10, 5000],
+        foreach (['window_from' => [0, 23], 'window_to' => [0, 23], 'period' => [1, 168], 'full_hours' => [1, 720], 'full_from' => [0, 23], 'full_to' => [0, 23], 'max_requests' => [10, 5000],
                      'page_limit' => [20, 200], 'quick_pages' => [1, 50], 'max_new' => [0, 20000], 'missing_runs' => [1, 10],
                      'photo_width' => [0, 3000], 'photo_height' => [0, 3000], 'photo_quality' => [30, 100], 'log_days' => [1, 90], 'history_days' => [30, 3650]] as $k => [$min, $max]) {
             if (!preg_match('/^\d{1,5}$/', $in[$k]) || (int) $in[$k] < $min || (int) $in[$k] > $max) $err[$k] = "Число от $min до $max";
         }
         if (!isset($err['window_from'], $err['window_to']) && (int) $in['window_from'] > (int) $in['window_to']) $err['window_to'] = 'Конец окна раньше начала';
+        if (!isset($err['full_from'], $err['full_to']) && (int) $in['full_from'] > (int) $in['full_to']) $err['full_to'] = 'Конец окна раньше начала';
         $delay = Importer::num($in['delay']);
         if ($delay === null || $delay < HitObuviClient::MIN_DELAY || $delay > 30) $err['delay'] = 'Пауза — от 1,5 до 30 с';
         else $in['delay'] = rtrim(rtrim(number_format($delay, 1, '.', ''), '0'), '.');
@@ -181,13 +183,20 @@ final class HitObuvi extends Supplier
 
     /**
      * Режим боевого запуска «по расписанию»: полный (сверка цен и наличия всех товаров), если с начала последнего завершённого
-     * полного прохода прошло не меньше full_hours ч (−10 мин, как расписание), иначе быстрый (только новые сверху списков)
+     * полного прохода прошло не меньше full_hours ч (−10 мин, как расписание) и сейчас ночное окно full_from–full_to
+     * (запоздал больше чем на сутки — полный и вне окна); иначе быстрый (только новые сверху списков)
      */
-    public static function autoMode(): string
+    public static function autoMode(?int $now = null): string
     {
+        $now ??= time();
         $last = App::db()->value("SELECT MAX(started_at) FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = ? AND status = 'done' AND state LIKE ?",
             [self::CODE, self::LIVE_SRC, '%"mode":"full"%"complete":true%']);
-        return !$last || strtotime((string) $last) <= time() - max(1, (int) self::cfg('full_hours')) * 3600 + 600 ? 'full' : 'quick';
+        $hours = max(1, (int) self::cfg('full_hours'));
+        $ago = $last ? $now - (int) strtotime((string) $last) : PHP_INT_MAX;
+        if ($ago < $hours * 3600 - 600) return 'quick';
+        $h = (int) date('G', $now);
+        $inWindow = $h >= (int) self::cfg('full_from') && $h <= (int) self::cfg('full_to');
+        return $inWindow || ($last && $ago >= ($hours + 24) * 3600) ? 'full' : 'quick';
     }
 
     /**
