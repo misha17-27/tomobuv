@@ -373,8 +373,9 @@ abstract class SupplierSync
             unset($set['supplier']);
         }
         foreach (ProductHistory::describe($set, $ex) as $ch) {
-            // категории-ряды с одним именем («26-32 → 26-32»: Весна-Осень > 26-32 → Туфли > 26-32) — с родителем
-            if (($ch[0] ?? '') === 'category_id' && count($ch) >= 3 && $ch[1] === $ch[2]) {
+            // категория — с родителем: ряды с одним именем («26-32 → 26-32»: Весна-Осень > 26-32 → Туфли > 26-32) и разделы
+            // с одним именем в разных корнях («Весна-Осень → 26-32»: ЖЕНСКАЯ ОБУВЬ > Весна-Осень → Весна-Осень > 26-32)
+            if (($ch[0] ?? '') === 'category_id' && count($ch) >= 3) {
                 $ch[1] = $this->catShort((int) ($ex['category_id'] ?? 0));
                 $ch[2] = $this->catShort((int) $set['category_id']);
             }

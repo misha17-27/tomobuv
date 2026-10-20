@@ -74,7 +74,7 @@ $srcLabel = static fn(array $r): string => match ((string) $r['src']) {
           <option value="site_last"<?= $hasSitePages ? '' : ' disabled' ?>>Список последнего запуска с сайта (без запросов)</option>
         </optgroup>
         <optgroup label="API бренда">
-          <option value="api"<?= $cfg['api_key'] === '' ? ' disabled' : '' ?><?= !$site ? ' selected' : '' ?>>Текущая очередь API (1 страница, без подтверждения)</option>
+          <option value="api"<?= $cfg['api_key'] === '' || $site ? ' disabled' : '' ?><?= !$site ? ' selected' : '' ?>>Текущая очередь API (1 страница, без подтверждения<?= $site ? '; источник — сайт бренда: к API не обращаемся' : '' ?>)</option>
           <option value="last"<?= $hasPages ? '' : ' disabled' ?>>Страницы последнего запуска по API</option>
           <option value="upload"<?= $hasDict ? '' : ' disabled' ?>>Файл с ответом export_product (JSON)</option>
         </optgroup>

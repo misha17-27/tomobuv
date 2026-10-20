@@ -17,7 +17,9 @@ use App\Services\ProductName;
  *      товары: сменился код у того же id — товар не меняется, предупреждение «проверьте»;
  *   R2 точный код (кириллица = латиница, без «-», « LED» и хвоста Forsage « 1») + тот же ряд; код единственный и у нас
  *      единственный — найден и при другом ряде (наши опечатки 38-38 / 32-27 — ряд исправится, предупреждение);
- *   R3 код без 1–2-буквенной приставки Forsage (T, B, F, CT, AB: «C-T0196-F» = 0196F) + тот же ряд, только единственный.
+ *   R3 код без 1–2-буквенной приставки Forsage (T, B, F, CT, AB: «C-T0196-F» = 0196F) + тот же ряд, только единственный;
+ *   R4 не найден, но код (или он с приставкой) уже есть у товара сайта без бренда, у Tom.m с другим рядом или у другого бренда
+ *      с тем же рядом — «похожий»: новый не создаётся (был бы дубль), предупреждение «проверьте».
  * Ищется только среди товаров брендов Tom.m сайта (настройка), кроме товаров других загрузчиков (Jong•Golf, Хит обуви) и
  * связанных с другим поставщиком (один товар — один поставщик); код у нас — артикул (если это не ряд), иначе после «TOM.M»
  * в названии, иначе последнее слово с цифрой (приклеенное слово-тип «Кроссовки65156K» отрезается).
@@ -50,10 +52,11 @@ final class TommSync extends WebSync
         'existing' => 'есть на сайте (Forsage / вручную) — не взят под загрузчик', 'ambiguous' => 'похож на несколько товаров сайта',
         'recode' => 'у бренда сменился код товара — товар сайта не изменён (проверьте)', 'dup' => 'повтор товара в запуске',
         'taken' => 'найденный товар сайта уже связан с другим товаром бренда', 'foreign' => 'найденный товар сайта ведёт другой поставщик',
+        'similar' => 'похожий товар уже есть на сайте (без бренда, другой бренд или другой ряд) — новый не создан, проверьте',
     ];
     public const VIA = ['link' => 'по связи', 'exact' => 'по коду и ряду', 'exact_size' => 'по коду (ряд у нас другой)', 'prefix' => 'по коду без приставки Forsage и ряду'];
     /** Итоги сопоставления (фаза match) */
-    public const PLAN = ['link' => 'по связи', 'exact' => 'по коду', 'exact_size' => 'по коду (ряд у нас другой)', 'prefix' => 'без приставки Forsage', 'ambiguous' => 'неоднозначно', 'recode' => 'сменился код у бренда', 'new' => 'нет у нас'];
+    public const PLAN = ['link' => 'по связи', 'exact' => 'по коду', 'exact_size' => 'по коду (ряд у нас другой)', 'prefix' => 'без приставки Forsage', 'ambiguous' => 'неоднозначно', 'recode' => 'сменился код у бренда', 'similar' => 'похож на товар сайта (проверить)', 'new' => 'нет у нас'];
     private const CYR = ['А' => 'A', 'В' => 'B', 'С' => 'C', 'Е' => 'E', 'Н' => 'H', 'К' => 'K', 'М' => 'M', 'О' => 'O', 'Р' => 'P', 'Т' => 'T', 'Х' => 'X', 'І' => 'I', 'У' => 'Y',
         'а' => 'A', 'в' => 'B', 'с' => 'C', 'е' => 'E', 'н' => 'H', 'к' => 'K', 'м' => 'M', 'о' => 'O', 'р' => 'P', 'т' => 'T', 'х' => 'X', 'і' => 'I', 'у' => 'Y'];
 
@@ -194,6 +197,30 @@ final class TommSync extends WebSync
                 $res[$i] = ['via' => 'ambiguous', 'pid' => null, 'warn' => '', 'msg' => 'код ' . $t['ncode'] . ' без приставки: товары сайта ID ' . implode(', ', array_keys($cands))];
             }
         }
+        // R4 — «новый» у бренда, но этот код (или он же с приставкой Forsage) уже есть у товара сайта вне правил R2–R3: без бренда
+        // («Зимняя обувь 65193H»), Tom.m с другим рядом (CT5752C 33-38 ↔ 5752C 32-37), другой бренд с тем же рядом (Ok Shoes 11324K) —
+        // новый не создаётся (был бы дубль), в отчёте — «проверьте»
+        $cores = [];
+        foreach ($tiles as $i => $t) if (!isset($res[$i]) && preg_match('~\d{4,6}~', $t['ncode'], $m)) $cores[$m[0]] = 1;
+        $keys = static function (string $c): array { $s = self::strip($c); return $s !== null ? [$c, $s] : [$c]; };
+        $sim = [];
+        if ($cores) {
+            // один проход по товарам сайта (без REGEXP в SQL — он с сотнями вариантов медленный): цифры кода в названии или артикуле
+            foreach ($db->query('SELECT id, name, sku, size, brand_id FROM products') as $o) {
+                if (!preg_match_all('~\d{4,6}~', $o['name'] . ' ' . $o['sku'], $dm) || !array_intersect_key($cores, array_flip($dm[0]))) continue;
+                $pid = (int) $o['id'];
+                if (isset($used[$pid]) || isset($linked[$pid]) || ($c = self::ourCode($o)) === '') continue;   // уже связан с другим товаром бренда — не дубль
+                foreach ($keys($c) as $k) $sim[$k][$pid] = $o;
+            }
+        }
+        foreach ($tiles as $i => $t) {
+            if (isset($res[$i])) continue;
+            $hit = [];
+            foreach ($keys($t['ncode']) as $k) foreach ($sim[$k] ?? [] as $pid => $o) {
+                if (!(int) $o['brand_id'] || in_array((int) $o['brand_id'], $bids, true) || self::sz($o['size']) === self::sz($t['size'])) $hit[$pid] = '«' . $o['name'] . '» (' . ($o['size'] ?: 'ряд не указан') . ')';
+            }
+            if ($hit) $res[$i] = ['via' => 'similar', 'pid' => null, 'warn' => '', 'msg' => 'у бренда ' . $t['ncode'] . ' (' . $t['size'] . '), на сайте уже есть похожий: ' . implode('; ', array_map(static fn($pid, $n) => 'ID ' . $pid . ' ' . $n, array_keys($hit), $hit))];
+        }
         foreach ($tiles as $i => &$t) $t['m'] = $res[$i] ?? ['via' => '', 'pid' => null, 'warn' => '', 'msg' => ''];
         unset($t);
         return $tiles;
@@ -220,12 +247,20 @@ final class TommSync extends WebSync
         $pair = (float) ($t['price'] ?? 0);
         $pb = (float) ($t['price_box'] ?? 0);
         $warn = [];
-        $box = (int) ($t['pairs'] ?? 0) ?: null;
-        if (!$box && (int) ($t['qty'] ?? 0) > 0) $box = (int) $t['qty'];
-        if (!$box && $pair > 0 && $pb > 0) $box = (int) round($pb / $pair);
-        if ($box !== null && ($box < 1 || $box > 200)) $box = null;
+        // пар в ящике: «Пар в ящике» плитки, заказ (скрытое quantity) и цена ящика ÷ цена пары. Бывает, что «Пар в ящике» расходится
+        // с двумя другими, а они между собой совпадают (65084H: 6 пар, заказ по 8, ящик 3520 = 440 × 8) — бренд продаёт ящик по заказу
+        $pf = (int) ($t['pairs'] ?? 0);
+        $qty = (int) ($t['qty'] ?? 0);
+        $ok = static fn(int $n): bool => $n >= 1 && $n <= 200;
+        $byPrice = $pair > 0 && $pb > 0 && abs($pb / $pair - round($pb / $pair)) < 0.01 ? (int) round($pb / $pair) : 0;
+        $box = $ok($pf) ? $pf : ($ok($qty) ? $qty : ($ok($byPrice) ? $byPrice : null));
+        $boxAlt = [];
+        if ($box && $ok($qty) && $qty !== $box) {
+            if ($qty === $byPrice) { $warn[] = 'у бренда «Пар в ящике» ' . $box . ', а заказ и цена ящика — по ' . $qty . ' — взято ' . $qty; $box = $qty; }
+            elseif ($byPrice === 0) $boxAlt = [$box, $qty];                // цены нет (нет в наличии) — не понять, что верно: у найденного ящик не меняется
+        }
         if ($box && $pair > 0 && $pb > 0 && abs($pb - $pair * $box) > 1) $warn[] = 'у бренда цена ящика ' . self::num($pb) . ' ≠ пара × ' . $box . ' (' . self::num($pair * $box) . ') — взята цена пары';
-        if ($box && (int) ($t['qty'] ?? 0) > 0 && (int) $t['qty'] !== $box) $warn[] = 'у бренда «Пар в ящике» ' . $box . ', а заказ по ' . (int) $t['qty'];
+        if ($box && $qty > 0 && $qty !== $box) $warn[] = 'у бренда «Пар в ящике» ' . $box . ', а заказ по ' . $qty;
         $old = (float) ($t['old_price'] ?? 0) > $pair ? (float) $t['old_price'] : 0.0;
         $price = Tomm::price($pair, $this->markup);
         $compare = $old > 0 && $pair > 0 ? Tomm::price($old, $this->markup) : 0.0;
@@ -237,7 +272,7 @@ final class TommSync extends WebSync
         if (($m['warn'] ?? '') !== '') $warn[] = $m['warn'];
         return [
             'sid' => (int) $t['id'], 'code' => (string) (int) $t['id'], 'acode' => $code, 'name' => (string) $t['code'], 'name_src' => (string) $t['code'], 'url_src' => (string) $t['url'],
-            'size' => mb_substr((string) $t['size'], 0, 64), 'box' => $box, 'price_box' => $pb, 'pair' => $pair, 'old_pair' => $old, 'price' => $price, 'compare' => $compare,
+            'size' => mb_substr((string) $t['size'], 0, 64), 'box' => $box, 'box_alt' => $boxAlt, 'price_box' => $pb, 'pair' => $pair, 'old_pair' => $old, 'price' => $price, 'compare' => $compare,
             'cost' => $pair, 'old_cost' => null, 'returned' => '', 'stock' => (bool) $t['stock'], 'stock_out' => false,
             'map' => $map, 'cat_id' => $map['cat_id'], 'photo_urls' => array_values(array_unique($photos)), 'photo_url' => $photos[0] ?? '',
             'plan' => $m, 'ex' => null, 'via' => '', 'link' => null, 'action' => '', 'why' => '', 'msg' => '', 'level' => 'skip', 'upd' => [], 'changes' => [], 'warn' => $warn, 'id' => null,
@@ -272,7 +307,7 @@ final class TommSync extends WebSync
             $p = $it['plan'];
             $via = (string) ($p['via'] ?? '');
             $it['link'] = $links[$it['code']] ?? null;
-            if ($via === 'ambiguous' || $via === 'recode') { $it['via'] = $via; $it['msg'] = (string) $p['msg']; if ($via === 'recode') $it['ex'] = $rows[(int) $p['pid']] ?? null; continue; }
+            if ($via === 'ambiguous' || $via === 'recode' || $via === 'similar') { $it['via'] = $via; $it['msg'] = (string) $p['msg']; if ($via === 'recode') $it['ex'] = $rows[(int) $p['pid']] ?? null; continue; }
             if ($via === '' || !$p['pid']) continue;
             $pid = (int) $p['pid'];
             $ex = $rows[$pid] ?? null;
@@ -303,8 +338,9 @@ final class TommSync extends WebSync
             $it['id'] = (int) $ex['id'];
             $ours = (string) $ex['supplier'] === Tomm::CODE || $it['via'] === 'link';
             if (!$ours && $c['adopt'] !== '1') { $it['action'] = 'existing'; return; }
-            // цена бренда за пару в прошлом проходе (история цен «Обзора»): из связи, у взятого под загрузчик — закупочная в карточке
-            $it['old_cost'] = $it['link']['cost'] ?? ((float) $ex['purchase_price'] > 0 ? (float) $ex['purchase_price'] : null);
+            // цена бренда за пару в прошлом проходе (история цен «Обзора») — из связи; у взятого под загрузчик её нет: закупочная в карточке —
+            // цена Forsage, а не бренда («подорожал» по ней — не изменение у бренда), поэтому направление — по нашей цене
+            $it['old_cost'] = $it['link']['cost'] ?? null;
             $missed = (int) ($it['link']['missed'] ?? 0);
             $it['stock_out'] = !$it['stock'];
             if ($c['update_existing'] !== '1' && $ours) {
@@ -337,6 +373,7 @@ final class TommSync extends WebSync
             } elseif (trim((string) $ex['sku']) === '') {
                 $upd['sku'] = $it['acode'];
             }
+            if (in_array((int) $ex['box_qty'], $it['box_alt'], true)) $it['box'] = (int) $ex['box_qty'];   // у бренда неоднозначно, наш — один из вариантов: не меняется
             if ((int) $ex['box_qty'] !== (int) $it['box']) {
                 $upd['box_qty'] = (int) $it['box'];
                 if ((int) $ex['min_qty'] === (int) $ex['box_qty']) $upd['min_qty'] = (int) $it['box'];
@@ -357,6 +394,7 @@ final class TommSync extends WebSync
         // нового товара на сайте нет
         if ($c['add_new'] !== '1') { $this->skip($it, 'noadd', ''); return; }
         if (!$it['stock']) { $this->skip($it, 'nostock', ''); return; }
+        if ($it['via'] === 'similar') { $this->skip($it, 'similar', mb_strtoupper(mb_substr($it['msg'], 0, 1)) . mb_substr($it['msg'], 1) . ' — новый не создан (был бы дубль), проверьте', 'warn'); return; }
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'раздел «' . $it['map']['key'] . '» не сопоставлен — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'нет размерного ряда — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен', 'warn'); return; }
         if (!$it['photo_urls']) { $this->skip($it, 'nophoto', 'нет фото — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен', 'warn'); return; }

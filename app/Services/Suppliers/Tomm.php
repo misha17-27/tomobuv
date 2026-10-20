@@ -360,6 +360,9 @@ final class Tomm extends WebSupplier
         }
         $page = TommParser::listPage($html);
         if (!$page['items']) throw new SupplierError('Страница ' . $url . ' не похожа на список товаров (нет плиток товаров — сменился шаблон сайта бренда?) — загрузка остановлена, в каталог ничего не записано, товары не скрываются', 'layout');
+        // наличие — у каждой плитки (div.stock yes|no): не читается — сменился шаблон; иначе все найденные получили бы «нет в наличии»
+        $noStock = count(array_filter($page['items'], static fn($p) => $p['stock'] === null));
+        if ($noStock) throw new SupplierError('Страница ' . $url . ': у ' . $noStock . ' из ' . count($page['items']) . ' товаров не читается наличие («В наличии» / «Нет в наличии» — сменился шаблон сайта бренда?) — загрузка остановлена, в каталог ничего не записано, наличие не меняется', 'layout');
         if ($n === 1) {
             $st['pages'] = (int) $page['pages'];
             if ($st['mode'] === 'files' && $page['per_page']) $st['per_page'] = (int) $page['per_page'];   // сохранённые — с тем числом на странице, с каким скачаны

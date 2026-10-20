@@ -110,7 +110,10 @@ abstract class WebSupplier extends Supplier
     /**
      * Режим боевого запуска «по расписанию»: полный (сверка цен и наличия всех товаров), если с начала последнего завершённого
      * полного прохода прошло не меньше full_hours ч (−10 мин, как расписание) и сейчас окно full_from–full_to
-     * (запоздал больше чем на сутки — полный и вне окна); иначе быстрый (только новые сверху списков)
+     * (запоздал больше чем на сутки — полный и вне окна); иначе быстрый (только новые сверху списков). Последний запуск в окне
+     * полного прохода (следующий через period ч — уже вне окна) — полный и чуть раньше срока, если прошло не меньше
+     * full_hours − period ч: период 5 ч не кратен суткам, время запуска сдвигается на час в сутки, и без этого ночное окно
+     * 0–6 раз в неделю оставалось бы без полного прохода (06:00 → 02:00 через 20 ч — «рано» → следующий полный через 45 ч)
      */
     public static function autoMode(?int $now = null): string
     {
@@ -119,10 +122,14 @@ abstract class WebSupplier extends Supplier
             [static::CODE, static::liveSrc(), '%"mode":"full"%"complete":true%']);
         $hours = max(1, (int) static::cfg('full_hours'));
         $ago = $last ? $now - (int) strtotime((string) $last) : PHP_INT_MAX;
-        if ($ago < $hours * 3600 - 600) return 'quick';
-        $h = (int) date('G', $now);
-        $inWindow = $h >= (int) static::cfg('full_from') && $h <= (int) static::cfg('full_to');
-        return $inWindow || ($last && $ago >= ($hours + 24) * 3600) ? 'full' : 'quick';
+        $from = (int) static::cfg('full_from');
+        $to = (int) static::cfg('full_to');
+        $in = static fn(int $t): bool => (int) date('G', $t) >= $from && (int) date('G', $t) <= $to;
+        if ($ago < $hours * 3600 - 600) {
+            $period = max(1, (int) static::cfg('period'));
+            return $in($now) && !$in($now + $period * 3600) && $ago >= max(1, $hours - $period) * 3600 - 600 ? 'full' : 'quick';
+        }
+        return $in($now) || ($last && $ago >= ($hours + 24) * 3600) ? 'full' : 'quick';
     }
 
     protected static function failure(\Throwable $e): array

@@ -368,7 +368,7 @@ final class JongGolf extends WebSupplier
      * Сайт бренда: dir — папка сохранённых страниц для src = pages (папка прошлого запуска с list-1.html или общий кэш ответов
      * SiteClient); cache — сквозной кэш для src = web (проверки: повторно не скачивать); aids — только эти цвета (проверка записи).
      * API: files — страницы (JSON ответа export_product) для src = file; dict_file — справочники для src = file (иначе
-     * сохранённая копия последнего ответа). Боевой запуск по API — только при источнике «API» и включённой автозагрузке; по файлу
+     * сохранённая копия последнего ответа). Запросы к API (и пробный прогон) — только при источнике «API», боевой — и при включённой автозагрузке; по файлу
      * и по сохранённым страницам — только из CLI (проверка записи на своих данных), бренду ничего не отправляется.
      */
     public static function start(string $kind, array $o = []): int
@@ -379,7 +379,8 @@ final class JongGolf extends WebSupplier
         if (in_array($src, ['web', 'pages'], true)) return self::startSite($kind, $src, $o);
         $src = $src === 'file' ? 'file' : 'api';
         $origin = in_array($o['origin'] ?? '', ['cron', 'cli'], true) ? $o['origin'] : 'admin';
-        if ($kind === 'run' && $src === 'api' && self::siteSource()) throw new \RuntimeException('Источник в настройках — сайт бренда: запись по API не выполняется (переключите источник на «API» или сделайте пробный прогон).');
+        // источник — сайт бренда: к API бренда загрузчик не обращается совсем (и пробным прогоном); сохранённый ответ API (file) — можно
+        if ($src === 'api' && self::siteSource()) throw new \RuntimeException('Источник в настройках — сайт бренда: к API бренда загрузчик не обращается (переключите источник на «API»; пробный прогон по сохранённому ответу API — «Страницы последнего запуска по API» или «Файл»).');
         if ($kind === 'run' && $src === 'api' && !self::enabled()) throw new \RuntimeException('Автозагрузка выключена — включите её в настройках (после отключения cron старого сайта) или сделайте пробный прогон.');
         if ($kind === 'run' && $src === 'file' && $origin !== 'cli') throw new \RuntimeException('Запись по сохранённому файлу — только из командной строки (bin/supplier-jonggolf.php --write).');
         self::assertIdle();
@@ -495,6 +496,8 @@ final class JongGolf extends WebSupplier
     protected static function advance(array &$run, float $deadline): void
     {
         if (!empty($run['state']['site'])) { self::advanceSite($run, $deadline); return; }
+        // источник переключили на сайт бренда во время запуска по API — дальше к API не обращаемся
+        if ($run['src'] === 'api' && self::siteSource()) throw new \RuntimeException('Источник переключён на сайт бренда — запуск по API остановлен (к API бренда загрузчик больше не обращается).');
         $id = (int) $run['id'];
         $st = &$run['state'];
         $dry = $run['kind'] === 'dry';
