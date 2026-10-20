@@ -15,10 +15,11 @@ use App\Services\Suppliers\JongGolfMap;
 use App\Services\Suppliers\Suppliers;
 
 /**
- * «Каталог → Поставщики»: список поставщиков (home) и страница Jong•Golf; «Хит обуви» — HitObuviController.
- * «Каталог → Поставщики → Jong•Golf» (только администратор): настройки автозагрузки по API (как cfg старого
- * загрузчика), таблица соответствия категорий, коэффициенты цен, проверка связи, пробный прогон, запуск, журнал.
- * Шаги запуска выполняет suppliers.js (POST …/runs/{id}/step/), как задания импорта.
+ * «Каталог → Поставщики»: список поставщиков (home) и страница Jong•Golf; «Хит обуви» — HitObuviController, Tom.m — TommController.
+ * «Каталог → Поставщики → Jong•Golf» (только администратор): источник — официальный сайт бренда www.jonggolf.com (по умолчанию)
+ * или API; настройки (наценка и бережность к сайту бренда; ключ API, cfg старого загрузчика), категории (разделы сайта бренда
+ * и таблица сочетаний старого загрузчика — общие для обоих источников), коэффициенты цен (API), проверка связи, пробный прогон,
+ * запуск, журнал; «Обзор» — общий с другими поставщиками (SupplierPages). Шаги запуска — suppliers.js (POST …/runs/{id}/step/).
  */
 final class SuppliersController extends BaseController
 {
@@ -29,7 +30,7 @@ final class SuppliersController extends BaseController
     private const BASE = '/admin/suppliers/jonggolf/';
     private const MAP_PER_PAGE = 50;
     private const LOG_PER_PAGE = 100;
-    public const TABS = ['overview' => 'Обзор', 'settings' => 'Настройки', 'map' => 'Категории', 'prices' => 'Цены', 'runs' => 'Журнал'];
+    public const TABS = ['overview' => 'Обзор', 'settings' => 'Настройки', 'map' => 'Категории', 'prices' => 'Цены (API)', 'runs' => 'Журнал'];
     public const LEVELS = ['all' => 'Все', 'add' => 'Добавлено', 'update' => 'Изменено', 'hide' => 'Скрыто', 'same' => 'Без изменений',
         'skip' => 'Пропущено', 'problem' => 'Ошибки и предупреждения', 'info' => 'Сообщения'];
 
@@ -63,17 +64,22 @@ final class SuppliersController extends BaseController
         $db = App::db();
         $cfg = array_combine(array_keys(JongGolf::DEFAULTS), array_map([JongGolf::class, 'cfg'], array_keys(JongGolf::DEFAULTS)));
         $cfg['api_key'] = $cfg['api_key'] !== '' ? '1' : '';                 // сам ключ в шаблон не передаётся — только «задан»
+        $siteRun = ($id = $db->value("SELECT id FROM supplier_runs WHERE supplier = ? AND src IN ('web', 'pages') AND kind IN ('run', 'dry') AND status <> 'running' ORDER BY id DESC LIMIT 1", [JongGolf::CODE]))
+            ? JongGolf::run((int) $id) : null;
         $data = [
             'title' => 'Поставщики → ' . JongGolf::TITLE, 'tab' => $tab, 'base' => self::BASE,
             'styles' => ['admin/suppliers.css'], 'scripts' => ['admin/suppliers.js'],
-            'cfg' => $cfg,
+            'cfg' => $cfg, 'site' => JongGolf::siteSource(), 'markup' => JongGolf::markup(),
             'enabled' => JongGolf::enabled(), 'keyHint' => JongGolf::keyHint(), 'debug' => App::isDebug(),
             'due' => JongGolf::due(), 'next' => JongGolf::nextRun(), 'active' => JongGolf::active(), 'last' => JongGolf::runs(1)[0] ?? null,
-            'lastFinished' => JongGolf::lastFinished(), 'mapCount' => JongGolfMap::count(),
+            'lastFinished' => JongGolf::lastFinished(), 'mapCount' => JongGolfMap::count(), 'secCount' => JongGolfMap::sectionCount(),
             'products' => $db->row('SELECT COUNT(*) total, SUM(status = 1) active FROM products WHERE supplier = ?', [JongGolf::CODE]),
             'manual' => (int) $db->value("SELECT COUNT(*) FROM products p WHERE (p.supplier IS NULL OR p.supplier = '') AND p.brand_id = (SELECT id FROM brands WHERE name = ? LIMIT 1)", [JongGolf::TITLE]),
+            'links' => JongGolf::linkCounts(), 'siteRun' => $siteRun,
+            // фото бренда закрыты robots.txt (по последнему запуску с сайта: state.photos_ok)
+            'photosBlocked' => $siteRun !== null && array_key_exists('photos_ok', $siteRun['state']) && !$siteRun['state']['photos_ok'],
             'hasDict' => is_file(JongGolf::dir() . '/product_setting.json'), 'dictTime' => @filemtime(JongGolf::dir() . '/product_setting.json') ?: null,
-            'hasPages' => (bool) $this->lastPages(), 'errors' => [], 'post' => null,
+            'hasPages' => (bool) $this->lastPages(), 'hasSitePages' => JongGolf::lastSiteDir() !== null, 'errors' => [], 'post' => null,
         ];
         if ($tab === 'overview') {
             $data += $this->overviewData();
@@ -85,7 +91,7 @@ final class SuppliersController extends BaseController
             $q = mb_substr(Request::get('q'), 0, 100);
             $page = Request::page();
             [$rows, $total] = JongGolfMap::page($filter, $q, $page, self::MAP_PER_PAGE);
-            $data += ['rows' => $rows, 'filter' => $filter, 'q' => $q, 'pg' => new Paginator($total, self::MAP_PER_PAGE, $page),
+            $data += ['rows' => $rows, 'filter' => $filter, 'q' => $q, 'pg' => new Paginator($total, self::MAP_PER_PAGE, $page), 'sections' => JongGolfMap::sectionRows(),
                 'choices' => Importer::categoryChoices(), 'unmapped' => $data['lastFinished']['stats']['unmapped'] ?? []];
         } elseif ($tab === 'prices') {
             $data += ['targets' => JongGolfMap::targets(), 'prices' => JongGolf::prices()];
@@ -103,8 +109,9 @@ final class SuppliersController extends BaseController
             $this->flash('Проверьте поля формы: ' . implode('; ', array_map(static fn($k, $v) => $k . ' — ' . $v, array_keys($errors), $errors)), true);
             return Response::redirect(self::BASE . '?tab=settings');
         }
-        $this->log('jonggolf_settings', 'settings', null, ['enabled' => JongGolf::on('enabled')]);
-        $this->flash('Настройки сохранены.' . (JongGolf::enabled() ? ' Автозагрузка ВКЛЮЧЕНА — cron старого сайта должен быть отключён.' : ' Автозагрузка выключена.'));
+        $this->log('jonggolf_settings', 'settings', null, ['enabled' => JongGolf::on('enabled'), 'source' => JongGolf::cfg('source'), 'markup' => JongGolf::cfg('markup_k')]);
+        $this->flash('Настройки сохранены (источник — ' . (JongGolf::siteSource() ? 'сайт бренда' : 'API') . ').' . (!JongGolf::enabled() ? ' Автозагрузка выключена.'
+            : (JongGolf::siteSource() ? ' Загрузка с сайта бренда ВКЛЮЧЕНА — по расписанию из cron.' : ' Автозагрузка по API ВКЛЮЧЕНА — cron старого сайта должен быть отключён.')));
         return Response::redirect(self::BASE . '?tab=settings');
     }
 
@@ -151,13 +158,23 @@ final class SuppliersController extends BaseController
         return Response::json($r);
     }
 
-    /** Начать пробный прогон (mode=dry: source api | last | upload) или боевой запуск (mode=run) */
+    /**
+     * Начать пробный прогон (mode=dry: source web — сайт бренда, site_last — сохранённые страницы последнего запуска с сайта
+     * (без запросов), api — очередь API, last — страницы последнего запуска по API, upload — файл ответа API) или боевой запуск
+     * (mode=run — из источника в настройках: сайт бренда или API)
+     */
     public function start(): Response
     {
         $mode = Request::post('mode') === 'run' ? 'run' : 'dry';
-        $source = Request::post('source', 'api');
-        $o = ['origin' => 'admin', 'user_id' => (int) Auth::id(), 'src' => 'api'];
-        if ($mode === 'dry' && $source === 'last') {
+        $site = JongGolf::siteSource();
+        $source = $mode === 'run' ? ($site ? 'web' : 'api') : Request::post('source', $site ? 'web' : 'api');
+        $o = ['origin' => 'admin', 'user_id' => (int) Auth::id(), 'src' => $source === 'web' ? 'web' : 'api'];
+        if ($mode === 'dry' && $source === 'site_last') {
+            $dir = JongGolf::lastSiteDir();
+            if ($dir === null) return Response::json(['ok' => false, 'error' => 'Нет сохранённых страниц прошлых запусков с сайта бренда.']);
+            $o['src'] = 'pages';
+            $o['dir'] = $dir;
+        } elseif ($mode === 'dry' && $source === 'last') {
             $files = $this->lastPages();
             if (!$files) return Response::json(['ok' => false, 'error' => 'Нет сохранённых страниц прошлых запусков.']);
             $o['src'] = 'file';
@@ -228,6 +245,20 @@ final class SuppliersController extends BaseController
     }
 
     // ------------------------------------------------------------------ таблица соответствия
+
+    /** Разделы сайта бренда (сезон | категория → категория сайта, загружать / нет, по рядам) — запасное правило после таблицы сочетаний */
+    public function mapSections(): Response
+    {
+        $changes = [];
+        foreach (Request::postArray('sec') as $id => $row) {
+            if (!ctype_digit((string) $id) || !is_array($row)) continue;
+            $changes[(int) $id] = ['category_id' => (int) ($row['category_id'] ?? 0), 'mode' => is_scalar($row['mode'] ?? null) ? (string) $row['mode'] : '', 'by_size' => !empty($row['by_size'])];
+        }
+        $n = JongGolfMap::assignSections($changes);
+        if ($n) $this->log('jonggolf_sections', 'settings', null, ['rows' => $n]);
+        $this->flash($n ? 'Сохранено разделов: ' . $n . ' — сработает со следующего запуска.' : 'Изменений нет.');
+        return $this->back(self::BASE . '?tab=map');
+    }
 
     public function mapUpload(): Response
     {

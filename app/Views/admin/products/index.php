@@ -8,6 +8,7 @@
  */
 use App\Controllers\Admin\BaseController;
 use App\Services\AdminCatalog;
+use App\Services\ProductHistory;
 use App\Services\SeoAudit;
 
 $catOptions = static function (array $cats, $selected): string {
@@ -75,7 +76,7 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
     <table class="tbl ac-ptable">
       <thead><tr>
         <th class="tick"><input type="checkbox" id="check-all" aria-label="Выбрать все на странице"></th>
-        <th>Фото</th><th>Товар</th><th>Категория · бренд</th><th class="num">Цена/пара</th><th class="num">Ящик</th><th class="num">Пар</th><th>Размеры</th><th>Наличие</th><th class="seo-col">Title</th><th class="seo-col">Description</th><th>Статус</th>
+        <th>Фото</th><th>Товар</th><th>Категория · бренд</th><th class="num">Цена/пара</th><th class="num">Ящик</th><th class="num">Пар</th><th>Размеры</th><th>Наличие</th><th title="Когда товар появился на сайте (у перенесённых — дата на старом сайте) и откуда">Загружен</th><th class="seo-col" colspan="2" title="Точки: Title и Description — состояние SEO (легенда под таблицей)">SEO</th><th>Статус</th>
       </tr></thead>
       <tbody>
       <?php foreach ($rows as $r):
@@ -98,6 +99,7 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
           <td class="nowrap"><?= e($r['size']) ?></td>
           <td class="nowrap"><?= (int) $r['in_stock'] ? '<span class="in-stock">в наличии</span>' : '<span class="out-stock">нет</span>' ?>
             <?php if ($r['stock'] !== null): ?><small>остаток: <?= (int) $r['stock'] ?></small><?php endif; ?></td>
+          <td class="ac-loaded"><?php $at = strtotime((string) $r['created_at']); $src = ProductHistory::source($r['source'], $r['supplier']); $src = $src === ProductHistory::SOURCES['webasyst'] ? 'Webasyst' : $src; // в списке — коротко ?><?= e(date('d.m.Y', $at)) ?><small><?= e(date('H:i', $at)) ?> · <?= e($src !== '' ? $src : 'неизвестно') ?></small></td>
           <?= $view->partial('admin/partials/seo-cells', ['seoCell' => $seoCells[$id] ?? null, 'seoEdit' => '/admin/products/' . $id . '/#h-seo']) ?>
           <td><?= (int) $r['status'] ? '<span class="pill ok">на сайте</span>' : '<span class="pill">скрыт</span>' ?></td>
         </tr>

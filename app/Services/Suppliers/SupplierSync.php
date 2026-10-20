@@ -7,6 +7,7 @@ use App\Core\App;
 use App\Services\AdminCatalog;
 use App\Services\CatalogIndexer;
 use App\Services\Import\Importer;
+use App\Services\ProductHistory;
 
 /**
  * Общая часть записи товаров поставщика (JongGolfSync, HitObuviSync): порция — одна транзакция под блокировкой
@@ -150,6 +151,29 @@ abstract class SupplierSync
         return $out;
     }
 
+    /**
+     * Значение характеристики для русской версии: украинские слова → русские по словарю database/suppliers/uk-values.php
+     * («чорний» → «черный», «штучна шкіра» → «искусственная кожа»), незнакомое — как есть
+     */
+    public static function ruValue(string $v): string
+    {
+        static $dict = null, $re = null;
+        if ($dict === null) {
+            $dict = [];
+            foreach ((array) include ROOT . '/database/suppliers/uk-values.php' as $uk => $ru) $dict[mb_strtolower((string) $uk)] = (string) $ru;
+            $keys = array_keys($dict);
+            usort($keys, static fn($a, $b) => mb_strlen($b) <=> mb_strlen($a));   // длинные фразы раньше
+            $re = $keys ? '/(?<!\p{L})(' . implode('|', array_map(static fn($k) => preg_quote($k, '/'), $keys)) . ')(?!\p{L})/iu' : null;
+        }
+        $v = Supplier::name($v);
+        if ($re === null || $v === '' || !preg_match('/\p{Cyrillic}/u', $v)) return $v;
+        return (string) preg_replace_callback($re, static function ($m) use ($dict): string {
+            $ru = $dict[mb_strtolower($m[1])] ?? $m[1];
+            $first = mb_substr($m[1], 0, 1);
+            return $first !== mb_strtolower($first) ? mb_strtoupper(mb_substr($ru, 0, 1)) . mb_substr($ru, 1) : $ru;
+        }, $v);
+    }
+
     /** Ключ значения характеристики: раскодированное (значение сайта «Шкіра &amp;amp; текстиль» = «Шкіра & текстиль» поставщика) */
     protected static function vkey(string $v): string
     {
@@ -164,13 +188,9 @@ abstract class SupplierSync
     protected function valueIds(array $want): array
     {
         $sup = static::SUPPLIER;
-        $db = App::db();
         $out = [];
         foreach ($want as $fid => $vals) {
-            if (!isset($this->values[$fid])) {
-                $this->values[$fid] = [];
-                foreach ($db->all('SELECT id, value FROM feature_values WHERE feature_id = ? ORDER BY id', [$fid]) as $r) $this->values[$fid][static::vkey((string) $r['value'])] ??= (int) $r['id'];
-            }
+            $this->loadValues((int) $fid);
             foreach (array_keys($vals) as $val) {
                 $k = static::vkey((string) $val);
                 if (!isset($this->values[$fid][$k])) {
@@ -182,6 +202,21 @@ abstract class SupplierSync
             }
         }
         return $out;
+    }
+
+    /** Значения характеристики на сайте: [ключ значения => id] — один раз за шаг (после отката транзакции — заново, loadBrands) */
+    private function loadValues(int $fid): void
+    {
+        if (isset($this->values[$fid])) return;
+        $this->values[$fid] = [];
+        foreach (App::db()->all('SELECT id, value FROM feature_values WHERE feature_id = ? ORDER BY id', [$fid]) as $r) $this->values[$fid][static::vkey((string) $r['value'])] ??= (int) $r['id'];
+    }
+
+    /** Есть ли на сайте такое значение характеристики (без учёта регистра и лишних пробелов) */
+    protected function hasValue(int $fid, string $v): bool
+    {
+        $this->loadValues($fid);
+        return isset($this->values[$fid][static::vkey($v)]);
     }
 
     /** id характеристик из настройки (поле поставщика → строка features) */
@@ -241,6 +276,23 @@ abstract class SupplierSync
         }
     }
 
+    /**
+     * «Один товар — один поставщик»: из $pids — товары, связанные (supplier_links) с другим поставщиком, чем этот.
+     * Такие товары загрузчик не находит, не берёт под себя и не меняет. @return [id товара => код другого поставщика]
+     */
+    protected function foreignLinked(array $pids): array
+    {
+        $pids = array_values(array_unique(array_filter(array_map('intval', $pids))));
+        if (!$pids) return [];
+        $sup = static::SUPPLIER;
+        $out = [];
+        foreach (array_chunk($pids, 1000) as $part) {
+            [$ph, $v] = App::db()->in($part);
+            foreach (App::db()->all("SELECT product_id, supplier FROM supplier_links WHERE product_id IN ($ph) AND supplier <> ?", array_merge($v, [$sup::CODE])) as $r) $out[(int) $r['product_id']] = (string) $r['supplier'];
+        }
+        return $out;
+    }
+
     /** Встреченные коды и товары запуска (для скрытия отсутствующих и повторов) */
     protected function seen(array $items): void
     {
@@ -261,7 +313,11 @@ abstract class SupplierSync
      *   new    — добавлен (цена поставщика за пару $it['cost'] → наша цена);
      *   price  — изменилась цена поставщика за пару ($it['old_cost'] → $it['cost']) или наша цена (upd.price): только реальные изменения;
      *   hidden — скрыт загрузчиком (status 1 → 0; $it['hide_note'] — почему);
-     *   back   — снова есть у поставщика ($it['returned'] — текст: был скрыт загрузчиком / пропадал N проходов).
+     *   out    — нет в наличии у поставщика: на сайте остаётся, но «нет в наличии» (in_stock 1 → 0 при status 1);
+     *   back   — снова есть у поставщика ($it['returned'] — текст: был скрыт загрузчиком / пропадал N проходов)
+     *            или снова в наличии (in_stock 0 → 1 при status 1);
+     *   edit   — остальные реальные изменения записи (editNote: взят под загрузчик, старая и закупочная цена, ряд, ящик,
+     *            артикул, название, категория, бренд, характеристики, описание, фото) — «было → стало» в note.
      */
     protected function journal(array $items, string $now): void
     {
@@ -279,15 +335,63 @@ abstract class SupplierSync
             $ex = $it['ex'];
             $was = round((float) $ex['price'], 2);
             $price = array_key_exists('price', $it['upd'] ?? []) ? round((float) $it['upd']['price'], 2) : $was;
-            if (abs($price - $was) >= 0.005 || ($cost !== null && $old !== null && abs($cost - $old) >= 0.005)) {
+            $costLogged = $cost !== null && $old !== null && abs($cost - $old) >= 0.005;
+            if (abs($price - $was) >= 0.005 || $costLogged) {
                 $rows[] = $this->change($it, 'price', $old, $cost, $was, $price, $now);
             }
+            // закупочная = цена поставщика: в строке price — только если её записали (иначе «закупочная: 0 → 665» — в строке edit)
+            if ($it['action'] !== 'same' && ($note = $this->editNote($it, $ex, $costLogged)) !== '') $rows[] = $this->change($it, 'edit', null, null, null, null, $now, $note);
             $st = (int) $ex['status'];
             $st2 = array_key_exists('status', $it['upd'] ?? []) ? (int) $it['upd']['status'] : $st;
+            $in = (int) ($ex['in_stock'] ?? 1);
+            $in2 = array_key_exists('in_stock', $it['upd'] ?? []) ? (int) $it['upd']['in_stock'] : $in;
             if ($st === 1 && $st2 === 0) $rows[] = $this->change($it, 'hidden', null, null, null, null, $now, (string) ($it['hide_note'] ?? ''));
             elseif (!empty($it['returned'])) $rows[] = $this->change($it, 'back', null, null, null, null, $now, (string) $it['returned']);
+            elseif ($st2 === 1 && $in === 1 && $in2 === 0) $rows[] = $this->change($it, 'out', null, null, null, null, $now, (string) ($it['out_note'] ?? 'нет в наличии у поставщика'));
+            elseif ($st === 1 && $st2 === 1 && $in === 0 && $in2 === 1) $rows[] = $this->change($it, 'back', null, null, null, null, $now, 'снова в наличии у поставщика');
         }
         static::record($rows);
+    }
+
+    /**
+     * Прочие изменения записи товара для журнала (kind edit) — всё, что не цена, видимость и наличие (у них свои строки):
+     * «взят под загрузчик (был forsage); размеры: 38-38 → 28-35; пар в ящике: 5 → 8; фото загружено (1)». Формат «было → стало» —
+     * ProductHistory::describe/line, как у правок в админке. $costKnown — цена поставщика есть в строке price (закупочная = она).
+     * '' — менять нечего (сравнение уже сделано: в upd только отличающиеся поля).
+     */
+    protected function editNote(array $it, array $ex, bool $costKnown): string
+    {
+        $upd = (array) ($it['upd'] ?? []);
+        $skip = ['price', 'status', 'in_stock', 'updated_at', 'supplier_code'];
+        if (array_key_exists('in_stock', $upd)) $skip[] = 'stock';           // остаток — вместе с наличием (строка out / back)
+        if ($costKnown) $skip[] = 'purchase_price';                           // закупочная = цена поставщика (строка price)
+        $set = array_diff_key($upd, array_flip($skip));
+        $lines = [];
+        if (array_key_exists('supplier', $set)) {
+            $was = (string) ($ex['supplier'] ?? '');
+            $lines[] = 'взят под загрузчик (' . ($was !== '' ? 'был ' . $was : 'был заведён вручную') . ')';
+            unset($set['supplier']);
+        }
+        foreach (ProductHistory::describe($set, $ex) as $ch) {
+            // категории-ряды с одним именем («26-32 → 26-32»: Весна-Осень > 26-32 → Туфли > 26-32) — с родителем
+            if (($ch[0] ?? '') === 'category_id' && count($ch) >= 3 && $ch[1] === $ch[2]) {
+                $ch[1] = $this->catShort((int) ($ex['category_id'] ?? 0));
+                $ch[2] = $this->catShort((int) $set['category_id']);
+            }
+            $lines[] = ProductHistory::line($ch);
+        }
+        if (!empty($it['relink']) && !array_key_exists('category_id', $set)) $lines[] = 'привязка к категории';
+        if (!empty($it['features'])) $lines[] = 'характеристики';
+        if (!empty($it['texts'])) $lines[] = 'описание изменено';
+        if (!empty($it['stored'])) $lines[] = 'фото загружено (' . count($it['stored']) . ')';
+        return implode('; ', array_values(array_filter($lines, static fn($l) => $l !== '')));
+    }
+
+    /** Категория сайта для журнала: две последние ступени пути («Весна-Осень > 26-32») */
+    private function catShort(int $id): string
+    {
+        $path = (string) (($this->ci['path'] ?? [])[$id] ?? ProductHistory::categoryName($id));
+        return implode(' > ', array_slice(array_map('trim', explode('>', $path)), -2));
     }
 
     /** Строка журнала изменений */

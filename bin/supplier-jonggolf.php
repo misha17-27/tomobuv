@@ -1,25 +1,36 @@
 <?php
 /**
- * Автозагрузка Jong•Golf из командной строки (замена wa_loader_jonggolf.php старого сайта).
+ * Загрузка товаров Jong•Golf из командной строки. Источник — настройка «jonggolf.source»: сайт бренда www.jonggolf.com
+ * (по умолчанию) или API бренда (замена wa_loader_jonggolf.php старого сайта); связи, категории и «Обзор» у них общие.
  *
  *   php bin/supplier-jonggolf.php                 — по расписанию, как из cron: продолжить прерванный запуск или начать новый,
  *                                                   если автозагрузка включена, час в окне и прошёл период (bin/cron.php делает то же)
- *   php bin/supplier-jonggolf.php --now [--limit=N]   — боевой запуск сейчас, вне расписания (автозагрузка должна быть включена)
- *   php bin/supplier-jonggolf.php --test          — проверить подключение: только export_product_setting (у поставщика ничего не меняется)
- *   php bin/supplier-jonggolf.php --dry-run [--source=api|last|<файл.json>] [--dict=<product_setting.json>] [--limit=N]
- *                                                 — пробный прогон: в каталог не пишет, поставщику не подтверждает;
- *                                                   api — первая страница текущей очереди (без clean_export), last — страницы
- *                                                   последнего запуска, файл — сохранённый ответ export_product
- *   php bin/supplier-jonggolf.php --write --source=<файл.json> [--dict=…] [--limit=N]
- *                                                 — запись по сохранённому ответу поставщика (проверка записи; поставщику ничего не уходит)
- *   php bin/supplier-jonggolf.php --import-map=<category_table_jonggolf.xls|xlsx|csv>  — таблица соответствия категорий
+ *   php bin/supplier-jonggolf.php --now [--limit=N] [--aids=B40678-3,…]
+ *                                                 — боевой запуск сейчас, вне расписания, из источника в настройках: сайт бренда —
+ *                                                   нужна наценка (автозагрузка может быть выключена), API — автозагрузка включена
+ *   php bin/supplier-jonggolf.php --test          — проверка связи: сайт бренда — robots.txt и первая страница каталога;
+ *                                                   API — только export_product_setting (у поставщика ничего не меняется)
+ *   php bin/supplier-jonggolf.php --dry-run [--source=…] [--limit=N] [--aids=…] [--cache=<папка>] [--dict=<product_setting.json>]
+ *                                                 — пробный прогон: в каталог не пишет, поставщику не подтверждает. --source:
+ *                                                   web — сайт бренда (весь каталог в наличии — 1 запрос; --cache — сквозной кэш ответов:
+ *                                                   есть — не качать снова), site-last — список последнего запуска с сайта, <папка> —
+ *                                                   сохранённые страницы сайта (list-1.html прошлого запуска или кэш ответов SiteClient),
+ *                                                   api — первая страница очереди API (без clean_export), last — страницы последнего
+ *                                                   запуска по API, <файл.json> — сохранённый ответ export_product. По умолчанию — источник настроек
+ *   php bin/supplier-jonggolf.php --write --source=<папка>|site-last|<файл.json> [--aids=…] [--limit=N]
+ *                                                 — запись по сохранённым данным (проверка записи на своих данных; сеть не используется,
+ *                                                   поставщику ничего не уходит; сайт бренда — нужна наценка, ничего не скрывает)
+ *   --mode=quick|full                             — для совместимости с другими загрузчиками: с сайта бренда каждый проход полный
+ *   php bin/supplier-jonggolf.php --seed-map [--force]  — разделы сайта бренда из черновика database/suppliers/jonggolf.php
+ *                                                   (--force — заменить правки владельца черновиком)
+ *   php bin/supplier-jonggolf.php --import-map=<category_table_jonggolf.xls|xlsx|csv>  — таблица сочетаний (старый загрузчик)
  *   php bin/supplier-jonggolf.php --import-cfg=<wa_loader_jonggolf.cfg.php>            — настройки старого загрузчика (файл
  *                                                   только читается, не выполняется; логин и пароль старой админки не переносятся)
  *   php bin/supplier-jonggolf.php --relink        — пересобрать связи «код цвета → товар» (после bin/import-webasyst.php — сам)
  *   php bin/supplier-jonggolf.php --report=<ID>   — отчёт запуска
  *
- * cron (если нужен отдельно от bin/cron.php — например, чаще раза в час, как старый загрузчик):
- *   0,10,20,30,40,50 * * * * /usr/bin/php /home/USER/tomobuv/bin/supplier-jonggolf.php >> /home/USER/tomobuv/storage/logs/jonggolf-cron.log 2>&1
+ * cron — общий bin/cron.php (раз в час); отдельно (необязательно):
+ *   40 * * * * /usr/bin/php /home/USER/tomobuv/bin/supplier-jonggolf.php >> /home/USER/tomobuv/storage/logs/jonggolf-cron.log 2>&1
  */
 declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
@@ -38,6 +49,9 @@ foreach (array_slice($argv, 1) as $a) {
 $say = static function (string $msg): void { echo '[' . date('H:i:s') . '] ' . $msg . PHP_EOL; };
 $fail = static function (string $msg) use ($say): never { $say('ОШИБКА: ' . $msg); exit(1); };
 $limit = isset($opts['limit']) ? max(1, (int) $opts['limit']) : null;
+$aids = isset($opts['aids']) ? array_values(array_filter(array_map('trim', explode(',', (string) $opts['aids'])))) : [];
+$mode = (string) ($opts['mode'] ?? 'auto');
+if (!in_array($mode, ['auto', 'quick', 'full'], true)) $fail('--mode=quick или --mode=full');
 
 JongGolf::ensureSchema();
 
@@ -46,6 +60,12 @@ try {
         $r = JongGolf::test(0, 'cli');
         $say($r['ok'] ? $r['message'] : 'Нет связи: ' . $r['error']);
         exit($r['ok'] ? 0 : 1);
+    }
+    if (isset($opts['seed-map'])) {
+        $st = JongGolfMap::seedSections(isset($opts['force']));
+        $say($st['added'] ? 'Разделов сайта бренда из черновика: ' . $st['added'] . ($st['unresolved'] ? '; категорий нет на сайте: ' . implode(', ', $st['unresolved']) : '')
+            : 'Разделы сайта бренда уже заполнены — без --force не меняются');
+        exit(0);
     }
     if (isset($opts['import-map'])) {
         $f = (string) $opts['import-map'];
@@ -76,38 +96,54 @@ try {
         foreach (App::db()->query('SELECT level, message FROM supplier_run_log WHERE run_id = ? ORDER BY id', [(int) $run['id']]) as $l) echo str_pad($l['level'], 7) . ' ' . $l['message'] . PHP_EOL;
         exit(0);
     }
+    if ($mode === 'quick') $say('С сайта бренда каждый проход полный (весь каталог — 1 запрос) — --mode=quick не нужен');
 
-    $files = [];
-    $src = (string) ($opts['source'] ?? 'api');
-    if ($src === 'last') {
+    // источник: сайт бренда (web | site-last | папка) или API (api | last | файл.json); по умолчанию — из настроек
+    $source = (string) ($opts['source'] ?? (JongGolf::siteSource() ? 'web' : 'api'));
+    $o = ['origin' => 'cli', 'limit' => $limit];
+    if ($source === 'web') {
+        $o['src'] = 'web';
+        if (isset($opts['cache'])) $o['cache'] = (string) $opts['cache'];
+        if ($aids) $o['aids'] = $aids;
+    } elseif ($source === 'site-last' || is_dir($source)) {
+        $dir = $source === 'site-last' ? JongGolf::lastSiteDir() : $source;
+        if ($dir === null) $fail('нет сохранённого списка прошлых запусков с сайта бренда');
+        $say('Сохранённые страницы сайта бренда: ' . $dir);
+        $o += ['src' => 'pages', 'dir' => $dir];
+        if ($aids) $o['aids'] = $aids;
+    } elseif ($source === 'api') {
+        $o['src'] = 'api';
+    } elseif ($source === 'last') {
+        $files = [];
         foreach (App::db()->col("SELECT id FROM supplier_runs WHERE supplier = ? AND src = 'api' AND kind IN ('run', 'dry') ORDER BY id DESC", [JongGolf::CODE]) as $rid) {
             $files = glob(JongGolf::dir((int) $rid) . '/page-*.json') ?: [];
             natsort($files);
             if ($files) { $say('Страницы запуска №' . $rid . ': ' . count($files)); break; }
         }
-        if (!$files) $fail('нет сохранённых страниц прошлых запусков');
-        $src = 'file';
-    } elseif ($src !== 'api') {
-        if (!is_file($src)) $fail('файл не найден: ' . $src);
-        $files = [$src];
-        $src = 'file';
+        if (!$files) $fail('нет сохранённых страниц прошлых запусков по API');
+        $o += ['src' => 'file', 'files' => array_values($files)];
+    } elseif (is_file($source)) {
+        $o += ['src' => 'file', 'files' => [$source]];
+    } else {
+        $fail('--source: web, site-last, папка сохранённых страниц, api, last или файл .json (не найдено: ' . $source . ')');
     }
-    $common = ['src' => $src, 'files' => array_values($files), 'dict_file' => $opts['dict'] ?? null, 'limit' => $limit, 'origin' => 'cli'];
+    if (($o['src'] ?? '') === 'file') $o['dict_file'] = $opts['dict'] ?? null;
 
     if (isset($opts['dry-run'])) {
-        $id = JongGolf::start('dry', $common);
+        $id = JongGolf::start('dry', $o);
     } elseif (isset($opts['write'])) {
-        if ($src !== 'file') $fail('--write — только с --source=<файл.json> (запись по сохранённому ответу; боевой запуск по API — --now)');
-        $id = JongGolf::start('run', $common);
+        if (!in_array($o['src'], ['pages', 'file'], true)) $fail('--write — только по сохранённым данным: --source=<папка>|site-last|<файл.json> (боевой запуск — --now)');
+        $id = JongGolf::start('run', $o);
     } elseif (isset($opts['now'])) {
-        if ($src !== 'api') $fail('--now — боевой запуск по API; для файла — --write');
-        $id = JongGolf::start('run', ['src' => 'api', 'limit' => $limit, 'origin' => 'cli']);
+        if (!in_array($o['src'], ['web', 'api'], true)) $fail('--now — боевой запуск из источника настроек; для сохранённых данных — --write');
+        if (($o['src'] === 'web') !== JongGolf::siteSource()) $fail('--now — только из источника в настройках (сейчас: ' . (JongGolf::siteSource() ? 'сайт бренда' : 'API') . ')');
+        $id = JongGolf::start('run', $o);
     } else {
         JongGolf::cron($say);
         exit(0);
     }
     $say('Запуск №' . $id);
-    $p = JongGolf::drive($id, $say);
+    JongGolf::drive($id, $say, 6 * 3600.0);
     $run = JongGolf::run($id);
     if ($run && $run['status'] === 'error') $fail((string) $run['error']);
     $say('Отчёт: /admin/suppliers/jonggolf/runs/' . $id . '/  или  php bin/supplier-jonggolf.php --report=' . $id);

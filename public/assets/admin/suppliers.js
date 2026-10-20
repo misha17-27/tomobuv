@@ -218,13 +218,15 @@
   });
   // строка изменена, если хоть одно поле с data-was (список, флажок «по рядам») отличается от сохранённого
   var val = function (el) { return el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value; };
-  var map = $('#jg-map');
-  if (map) map.addEventListener('change', function (e) {
-    var el = e.target.closest('[data-was]');
-    if (!el) return;
-    var tr = el.closest('tr');
-    tr.classList.toggle('jg-changed', Array.prototype.some.call(tr.querySelectorAll('[data-was]'), function (x) { return val(x) !== x.getAttribute('data-was'); }));
-    var n = map.querySelectorAll('tr.jg-changed').length;
-    $('#jg-map-note').textContent = n ? 'Изменено строк: ' + n + ' — не забудьте сохранить.' : 'Изменённые строки подсвечиваются.';
+  // формы таблиц: #jg-map (сочетания / разделы) и #jg-sec (разделы сайта бренда Jong•Golf); подпись — #{id формы}-note
+  $$('#jg-map, #jg-sec').forEach(function (map) {
+    map.addEventListener('change', function (e) {
+      var el = e.target.closest('[data-was]');
+      if (!el) return;
+      var tr = el.closest('tr');
+      tr.classList.toggle('jg-changed', Array.prototype.some.call(tr.querySelectorAll('[data-was]'), function (x) { return val(x) !== x.getAttribute('data-was'); }));
+      var n = map.querySelectorAll('tr.jg-changed').length, note = $('#' + map.id + '-note');
+      if (note) note.textContent = n ? 'Изменено строк: ' + n + ' — не забудьте сохранить.' : 'Изменённые строки подсвечиваются.';
+    });
   });
 })();

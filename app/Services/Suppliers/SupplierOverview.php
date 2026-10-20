@@ -6,7 +6,7 @@ namespace App\Services\Suppliers;
 use App\Core\App;
 
 /**
- * Вкладка «Обзор» страницы поставщика (одна для всех адаптеров: Jong•Golf, Хит обуви) и блок «Цена у поставщика: история»
+ * Вкладка «Обзор» страницы поставщика (одна для всех адаптеров: Jong•Golf, Хит обуви, Tom.m) и блок «Цена у поставщика: история»
  * в карточке товара. Только чтение: связи supplier_links (сейчас), журнал изменений supplier_changes (что загрузчик реально
  * записал — SupplierSync::journal), запуски supplier_runs. Методы принимают класс адаптера (наследник Supplier).
  */
@@ -17,12 +17,14 @@ final class SupplierOverview
         'price'   => 'Изменения цен',
         'hidden'  => 'Пропали у поставщика — скрыты на сайте',
         'missing' => 'Нет у поставщика — ещё на сайте',
+        'out'     => 'Нет в наличии у поставщика — на сайте «нет в наличии»',
+        'unlinked' => 'Есть у нас, нет у поставщика (товары бренда без связи)',
         'back'    => 'Вернулись у поставщика',
         'new'     => 'Добавлены загрузчиком',
     ];
     public const DIRS = ['all' => 'Все', 'up' => 'Подорожали', 'down' => 'Подешевели'];
     public const PERIODS = [1 => 'сутки', 7 => '7 дней', 30 => '30 дней', 90 => '90 дней', 365 => 'год'];
-    public const KIND_NAMES = ['new' => 'добавлен', 'price' => 'цена', 'hidden' => 'скрыт', 'back' => 'вернулся'];
+    public const KIND_NAMES = ['new' => 'добавлен', 'price' => 'цена', 'hidden' => 'скрыт', 'out' => 'нет в наличии', 'back' => 'вернулся', 'edit' => 'изменён'];
 
     /**
      * Сводка: товары (связано, на сайте, скрыто, нет у поставщика), добавлено (последний боевой запуск, 7 и 30 дней),
@@ -35,7 +37,7 @@ final class SupplierOverview
         $db = App::db();
         $code = $cls::CODE;
         $c = $db->row('SELECT COUNT(*) total, SUM(p.status = 1) active, SUM(p.status = 0) hidden, SUM(p.status = 0 AND l.hidden = 1) by_us,
-            SUM(l.missed > 0 AND p.status = 1) missing FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.supplier = ?', [$code]) ?: [];
+            SUM(l.missed > 0 AND p.status = 1) missing, SUM(p.status = 1 AND p.in_stock = 0) out_stock FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.supplier = ?', [$code]) ?: [];
         $d7 = date('Y-m-d H:i:s', time() - 7 * 86400);
         $d30 = date('Y-m-d H:i:s', time() - 30 * 86400);
         $ev = [];
@@ -46,15 +48,18 @@ final class SupplierOverview
         $liveId = $db->value("SELECT id FROM supplier_runs WHERE supplier = ? AND kind = 'run' ORDER BY id DESC LIMIT 1", [$code]);
         $live = $liveId ? $cls::run((int) $liveId) : null;
         $check = $cls::lastFinished();
+        $own = $cls::ownBrandIds();
+        $unlinked = 0;
+        if ($own) { [$bph, $bv] = $db->in($own); $unlinked = (int) $db->value("SELECT COUNT(*) FROM products p WHERE p.brand_id IN ($bph) AND p.status = 1 AND NOT EXISTS (SELECT 1 FROM supplier_links l WHERE l.product_id = p.id)", $bv); }
         $s = $check['stats'] ?? [];
         return [
             'linked' => (int) ($c['total'] ?? 0), 'active' => (int) ($c['active'] ?? 0), 'hidden' => (int) ($c['hidden'] ?? 0),
-            'hidden_by_us' => (int) ($c['by_us'] ?? 0), 'missing' => (int) ($c['missing'] ?? 0),
+            'hidden_by_us' => (int) ($c['by_us'] ?? 0), 'missing' => (int) ($c['missing'] ?? 0), 'out' => (int) ($c['out_stock'] ?? 0), 'unlinked' => $unlinked,
             'products' => $cls::productCounts(),
             'last_run' => $live, 'added_last' => $live ? (int) $live['stats']['created'] : 0,
             'added_7' => $ev['new']['d7'] ?? 0, 'added_30' => $ev['new']['d30'] ?? 0,
             'price_7' => $ev['price']['d7'] ?? 0, 'price_30' => $ev['price']['d30'] ?? 0, 'up_30' => (int) ($up['up'] ?? 0), 'down_30' => (int) ($up['down'] ?? 0),
-            'hidden_30' => $ev['hidden']['d30'] ?? 0, 'back_30' => $ev['back']['d30'] ?? 0,
+            'hidden_30' => $ev['hidden']['d30'] ?? 0, 'back_30' => $ev['back']['d30'] ?? 0, 'out_30' => $ev['out']['d30'] ?? 0,
             'check' => $check,
             'unmapped' => array_sum(array_map('intval', (array) ($s['unmapped'] ?? []))), 'unmapped_cats' => count((array) ($s['unmapped'] ?? [])),
             'skipped' => (int) ($s['skipped'] ?? 0), 'existing' => (int) ($s['existing'] ?? 0), 'skip' => (array) ($s['skip'] ?? []),
@@ -86,14 +91,29 @@ final class SupplierOverview
             case 'hidden':                                                   // сейчас: скрыт загрузчиком (нет у поставщика / цвет закончился)
                 $where = 'l.supplier = ? AND l.hidden = 1 AND p.status = 0';
                 $total = (int) $db->value("SELECT COUNT(*) FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE $where", [$code]);
-                $rows = $db->all("SELECT l.code, l.product_id, l.missed, l.seen_at, l.cost, p.name, p.url, p.status, p.price,
+                $rows = $db->all("SELECT l.code, l.ext_id, l.product_id, l.missed, l.seen_at, l.cost, p.name, p.url, p.status, p.price,
                     (SELECT MAX(c.created_at) FROM supplier_changes c WHERE c.product_id = l.product_id AND c.supplier = l.supplier AND c.kind = 'hidden') hidden_at
+                    FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE $where ORDER BY l.seen_at DESC, l.product_id DESC" . $lim, [$code]);
+                return [$rows, $total];
+            case 'unlinked':                                                 // сейчас: товары бренда поставщика на сайте без связи с ним (и с другими)
+                $own = $cls::ownBrandIds();
+                if (!$own) return [[], 0];
+                [$bph, $bv] = $db->in($own);
+                $where = "p.brand_id IN ($bph) AND p.status = 1 AND NOT EXISTS (SELECT 1 FROM supplier_links l WHERE l.product_id = p.id)";
+                $total = (int) $db->value("SELECT COUNT(*) FROM products p WHERE $where", $bv);
+                $rows = $db->all("SELECT '' code, NULL ext_id, p.id product_id, p.name, p.url, p.status, p.price, p.in_stock, p.supplier, p.created_at FROM products p WHERE $where ORDER BY p.id DESC" . $lim, $bv);
+                return [$rows, $total];
+            case 'out':                                                      // сейчас: на сайте, но «нет в наличии» (так у поставщика)
+                $where = 'l.supplier = ? AND p.status = 1 AND p.in_stock = 0';
+                $total = (int) $db->value("SELECT COUNT(*) FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE $where", [$code]);
+                $rows = $db->all("SELECT l.code, l.ext_id, l.product_id, l.missed, l.seen_at, l.cost, p.name, p.url, p.status, p.price,
+                    (SELECT MAX(c.created_at) FROM supplier_changes c WHERE c.product_id = l.product_id AND c.supplier = l.supplier AND c.kind = 'out') out_at
                     FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE $where ORDER BY l.seen_at DESC, l.product_id DESC" . $lim, [$code]);
                 return [$rows, $total];
             case 'missing':                                                  // сейчас: не было в последних полных проходах, но на сайте
                 $where = 'l.supplier = ? AND l.missed > 0 AND p.status = 1';
                 $total = (int) $db->value("SELECT COUNT(*) FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE $where", [$code]);
-                $rows = $db->all("SELECT l.code, l.product_id, l.missed, l.seen_at, l.cost, p.name, p.url, p.status, p.price
+                $rows = $db->all("SELECT l.code, l.ext_id, l.product_id, l.missed, l.seen_at, l.cost, p.name, p.url, p.status, p.price
                     FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE $where ORDER BY l.missed DESC, l.seen_at, l.product_id" . $lim, [$code]);
                 return [$rows, $total];
             case 'back':
@@ -105,7 +125,8 @@ final class SupplierOverview
                 if ($list === 'price' && ($f['dir'] ?? 'all') === 'down') $where .= ' AND ' . self::dirSql('c') . ' < 0';
                 $total = (int) $db->value("SELECT COUNT(*) FROM supplier_changes c WHERE $where", $p);
                 $rows = $db->all("SELECT c.id, c.run_id, c.product_id, c.code, c.kind, c.old_cost, c.new_cost, c.old_price, c.new_price, c.note, c.created_at,
-                    p.name, p.url, p.status, p.price FROM supplier_changes c LEFT JOIN products p ON p.id = c.product_id WHERE $where ORDER BY c.id DESC" . $lim, $p);
+                    p.name, p.url, p.status, p.price, l.ext_id FROM supplier_changes c LEFT JOIN products p ON p.id = c.product_id
+                    LEFT JOIN supplier_links l ON l.supplier = c.supplier AND l.code = c.code WHERE $where ORDER BY c.id DESC" . $lim, $p);
                 foreach ($rows as &$r) $r['pct'] = self::pct($r);
                 unset($r);
                 return [$rows, $total];
@@ -174,14 +195,15 @@ final class SupplierOverview
 
     // ================================================================== карточка товара
 
-    /** Связи товара с поставщиками: [['supplier', 'title', 'code', 'cost', 'seen_at', 'missed', 'hidden']] */
+    /** Связи товара с поставщиками: [['supplier', 'title', 'code', 'label' (код для людей — Supplier::codeLabel), 'cost', 'seen_at', 'missed', 'hidden']] */
     public static function productLinks(int $pid): array
     {
         if ($pid <= 0 || !self::tables()) return [];
         $out = [];
-        foreach (App::db()->all('SELECT supplier, code, cost, seen_at, missed, hidden FROM supplier_links WHERE product_id = ? ORDER BY supplier, code', [$pid]) as $r) {
+        foreach (App::db()->all('SELECT supplier, code, ext_id, cost, seen_at, missed, hidden FROM supplier_links WHERE product_id = ? ORDER BY supplier, code', [$pid]) as $r) {
             $cls = Suppliers::get((string) $r['supplier']);
             $r['title'] = $cls ? $cls::TITLE : (string) $r['supplier'];
+            $r['label'] = $cls ? $cls::codeLabel((string) $r['code'], $r['ext_id'] !== null ? (string) $r['ext_id'] : null) : (string) $r['code'];
             $r['base'] = $cls ? '/admin/suppliers/' . $r['supplier'] . '/' : null;
             $out[] = $r;
         }

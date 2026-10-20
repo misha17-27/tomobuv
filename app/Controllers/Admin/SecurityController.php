@@ -10,6 +10,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Settings;
 use App\Core\Str;
+use App\Services\ProductHistory;
 use App\Services\SystemStatus;
 
 /**
@@ -66,6 +67,8 @@ final class SecurityController extends BaseController
         'customer_reset_link' => 'Ссылка восстановления пароля клиенту', 'customer_block' => 'Клиент заблокирован', 'customer_unblock' => 'Клиент разблокирован',
         'product_create' => 'Новый товар', 'product_update' => 'Изменение товара', 'product_delete' => 'Удаление товара', 'products_delete' => 'Удаление товаров',
         'product_images_upload' => 'Загрузка фото товара', 'product_image_delete' => 'Удаление фото товара', 'export_products' => 'Выгрузка товаров',
+        'product_images_sort' => 'Порядок фото товара', 'product_bulk' => 'Товар: массовое действие', 'product_import' => 'Товар: импорт',
+        'product_autoname' => 'Товар: автоназвание',
         'category_create' => 'Новая категория', 'category_update' => 'Изменение категории', 'category_delete' => 'Удаление категории',
         'category_move' => 'Перемещение категории', 'category_parent' => 'Смена родительской категории', 'brand_delete' => 'Удаление бренда',
         'import_upload' => 'Загрузка прайса', 'import_start' => 'Запуск импорта', 'import_restart' => 'Повтор импорта', 'import_delete' => 'Удаление импорта',
@@ -142,7 +145,8 @@ final class SecurityController extends BaseController
         // счётчики вкладок (индекс action_created)
         $byAction = $db->pairs("SELECT action, COUNT(*) FROM admin_log WHERE action IN ('login','login_failed') GROUP BY action");
         $counts = ['all' => (int) array_sum($byAction), 'ok' => (int) ($byAction['login'] ?? 0), 'failed' => (int) ($byAction['login_failed'] ?? 0),
-            'actions' => (int) $db->value("SELECT COUNT(*) FROM admin_log WHERE action NOT IN ('login','login_failed')")];
+            'actions' => (int) $db->value('SELECT COUNT(*) FROM admin_log WHERE action NOT IN (' . implode(',', array_fill(0, count(ProductHistory::QUIET) + 2, '?')) . ')',
+                array_merge(['login', 'login_failed'], ProductHistory::QUIET))];
 
         [$where, $params] = self::logWhere($tab, $q, $days);
         // без поиска и периода число записей вкладки уже посчитано выше — второй полный подсчёт не нужен
@@ -230,7 +234,10 @@ final class SecurityController extends BaseController
             $w[] = 'a.action IN (' . implode(',', array_fill(0, count($actions), '?')) . ')';
             array_push($p, ...$actions);
         } else {
-            $w[] = "a.action NOT IN ('login','login_failed')";
+            // записи истории отдельных товаров (массовое действие, импорт, автоназвание) — в карточке товара, здесь — общая запись
+            $quiet = array_merge(['login', 'login_failed'], ProductHistory::QUIET);
+            $w[] = 'a.action NOT IN (' . implode(',', array_fill(0, count($quiet), '?')) . ')';
+            array_push($p, ...$quiet);
         }
         if ($days) { $w[] = 'a.created_at >= ?'; $p[] = date('Y-m-d H:i:s', time() - $days * 86400); }
         if ($q !== '') {

@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace App\Services\Suppliers;
 
 use App\Core\App;
-use App\Core\Cache;
 use App\Services\AdminCatalog;
 use App\Services\CatalogIndexer;
 use App\Services\Import\Importer;
@@ -13,14 +12,16 @@ use App\Services\UkWords;
 
 /**
  * Товары «Хит обуви» со страницы списка — порциями (одна транзакция под блокировкой записи индекса, как у Jong•Golf:
- * общая часть — SupplierSync).
+ * общая часть порций со страниц сайта — WebSync, записи — SupplierSync).
  *
  * Поиск товара сайта (первое подходящее, правила из разбора):
  *   R1 связь supplier_links (hitobuvi, код = product_id поставщика);
  *   R2 forsage-код из «машинного» адреса товара → товар supplier = 'forsage' с этим supplier_code («Хит обуви» сам
  *      импортирует товары из Forsage, как старый сайт);
- *   R3 точное название + тот же размерный ряд среди товаров без поставщика, forsage и hitobuvi (jonggolf — никогда);
+ *   R3 точное название + тот же размерный ряд среди товаров без поставщика, forsage и hitobuvi (jonggolf, tomm — никогда);
  *   R4 тип + бренд + «хвост» названия (артикул и цвет, кириллица = латиница, без «-._/») + ряд — только единственный.
+ * Один товар — один поставщик: товар, связанный с другим поставщиком (Tom.m, Jong•Golf), и товар сайта с брендом из
+ * «пропускаемых» в R2–R4 не находятся; товар поставщика с таким брендом в названии или производителем — пропускается.
  * Найденный не наш товар (Forsage, заведённый вручную) по умолчанию не меняется и не дублируется — строка в отчёте;
  * с настройкой «брать под загрузчик» — становится товаром поставщика. Связанный — цена (×наценка), закупочная цена,
  * ящик, ряд, наличие, видимость (скрытый загрузчиком — снова показан; скрытый вручную — по настройке), категория.
@@ -28,19 +29,14 @@ use App\Services\UkWords;
  * UA — словарём сайта (UkWords), бренд из названия (иначе фабрика без страны), характеристики по настройке,
  * фото full_ → GD 700×700; SEO — шаблоны сайта (свои meta не пишутся). Без фото не создаётся.
  */
-final class HitObuviSync extends SupplierSync
+final class HitObuviSync extends WebSync
 {
     protected const SUPPLIER = HitObuvi::class;
-    private const PORTION = 40;
     private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, purchase_price, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext';
     protected const UPDATABLE = ['sku', 'supplier', 'supplier_code', 'category_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty', 'size',
         'stock', 'in_stock', 'status', 'updated_at'];
-    private const CHANGE_NAMES = ['price' => 'цена', 'compare_price' => 'старая цена', 'purchase_price' => 'закупочная', 'status' => 'на сайте', 'in_stock' => 'наличие',
-        'stock' => 'остаток', 'sku' => 'артикул (ряд)', 'size' => 'размер', 'box_qty' => 'пар в ящике', 'min_qty' => 'мин. заказ', 'supplier' => 'поставщик',
-        'supplier_code' => 'код поставщика', 'category_id' => 'категория'];
-    /** Сколько строк «без изменений» / «есть на сайте» писать в отчёт (дальше — только счётчики) */
-    private const LOG_SAME = 200;
+    protected const MASS_SKIP = ['cat_skip', 'old', 'noadd', 'limit_new', 'brand', 'dup', 'taken', 'foreign'];
 
     public const SKIP = [
         'cat_skip' => 'категория поставщика не загружается (настройка)', 'category' => 'категория не сопоставлена', 'brand' => 'бренд в списке пропускаемых',
@@ -48,11 +44,10 @@ final class HitObuviSync extends SupplierSync
         'noadd' => 'новые товары не добавляются (настройка)', 'limit_new' => 'лимит новых товаров за запуск', 'nophoto' => 'нет фото у поставщика',
         'photo' => 'фото не скачалось', 'existing' => 'есть на сайте (Forsage / вручную) — не взят под загрузчик', 'ambiguous' => 'похож на несколько товаров сайта',
         'dup' => 'повтор товара в запуске', 'taken' => 'найденный товар сайта уже связан с другим товаром поставщика',
+        'foreign' => 'найденный товар сайта ведёт другой поставщик (свой загрузчик бренда) или его бренд в пропускаемых',
     ];
     public const VIA = ['link' => 'по связи', 'forsage' => 'по forsage-коду', 'name' => 'по названию и ряду', 'article' => 'по типу, бренду, артикулу и ряду'];
 
-    private HitObuviClient $client;
-    private ?array $markup;
     private int $minId;
     private array $skipBrands = [];
     /** Названия брендов для разбора названий: [ключ bkey => название] (бренды сайта + производители поставщика) */
@@ -63,8 +58,6 @@ final class HitObuviSync extends SupplierSync
     private array $brandProducts = [];
     /** Разбор названий товаров сайта для R4: [id => split()] */
     private array $splitCache = [];
-    private string $deferredBy = '';
-    private int $plannedNew = 0;
 
     public function __construct(int $runId, bool $dry, array &$stats, HitObuviClient $client)
     {
@@ -78,12 +71,6 @@ final class HitObuviSync extends SupplierSync
         $this->minId = (int) $this->cfg['min_id'];
         $this->brandFeature = AdminCatalog::featureId('brand');
         foreach (preg_split('~\r\n|\n~', $this->cfg['skip_brands']) ?: [] as $b) if (($k = self::bkey($b)) !== '') $this->skipBrands[$k] = trim($b);
-    }
-
-    /** Причина последней отложенной порции: lock — идёт перестройка индекса (ждать), photos — фото не уложились в шаг */
-    public function deferredBy(): string
-    {
-        return $this->deferredBy;
     }
 
     // ================================================================== ключи
@@ -146,85 +133,26 @@ final class HitObuviSync extends SupplierSync
         return ['type' => $type, 'brand' => '', 'tail' => implode(' ', $rest)];
     }
 
-    // ================================================================== порции
+    // ================================================================== порции (цикл, фото, отчёт — WebSync)
 
-    /**
-     * Товары страницы с позиции $pos до $deadline (и не больше $limit). $meta — страница (root, cat). $saved($pos) — после
-     * каждой порции; false — запуск остановлен. @return int новая позиция
-     */
-    public function process(array $list, int $pos, array $meta, float $deadline, ?int $limit, ?callable $saved = null): int
+    protected function prepare(): void
     {
-        $this->ci = Importer::categoryIndex();
-        $this->loadBrands();
+        parent::prepare();
         $this->loadBrandNames();
-        $this->deferred = false;
-        $this->deferredBy = '';
-        $root = (string) ($meta['root'] ?? '');
-        $pageCat = !empty($meta['cat']) ? HitObuviMap::category((string) $meta['cat'], null) : null;
-        $first = true;
-        while ($pos < count($list) && ($limit === null || $limit > 0) && microtime(true) < $deadline - ($first ? 1.0 : self::MIN_LEFT)) {
-            $first = false;
-            $n = self::PORTION;
-            if ($limit !== null) $n = min($n, $limit);
-            $used = $this->portion(array_slice($list, $pos, $n), $root, $pageCat, $deadline);
-            if ($used === 0) { $this->deferred = true; break; }
-            $pos += $used;
-            if ($limit !== null) $limit -= $used;
-            if ($saved && $saved($pos) === false) break;
-        }
-        return $pos;
     }
 
-    /** Одна порция; @return int сколько товаров обработано (0 — отложена: блокировка индекса или фото не уложились в шаг) */
-    private function portion(array $slice, string $root, ?array $pageCat, float $deadline): int
+    /** Товары порции: разбор, поиск на сайте, повторы, решение. $meta — страница (root, cat) */
+    protected function items(array $slice, array $meta): array
     {
-        $statsBefore = $this->stats;
-        $logMark = HitObuvi::logMark();
-        $plannedBefore = $this->plannedNew;
+        $root = (string) ($meta['root'] ?? '');
+        $pageCat = !empty($meta['cat']) ? HitObuviMap::category((string) $meta['cat'], null) : null;
         $items = [];
         foreach ($slice as $p) $items[] = $this->expand($p, $root, $pageCat);
         $this->match($items);
         $this->dedupe($items);
         foreach ($items as &$it) $this->decide($it);
         unset($it);
-        if (!$this->dry) {
-            // фото новых — по одному с паузой: в порцию берём столько новых без готового фото, сколько успеем скачать в этом шаге
-            $per = $this->client->isOffline() ? 0.05 : (float) (Importer::num($this->cfg['delay']) ?? 2.0) + 1.5;
-            $fit = max(1, (int) floor(($deadline - microtime(true) - 4.0) / $per));
-            $need = 0;
-            foreach ($items as $i => $it) {
-                if (empty($it['photo']) || is_file($this->photoFile($it['photo_url']))) continue;
-                if (++$need > $fit) {
-                    foreach (array_slice($items, $i) as $rest) if ($rest['action'] === 'create') $this->plannedNew--;
-                    $items = array_slice($items, 0, $i);
-                    break;
-                }
-            }
-        }
-        if ($this->dry) {
-            $this->report($items);
-            $this->seen($items);
-            $this->plannedNew = 0;                                          // новые порции уже в stats['created']
-            HitObuvi::flushLog();
-            return count($items);
-        }
-        $defer = function (string $why) use ($statsBefore, $logMark, $plannedBefore): int {
-            $this->stats = $statsBefore;
-            $this->plannedNew = $plannedBefore;
-            HitObuvi::logRollback($logMark);
-            $this->deferredBy = $why;
-            return 0;
-        };
-        if (!CatalogIndexer::locked(static function (): void {}, max(0.0, min(self::PRECHECK, $deadline - microtime(true) - 1.0)), false)) return $defer('lock');
-        $photos = $this->photos($items, $deadline);
-        foreach ($items as $i => $it) if (!empty($it['photo']) && ($photos[$i]['error'] ?? '') === 'time') return $defer('photos');   // скачанные — в папке запуска
-        if (!$this->transact($items, $photos, $deadline)) return $defer('lock');
-        foreach ($items as $it) foreach ($it['drop_files'] ?? [] as [$pid, $iid, $ext]) AdminCatalog::deleteImageFiles($pid, $iid, $ext);
-        $this->dropPhotos($photos);
-        $this->report($items);
-        $this->plannedNew = 0;                                              // созданные — в stats['created'], не созданные (нет фото) — не в счёт лимита
-        HitObuvi::flushLog();
-        return count($items);
+        return $items;
     }
 
     // ================================================================== разбор товара поставщика
@@ -342,12 +270,23 @@ final class HitObuviSync extends SupplierSync
             unset($r);
             foreach ($db->all("SELECT product_id, code FROM supplier_links WHERE supplier = ? AND product_id IN ($iph)", array_merge([HitObuvi::CODE], $iv)) as $r) $taken[(int) $r['product_id']] = (string) $r['code'];
         }
+        // один товар — один поставщик: связанные с другим поставщиком (Tom.m, Jong•Golf) и товары пропускаемых брендов сайта — не наши
+        $foreign = $this->foreignLinked(array_keys($ids));
+        $skipBids = [];
+        foreach (array_keys($this->skipBrands) as $k) foreach ($this->siteBrands[$k] ?? [] as $bid) $skipBids[(int) $bid] = 1;
+        $alien = static fn($pid) => isset($foreign[$pid]) || (isset($rows[$pid]) && isset($skipBids[(int) $rows[$pid]['brand_id']]));
         $used = [];
         foreach ($items as $i => &$it) {
             if (!isset($found[$i])) continue;
-            [$via, $list] = $found[$i];
-            $list = array_values(array_filter($list, static fn($pid) => isset($rows[$pid]) && ($via === 'link' || !isset($taken[$pid]) || $taken[$pid] === $it['code'])));
-            if (!$list) { if ($via !== 'link') { $it['via'] = 'taken'; $it['msg'] = 'товар сайта уже связан с другим товаром поставщика'; } continue; }
+            [$via, $all] = $found[$i];
+            $list = array_values(array_filter($all, static fn($pid) => isset($rows[$pid]) && ($via === 'link' || (!$alien($pid) && (!isset($taken[$pid]) || $taken[$pid] === $it['code'])))));
+            if (!$list) {
+                if ($via === 'link') continue;
+                $al = array_values(array_filter($all, $alien));
+                if ($al) { $it['via'] = 'foreign'; $it['msg'] = 'ID ' . implode(', ', $al) . ' — товар другого поставщика или пропускаемого бренда'; }
+                else { $it['via'] = 'taken'; $it['msg'] = 'товар сайта уже связан с другим товаром поставщика'; }
+                continue;
+            }
             if (count($list) > 1) { $it['via'] = 'ambiguous'; $it['msg'] = 'ID ' . implode(', ', $list); continue; }
             $pid = $list[0];
             if (isset($used[$pid])) { $it['via'] = 'ambiguous'; $it['msg'] = 'ID ' . $pid . ' уже найден для товара поставщика ' . $used[$pid]; continue; }
@@ -370,20 +309,6 @@ final class HitObuviSync extends SupplierSync
         return $this->brandProducts[$k];
     }
 
-    /** Повтор товара поставщика в этом запуске (другой раздел, сдвиг страниц) — второй раз не обрабатывается */
-    private function dedupe(array &$items): void
-    {
-        if (!$items) return;
-        $db = App::db();
-        [$ph, $v] = $db->in(array_values(array_unique(array_column($items, 'code'))));
-        $seen = array_flip($db->col("SELECT code FROM supplier_run_seen WHERE run_id = ? AND code IN ($ph)", array_merge([$this->runId], $v)));
-        foreach ($items as &$it) {
-            if (isset($seen[$it['code']])) { $it['action'] = 'skip'; $it['why'] = 'dup'; $it['msg'] = 'повтор товара поставщика ' . $it['code'] . ' — уже обработан в этом запуске'; continue; }
-            $seen[$it['code']] = 1;
-        }
-        unset($it);
-    }
-
     // ================================================================== решение
 
     private function decide(array &$it): void
@@ -393,8 +318,10 @@ final class HitObuviSync extends SupplierSync
         $ex = $it['ex'];
         if ($it['via'] === 'ambiguous') { $this->skip($it, 'ambiguous', 'похож на несколько товаров сайта (' . $it['msg'] . ') — не изменены, новый не создан'); return; }
         if ($it['via'] === 'taken') { $this->skip($it, 'taken', ''); return; }
+        if ($it['via'] === 'foreign') { $this->skip($it, 'foreign', ''); return; }
         if ($it['map']['skip']) { $this->skip($it, 'cat_skip', ''); return; }
-        if ($it['brand'] !== '' && isset($this->skipBrands[self::bkey($it['brand'])])) { $this->skip($it, 'brand', ''); return; }
+        // бренд со своим загрузчиком (Tom.m, Jong•Golf): по бренду из названия и по производителю («Пинетки Red Hat P023», производитель TOM.M)
+        if (($it['brand'] !== '' && isset($this->skipBrands[self::bkey($it['brand'])])) || ($it['maker'] !== '' && isset($this->skipBrands[self::bkey($it['maker'])]))) { $this->skip($it, 'brand', ''); return; }
         if ($it['pair'] <= 0) { $this->skip($it, 'price', 'нет цены у товара поставщика ' . $it['code'], 'warn'); return; }
         if (!$it['box']) { $this->skip($it, 'box', 'не определить пар в ящике у товара поставщика ' . $it['code'], 'warn'); return; }
         if ($it['box_note'] !== '') $it['warn'][] = $it['box_note'];
@@ -436,18 +363,7 @@ final class HitObuviSync extends SupplierSync
             }
             if ($it['cat_id'] === null) $it['warn'][] = 'категория «' . $it['map']['key'] . '» не сопоставлена — привязка не изменена';
             if ($ex['image_id'] === null && $it['photo_url'] !== '') $it['photo'] = true;
-            foreach ($upd as $col => $val) {
-                $old = $ex[$col] ?? null;
-                $same = match ($col) {
-                    'price', 'compare_price', 'purchase_price' => $old !== null && abs((float) $old - (float) $val) < 0.005,
-                    'stock', 'category_id' => ($old === null && $val === null) || ($old !== null && $val !== null && (int) $old === (int) $val),
-                    'status', 'in_stock', 'box_qty', 'min_qty' => (int) $old === (int) $val,
-                    default => trim((string) $old) === trim((string) $val),
-                };
-                if ($same) continue;
-                $it['upd'][$col] = $val;
-                $it['changes'][] = (self::CHANGE_NAMES[$col] ?? $col) . ': ' . $this->show($col, $old) . ' → ' . $this->show($col, $val);
-            }
+            $this->diff($it, $ex, $upd);
             if (!empty($it['relink']) && !isset($it['upd']['category_id'])) $it['changes'][] = 'привязка к категории → ' . ($this->ci['path'][$it['cat_id']] ?? $it['cat_id']);
             if (!empty($it['photo'])) $it['changes'][] = 'фото';
             $it['link_set'] = 1;
@@ -492,52 +408,6 @@ final class HitObuviSync extends SupplierSync
         if ($brand === '') return null;
         $ids = $this->siteBrands[self::bkey($brand)] ?? [];
         return $ids ? $ids[0] : $this->brandRef($brand);
-    }
-
-    private function skip(array &$it, string $why, string $msg, string $level = 'skip'): void
-    {
-        $it['action'] = 'skip';
-        $it['why'] = $why;
-        $it['msg'] = $msg;
-        $it['level'] = $level;
-    }
-
-    private function show(string $col, $v): string
-    {
-        if ($v === null || $v === '') return '—';
-        if ($col === 'status' || $col === 'in_stock') return (int) $v ? 'да' : 'нет';
-        if ($col === 'category_id') return (string) ($this->ci['path'][(int) $v] ?? $v);
-        if (in_array($col, ['price', 'compare_price', 'purchase_price'], true)) return self::num((float) $v);
-        return mb_strimwidth((string) $v, 0, 40, '…');
-    }
-
-    // ================================================================== фото
-
-    /**
-     * Фото новых товаров (и найденных без фото) — по одному через бережный клиент (пауза, robots.txt), вписывание в холст
-     * (SupplierSync::frame), готовое — в папке запуска: отложенная порция не качает его снова. Время шага кончилось —
-     * ['error' => 'time'] (порция отложится). @return [индекс => ['file', 'w', 'h'] | ['error']]
-     */
-    private function photos(array $items, float $deadline): array
-    {
-        $out = [];
-        $first = true;
-        foreach ($items as $i => $it) {
-            if (empty($it['photo']) || !in_array($it['action'], ['create', 'update'], true)) continue;
-            $f = $this->photoFile($it['photo_url']);
-            $info = is_file($f) ? @getimagesize($f) : false;
-            if ($info) { $out[$i] = ['file' => $f, 'w' => (int) $info[0], 'h' => (int) $info[1]]; continue; }
-            if (!$first && microtime(true) > $deadline - 3.0) { $out[$i] = ['error' => 'time']; continue; }
-            $first = false;
-            $r = $this->client->get($it['photo_url'], true);
-            if (!empty($r['missing'])) { $out[$i] = ['error' => 'нет среди сохранённых ответов']; continue; }
-            if ($r['code'] !== 200) { $out[$i] = ['error' => 'ответ ' . $r['code']]; continue; }
-            $tmp = HitObuvi::dir($this->runId) . '/dl-' . md5($it['photo_url']) . '.bin';
-            file_put_contents($tmp, $r['body']);
-            $out[$i] = $this->frame($tmp, $f);
-            @unlink($tmp);
-        }
-        return $out;
     }
 
     // ================================================================== запись
@@ -661,79 +531,8 @@ final class HitObuviSync extends SupplierSync
         }
     }
 
-    /** Встреченные товары поставщика (для повторов и скрытия пропавших): записанные и связанные, даже если пропущены */
-    protected function seen(array $items): void
-    {
-        $rows = [];
-        foreach ($items as $it) {
-            if (!in_array($it['action'], ['create', 'update', 'same'], true) && !($it['via'] === 'link' && $it['ex'])) continue;
-            $rows[$it['code']] = [$this->runId, $it['code'], $it['id'] ? (int) $it['id'] : ($it['ex']['id'] ?? null)];
-        }
-        // пропущенные и чужие — тоже отмечаются кодом (повтор на другой странице не обрабатывается заново)
-        foreach ($items as $it) if (!isset($rows[$it['code']]) && $it['why'] !== 'dup') $rows[$it['code']] = [$this->runId, $it['code'], null];
-        foreach (array_chunk(array_values($rows), 500) as $part) {
-            App::db()->query('INSERT IGNORE INTO supplier_run_seen (run_id, code, product_id) VALUES ' . implode(',', array_fill(0, count($part), '(?,?,?)')), array_merge(...$part));
-        }
-    }
-
-    // ================================================================== отчёт
-
-    private function report(array $items): void
-    {
-        $dry = $this->dry;
-        foreach ($items as $it) {
-            $this->stats['products']++;
-            $a = $it['action'];
-            $price = ' — пара: закупка ' . self::num($it['pair']) . ' → сайт ' . self::num($it['price']) . ' грн' . ($it['compare'] > 0 ? ' (старая ' . self::num($it['compare']) . ')' : '') . ', ящик ' . (int) $it['box'];
-            $warn = $it['warn'] ? ' (' . implode('; ', $it['warn']) . ')' : '';
-            if ($it['warn']) $this->stats['warnings']++;
-            if ($it['cat_id'] === null && !$it['map']['skip'] && in_array($a, ['create', 'update', 'same', 'existing'], true) || $a === 'skip' && $it['why'] === 'category') {
-                $this->stats['unmapped'][$it['map']['key']] = ($this->stats['unmapped'][$it['map']['key']] ?? 0) + 1;
-            }
-            if (in_array($a, ['update', 'same', 'existing'], true) && $it['via'] !== '') $this->stats['found'][$it['via']] = ($this->stats['found'][$it['via']] ?? 0) + 1;
-            switch ($a) {
-                case 'skip':
-                    $this->stats['skipped']++;
-                    $why = $it['why'] ?: 'other';
-                    if (in_array($why, ['cat_skip', 'old', 'noadd', 'limit_new', 'brand', 'dup', 'taken'], true)) { $this->skipCount($why, 'Пропущен «' . $it['name'] . '» (' . $it['code'] . '): ' . self::SKIP[$why]); continue 2; }
-                    $this->stats['skip'][$why] = ($this->stats['skip'][$why] ?? 0) + 1;
-                    if ($it['level'] === 'error') $this->stats['errors']++;
-                    if ($it['level'] === 'warn') $this->stats['warnings']++;
-                    $n = $this->stats['examples'][$why] = (int) ($this->stats['examples'][$why] ?? 0) + 1;
-                    if ($n > 50 && $it['level'] === 'skip') continue 2;
-                    HitObuvi::log($this->runId, $it['level'] === 'skip' ? 'skip' : $it['level'], ($it['msg'] !== '' ? $it['msg'] : 'Пропущен «' . $it['name'] . '» (' . $it['code'] . '): ' . (self::SKIP[$why] ?? $why)),
-                        $it['ex']['id'] ?? null, $this->data($it));
-                    break;
-                case 'existing':
-                    $this->stats['existing']++;
-                    $n = $this->stats['examples']['existing'] = (int) ($this->stats['examples']['existing'] ?? 0) + 1;
-                    if ($n <= self::LOG_SAME) HitObuvi::log($this->runId, 'skip', 'Есть на сайте: id=' . $it['id'] . ' «' . $it['ex']['name'] . '» (' . ((string) $it['ex']['supplier'] !== '' ? $it['ex']['supplier'] : 'заведён вручную')
-                        . ', найден ' . (self::VIA[$it['via']] ?? $it['via']) . ') — не взят под загрузчик, дубль не создан' . $price, (int) $it['id'], $this->data($it));
-                    break;
-                case 'create':
-                    $this->stats['created']++;
-                    $this->plannedNew = max(0, $this->plannedNew - 1);
-                    $this->stats['photos'] += count($it['stored'] ?? []);
-                    HitObuvi::log($this->runId, 'add', ($dry ? 'Будет добавлен' : 'Добавлен id=' . $it['id']) . ' «' . $it['row']['name'] . '» (' . $it['code'] . ', ' . $it['size'] . ') в «'
-                        . ($this->ci['path'][$it['cat_id']] ?? $it['cat_id']) . '»' . $price . $warn, $it['id'] ?: null, $this->data($it));
-                    break;
-                case 'update':
-                    $this->stats['updated']++;
-                    $this->stats['photos'] += count($it['stored'] ?? []);
-                    HitObuvi::log($this->runId, 'update', ($dry ? 'Будет изменён' : 'Изменён') . ' id=' . $it['id'] . ' «' . $it['ex']['name'] . '»: ' . implode('; ', $it['changes']) . $price . $warn
-                        . ($it['via'] !== 'link' ? ' [найден ' . (self::VIA[$it['via']] ?? $it['via']) . ', взят под загрузчик]' : ''), (int) $it['id'], $this->data($it));
-                    break;
-                case 'same':
-                    $this->stats['same']++;
-                    $n = $this->stats['examples']['same'] = (int) ($this->stats['examples']['same'] ?? 0) + 1;
-                    if ($n <= self::LOG_SAME) HitObuvi::log($this->runId, 'same', 'Без изменений id=' . $it['id'] . ' «' . $it['ex']['name'] . '»' . $price . $warn, (int) $it['id'], $this->data($it));
-                    break;
-            }
-        }
-    }
-
     /** Подробности строки отчёта (таблица запуска): что будет у товара после записи */
-    private function data(array $it): array
+    protected function data(array $it): array
     {
         $ex = $it['ex'];
         $cat = $it['action'] === 'create' || !empty($it['relink']) ? $it['cat_id'] : ($ex['category_id'] ?? $it['cat_id']);
@@ -746,78 +545,5 @@ final class HitObuviSync extends SupplierSync
             'brand' => $it['brand'], 'size' => $it['size'], 'color' => $it['color'], 'material' => trim($it['material'] . ($it['lining'] !== '' ? ' / ' . $it['lining'] : '')),
             'country' => $it['country'], 'changes' => $it['changes'], 'photo' => $it['photo_url'], 'forsage' => $it['forsage'],
         ];
-    }
-
-    // ================================================================== завершение
-
-    /**
-     * Полный проход по всем страницам ($complete): связанные товары, которых не было в проходе, получают +1 к missed;
-     * достигшие N (настройка, по умолчанию 2) полных проходов подряд — скрываются (не удаляются). Защита: пропало
-     * больше половины активных товаров поставщика — похоже на сбой, ничего не меняется. Forsage-товары, не взятые под
-     * загрузчик, и товары других поставщиков не трогаются. В конце — сброс кэша сайта.
-     */
-    public function finish(bool $complete, ?callable $alive = null): void
-    {
-        $db = App::db();
-        $s = &$this->stats;
-        $n = max(1, (int) $this->cfg['missing_runs']);
-        if (!$complete) {
-            HitObuvi::log($this->runId, 'info', 'Скрытие пропавших не выполнялось: не полный проход по всем страницам (быстрый режим, сохранённые страницы, лимит, ошибка или только часть товаров)');
-        } elseif ($this->cfg['hide_missing'] !== '1') {
-            HitObuvi::log($this->runId, 'info', '«Скрывать пропавшие у поставщика» выключено — товары не скрываются');
-        } elseif ($alive && !$alive()) {
-            HitObuvi::log($this->runId, 'info', 'Запуск остановлен — скрытие пропавших не выполнялось');
-        } elseif ((int) $s['products'] === 0) {
-            HitObuvi::log($this->runId, 'warn', 'У поставщика не прочитано ни одного товара — скрытие отменено');
-        } else {
-            $missing = $db->all('SELECT l.code, l.product_id, l.missed, l.hidden, p.status, p.name FROM supplier_links l JOIN products p ON p.id = l.product_id
-                LEFT JOIN supplier_run_seen s ON s.run_id = ? AND s.code = l.code WHERE l.supplier = ? AND s.code IS NULL ORDER BY l.product_id', [$this->runId, HitObuvi::CODE]);
-            $active = (int) $db->value('SELECT COUNT(*) FROM products WHERE supplier = ? AND status = 1', [HitObuvi::CODE]);
-            $missingActive = count(array_filter($missing, static fn($r) => (int) $r['status'] === 1));
-            if ($missingActive && $missingActive > $active * 0.5) {
-                $s['warnings']++;
-                $s['hide_cancelled'] = $missingActive;
-                HitObuvi::log($this->runId, 'warn', 'Скрытие отменено: в проходе нет ' . $missingActive . ' из ' . $active . ' активных товаров «Хит обуви» — похоже на сбой сайта поставщика или смену шаблона. Счётчики пропусков не изменены.');
-            } elseif ($missing) {
-                $hide = []; $codes = [];
-                foreach ($missing as $r) if ((int) $r['missed'] + 1 >= $n && (int) $r['status'] === 1) { $hide[(int) $r['product_id']] = (string) $r['name']; $codes[(int) $r['product_id']] = (string) $r['code']; }
-                $ids = array_keys($hide);
-                if (!$this->dry) {
-                    foreach (array_chunk(array_column($missing, 'code'), 500) as $part) {
-                        [$ph, $v] = $db->in($part);
-                        $db->query("UPDATE supplier_links SET missed = LEAST(missed + 1, 60000), updated_at = NOW() WHERE supplier = ? AND code IN ($ph)", array_merge([HitObuvi::CODE], $v));
-                    }
-                    if ($ids) {
-                        CatalogIndexer::locked(function () use ($db, $ids, $codes, $n): void {
-                            $db->transaction(function () use ($db, $ids, $codes, $n): void {
-                                $snap = CatalogIndexer::snapshot($ids);
-                                foreach (array_chunk($ids, 500) as $part) {
-                                    [$ph, $v] = $db->in($part);
-                                    $db->query("UPDATE products SET status = 0, updated_at = NOW() WHERE id IN ($ph)", $v);
-                                    $db->query("UPDATE supplier_links SET hidden = 1 WHERE supplier = ? AND product_id IN ($ph)", array_merge([HitObuvi::CODE], $v));
-                                }
-                                $this->journalHidden($codes, 'нет у поставщика ' . $n . ' полн. проходов подряд');
-                                CatalogIndexer::products($ids, $snap, false);
-                            });
-                        });
-                    }
-                }
-                foreach (array_slice($hide, 0, 500, true) as $pid => $name) {
-                    HitObuvi::log($this->runId, 'hide', ($this->dry ? 'Будет скрыт' : 'Скрыт') . ' id=' . $pid . ' «' . $name . '» — нет у поставщика ' . $n . ' полных проходов подряд', $pid, ['a' => 'hide_missing', 'pid' => $pid, 'name' => $name]);
-                }
-                $s['hidden_missing'] = count($ids);
-                HitObuvi::log($this->runId, 'info', 'Нет в этом проходе: ' . count($missing) . ' связанных товаров (активных ' . $missingActive . ')' . ($this->dry ? ' — при записи счётчик пропусков +1' : '')
-                    . '; скрыто — ' . count($ids) . ' (нет ' . $n . ' прохода подряд)');
-            } else {
-                HitObuvi::log($this->runId, 'info', 'Все связанные товары есть у поставщика — скрывать нечего');
-            }
-        }
-        if ($s['unmapped']) {
-            arsort($s['unmapped']);
-            $s['unmapped'] = array_slice($s['unmapped'], 0, 300, true);
-            HitObuvi::log($this->runId, 'warn', 'Несопоставленные категории (раздел|категория поставщика|название — товаров): ' . implode('; ', array_map(static fn($k, $v) => $k . ' — ' . $v,
-                array_keys(array_slice($s['unmapped'], 0, 30, true)), array_slice($s['unmapped'], 0, 30, true))) . (count($s['unmapped']) > 30 ? '; …' : ''));
-        }
-        if (!$this->dry && ($s['created'] + $s['updated'] + $s['hidden_missing']) > 0) Cache::flush();
     }
 }

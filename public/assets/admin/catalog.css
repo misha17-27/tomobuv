@@ -151,3 +151,13 @@ button.btn.btn-d:hover{background:#fef1f1;border-color:var(--bad)}
 .sup-ph .sup-up{color:var(--bad)}
 .sup-ph .sup-down{color:var(--ok)}
 .sup-ph .hint{margin:8px 0 0}
+
+/* ---------- карточка товара: «Даты» и история (admin/products/dates, events, history) */
+.ac-dates .ac-dates-dl > div{grid-template-columns:86px minmax(0,1fr);gap:10px;padding:8px 0}
+.ac-dates dd small{display:block;color:var(--steel);font-size:12.5px;margin-top:2px}
+.ac-dates h3{margin:16px 0 10px}
+.ac-events em{overflow-wrap:anywhere}
+.ac-events li.ev-create{border-left-color:var(--ok)}
+.ac-events li.ev-supplier,.ac-events li.ev-import{border-left-color:#c7d7fe}
+.ac-allhist{margin:12px 0 0}
+.ac-loaded{white-space:nowrap}.ac-loaded small{white-space:normal;max-width:92px;line-height:1.25}

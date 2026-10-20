@@ -10,11 +10,9 @@ use App\Controllers\Admin\BaseController;
 use App\Controllers\Admin\HitObuviController;
 use App\Services\Suppliers\HitObuvi;
 use App\Services\Suppliers\HitObuviMap;
-use App\Services\Suppliers\HitObuviSync;
 
 $fmt = static fn($n) => number_format((int) $n, 0, '', ' ');
 $on = static fn(string $k) => ($cfg[$k] ?? '') === '1';
-$dt = static fn(?string $d) => $d ? date('d.m.Y H:i', strtotime($d)) : '—';
 $money = static fn($v) => rtrim(rtrim(number_format((float) $v, 2, '.', ' '), '0'), '.');
 $unmappedCount = count($lastFinished['stats']['unmapped'] ?? []);
 $selRoots = array_flip(array_filter(array_map('trim', explode("\n", (string) $cfg['roots']))));
@@ -111,18 +109,8 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
           Уже загруженные товары раздела, снятого с обхода, перестают обновляться и после <?= (int) $cfg['missing_runs'] ?> полных проходов скрываются как пропавшие.</p>
       </div>
 
-      <div class="card">
-        <h2>Наценка</h2>
-        <p class="hint jg-lead">Цены на сайте «Хит обуви» — <b>закупочные</b> для магазина. Цена на сайте за пару = цена поставщика за пару (цена ящика ÷ пар в ящике) × коэффициент + надбавка, затем округление.
-          Старая цена (у товаров со скидкой) — так же. Закупочная цена товара сохраняется в карточке («Закупочная цена»).</p>
-        <div class="pair">
-          <label class="fld"><span>Коэффициент (1,2 — +20 %)</span><input name="markup_k" value="<?= e($cfg['markup_k']) ?>" inputmode="decimal" placeholder="не задан — включить нельзя"></label>
-          <label class="fld"><span>Надбавка за пару, грн</span><input name="markup_plus" value="<?= e($cfg['markup_plus']) ?>" inputmode="decimal"></label>
-          <label class="fld"><span>Округление</span><select name="round_step"><?php foreach (HitObuvi::ROUND_STEPS as $k => $label): ?><option value="<?= e((string) $k) ?>"<?= (string) $cfg['round_step'] === (string) $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
-          <label class="fld"><span>Как округлять</span><select name="round_mode"><?php foreach (HitObuvi::ROUND_MODES as $k => $label): ?><option value="<?= e($k) ?>"<?= $cfg['round_mode'] === $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
-        </div>
-        <p class="hint"><?php if ($markup): ?>Пример: пара у поставщика 400 грн → на сайте <b><?= e($money(HitObuvi::price(400, $markup))) ?> грн</b>; 495 грн → <?= e($money(HitObuvi::price(495, $markup))) ?> грн.<?php else: ?>Наценка не задана: пробный прогон покажет цены поставщика как есть.<?php endif; ?> Ящик и минимальный заказ — «пар в упаковке» поставщика (по ценам ящика и пары).</p>
-      </div>
+      <?= $view->partial('admin/suppliers/markup', ['sup' => HitObuvi::class, 'lead' => 'Цены на сайте «Хит обуви» — <b>закупочные</b> для магазина. Цена на сайте за пару = цена поставщика за пару (цена ящика ÷ пар в ящике) × коэффициент + надбавка, затем округление.
+          Старая цена (у товаров со скидкой) — так же. Закупочная цена товара сохраняется в карточке («Закупочная цена»).', 'after' => 'Ящик и минимальный заказ — «пар в упаковке» поставщика (по ценам ящика и пары).']) ?>
 
       <div class="card">
         <h2>Новые товары</h2>
@@ -175,7 +163,8 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
       <div class="card">
         <h2>Пропуск и отчёты</h2>
         <label class="fld"><span>Пропускаемые бренды (по одному в строке)</span><textarea name="skip_brands" rows="3"><?= e($cfg['skip_brands']) ?></textarea>
-          <span class="hint">JONG GOLF — его товары загружает загрузчик Jong•Golf (иначе дубли).</span></label>
+          <span class="hint">Jong•Golf и Tom.m — их товары загружают свои загрузчики с сайтов брендов (иначе дубли): проверяется бренд в названии и «Производитель»,
+            написание не важно (JONG GOLF = Jong•Golf = J&amp;G, TOM.M = Tom.m = ТОМ.М). Товары сайта, связанные с другим поставщиком, «Хит обуви» не берёт никогда.</span></label>
         <div class="pair">
           <label class="fld"><span>Хранить отчёты запусков, дней</span><input name="log_days" type="number" min="1" max="90" value="<?= e($cfg['log_days']) ?>"></label>
           <label class="fld"><span>Историю цен и наличия («Обзор»), дней</span><input name="history_days" type="number" min="30" max="3650" value="<?= e($cfg['history_days']) ?>"></label>
@@ -282,22 +271,5 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
 </form>
 
 <?php elseif ($tab === 'runs'): ?>
-<?php /** @var array $runs */ ?>
-<div class="card">
-  <?php if ($runs): ?>
-  <div class="table-scroll"><table class="grid"><thead><tr><th>№</th><th>Начат</th><th>Вид</th><th>Статус</th><th class="right">Запросов</th><th class="right">Товаров</th><th class="right">Добавлено</th><th class="right">Изменено</th>
-    <th class="right">Есть на сайте</th><th class="right">Скрыто</th><th class="right">Пропущено</th><th class="right">Ошибок</th></tr></thead><tbody>
-  <?php foreach ($runs as $r): $s = $r['stats']; $mode = $r['state']['mode'] ?? ''; ?>
-    <tr class="<?= $r['status'] === 'running' ? 'unread' : '' ?>"><td><a href="<?= e($base . 'runs/' . (int) $r['id'] . '/') ?>">№<?= (int) $r['id'] ?></a></td>
-      <td class="nowrap"><?= e($dt($r['started_at'])) ?><small><?= e(['cron' => 'по расписанию', 'cli' => 'командная строка', 'admin' => 'из админки'][$r['origin']] ?? $r['origin']) ?></small></td>
-      <td><?= e(HitObuvi::KINDS[$r['kind']] ?? $r['kind']) ?><small><?= $r['src'] === 'file' ? 'сохранённые страницы' : e(HitObuvi::MODES[$mode] ?? '') ?></small></td>
-      <td><span class="st <?= ['done' => 'st-completed', 'error' => 'st-refunded', 'stopped' => 'st-deleted', 'running' => 'st-processing'][$r['status']] ?? '' ?>"><?= e(HitObuvi::STATUSES[$r['status']] ?? $r['status']) ?></span>
-        <?php if ($r['error']): ?><small><?= e(mb_strimwidth((string) $r['error'], 0, 140, '…')) ?></small><?php endif; ?></td>
-      <td class="right"><?= $fmt($s['requests'] ?? 0) ?></td><td class="right"><?= $r['kind'] === 'test' ? '—' : $fmt($s['products']) ?></td><td class="right"><?= $fmt($s['created']) ?></td><td class="right"><?= $fmt($s['updated']) ?></td>
-      <td class="right"><?= $fmt($s['existing'] ?? 0) ?></td><td class="right"><?= $fmt($s['hidden_missing']) ?></td><td class="right"><?= $fmt($s['skipped']) ?></td><td class="right"><?= $fmt($s['errors']) ?></td></tr>
-  <?php endforeach; ?>
-  </tbody></table></div>
-  <p class="hint jg-pad">Отчёты хранятся <?= (int) $cfg['log_days'] ?> дн. (последние 5 запусков — всегда). Причины пропусков: <?= e(implode('; ', HitObuviSync::SKIP)) ?>.</p>
-  <?php else: ?><div class="empty-card"><h2>Запусков ещё не было</h2><p>Начните с «Проверить связь» и «Пробный прогон».</p></div><?php endif; ?>
-</div>
+<?= $view->partial('admin/suppliers/web-runs', ['sup' => HitObuvi::class]) ?>
 <?php endif; ?>

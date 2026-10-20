@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controllers\Admin;
 
 use App\Core\App;
+use App\Core\Auth;
 use App\Core\Cache;
 use App\Core\Paginator;
 use App\Core\Request;
@@ -13,6 +14,7 @@ use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
+use App\Services\ProductHistory;
 use App\Services\ProductName;
 use App\Services\SeoAudit;
 use App\Services\Suppliers\SupplierOverview;
@@ -23,6 +25,8 @@ final class ProductsController extends BaseController
     private const PER_PAGE = 50;
     /** Поиск отдаёт не больше стольких товаров (дальше — «уточните запрос») */
     private const SEARCH_LIMIT = 5000;
+    /** Страница «Вся история товара» — столько последних событий */
+    private const HISTORY_ALL = 300;
     /** Последний поиск упёрся в SEARCH_LIMIT */
     private static bool $capped = false;
 
@@ -31,6 +35,9 @@ final class ProductsController extends BaseController
         'id_desc'    => ['p.id DESC', 'Сначала новые'],
         'id_asc'     => ['p.id ASC', 'Сначала старые'],
         'updated'    => ['p.updated_at DESC, p.id DESC', 'Недавно изменённые'],
+        // дата загрузки (products.created_at, у перенесённых — дата на старом сайте): индекс created (created_at, id)
+        'created_desc' => ['p.created_at DESC, p.id DESC', 'Дата загрузки: новые сверху'],
+        'created_asc'  => ['p.created_at ASC, p.id ASC', 'Дата загрузки: старые сверху'],
         'name'       => ['p.name ASC, p.id ASC', 'Название А–Я'],
         'name_desc'  => ['p.name DESC, p.id DESC', 'Название Я–А'],
         'price'      => ['p.price ASC, p.id ASC', 'Цена по возрастанию'],
@@ -56,6 +63,7 @@ final class ProductsController extends BaseController
 
     public function index(): Response
     {
+        ProductHistory::ensureSchema();
         $f = self::filters($_GET);
         [$where, $params] = self::where($f);
         $db = App::db();
@@ -68,7 +76,7 @@ final class ProductsController extends BaseController
         if ($ids) {
             [$ph, $vals] = $db->in($ids);
             $byId = $db->keyed("SELECT id, name, name_uk, sku, url, price, compare_price, box_qty, size, stock, in_stock, status, image_id, image_ext,
-                brand_id, category_id, badge, updated_at, seo_name, meta_title, meta_title_uk, meta_description, meta_description_uk
+                brand_id, category_id, badge, created_at, updated_at, source, supplier, seo_name, meta_title, meta_title_uk, meta_description, meta_description_uk
                 FROM products WHERE id IN ($ph)", $vals);
             foreach ($ids as $id) if (isset($byId[$id])) $rows[] = $byId[$id];
         }
@@ -312,9 +320,55 @@ final class ProductsController extends BaseController
             if ($pct === 0.0 || $pct < -90 || $pct > 500) return $this->bulkBack('Укажите процент от −90 до 500 (например, 10 или −5).', true);
         }
 
-        $snap = CatalogIndexer::snapshot($ids);                           // фильтры и бренды до изменения
-        $now = date('Y-m-d H:i:s');
+        // Только товары, которые действительно изменятся: уже скрытый не «скрывается» снова, цена, не изменившаяся после
+        // округления, не пишется. У них одних сдвигается updated_at, они переиндексируются и попадают в историю товара
+        // (по записи на товар — «было → стало»; общая запись действия — в журнале сотрудников, как раньше).
+        $round = Request::post('round') === '1' ? 0 : 2;
+        $k = 1 + $pct / 100;
+        $catName = $cat ? (string) $cat['name'] : '';
+        $ch = [];                                                         // [id => [изменения]]
         foreach (array_chunk($ids, 1000) as $part) {
+            [$ph, $vals] = $db->in($part);
+            switch ($action) {
+                case 'show':
+                case 'hide':
+                case 'instock':
+                case 'outstock':
+                    $col = $action === 'show' || $action === 'hide' ? 'status' : 'in_stock';
+                    $to = $action === 'show' || $action === 'instock' ? 1 : 0;
+                    foreach ($db->col("SELECT id FROM products WHERE id IN ($ph) AND `$col` <> ?", array_merge($vals, [$to])) as $pid) {
+                        $ch[(int) $pid] = [[$col, ProductHistory::show($col, 1 - $to), ProductHistory::show($col, $to)]];
+                    }
+                    break;
+                case 'price':
+                    foreach ($db->all("SELECT id, price, GREATEST(0, ROUND(price * ?, $round)) np FROM products WHERE id IN ($ph)", array_merge([$k], $vals)) as $r) {
+                        if (abs((float) $r['np'] - (float) $r['price']) >= 0.005) $ch[(int) $r['id']] = [['price', ProductHistory::show('price', $r['price']), ProductHistory::show('price', $r['np'])]];
+                    }
+                    break;
+                case 'addcat':
+                    foreach ($db->all("SELECT p.id, p.category_id FROM products p WHERE p.id IN ($ph)
+                        AND NOT EXISTS (SELECT 1 FROM category_products cp WHERE cp.category_id = ? AND cp.product_id = p.id)", array_merge($vals, [$catId])) as $r) {
+                        $ch[(int) $r['id']] = array_merge(['добавлен в категорию «' . $catName . '»'],
+                            $r['category_id'] === null ? [['category_id', '—', ProductHistory::show('category_id', $catId)]] : []);
+                    }
+                    break;
+                case 'delcat':
+                    // привязанные к категории и те, у кого она основная (основная без привязки — бывает у перенесённых)
+                    foreach ($db->all("SELECT p.id, p.category_id, EXISTS (SELECT 1 FROM category_products cp WHERE cp.category_id = ? AND cp.product_id = p.id) linked
+                        FROM products p WHERE p.id IN ($ph) AND (p.category_id = ? OR EXISTS (SELECT 1 FROM category_products cp WHERE cp.category_id = ? AND cp.product_id = p.id))",
+                        array_merge([$catId], $vals, [$catId, $catId])) as $r) {
+                        $ch[(int) $r['id']] = (int) $r['linked'] ? ['убран из категории «' . $catName . '»'] : [];
+                        if ((int) $r['category_id'] === $catId) $ch[(int) $r['id']]['main'] = 1;   // основная — пересчитается ниже
+                    }
+                    break;
+            }
+        }
+        if (!$ch) return $this->bulkBack('Ничего не изменилось: ' . ($n === 1 ? 'товар уже' : 'все ' . $n . ' ' . plural($n, 'товар', 'товара', 'товаров') . ' уже') . ' в нужном состоянии.');
+
+        $changed = array_keys($ch);
+        $snap = CatalogIndexer::snapshot($changed);                       // фильтры и бренды до изменения
+        $now = date('Y-m-d H:i:s');
+        foreach (array_chunk($changed, 1000) as $part) {
             [$ph, $vals] = $db->in($part);
             switch ($action) {
                 case 'show':
@@ -326,28 +380,41 @@ final class ProductsController extends BaseController
                     $db->query("UPDATE products SET in_stock = ?, updated_at = ? WHERE id IN ($ph)", array_merge([$action === 'instock' ? 1 : 0, $now], $vals));
                     break;
                 case 'price':
-                    $round = Request::post('round') === '1' ? 0 : 2;
-                    $db->query("UPDATE products SET price = GREATEST(0, ROUND(price * ?, $round)), updated_at = ? WHERE id IN ($ph)",
-                        array_merge([1 + $pct / 100, $now], $vals));
+                    $db->query("UPDATE products SET price = GREATEST(0, ROUND(price * ?, $round)), updated_at = ? WHERE id IN ($ph)", array_merge([$k, $now], $vals));
                     break;
                 case 'addcat':
                     $db->query("INSERT IGNORE INTO category_products (category_id, product_id, sort) SELECT ?, id, 0 FROM products WHERE id IN ($ph)", array_merge([$catId], $vals));
-                    $db->query("UPDATE products SET category_id = ? WHERE category_id IS NULL AND id IN ($ph)", array_merge([$catId], $vals));
+                    $db->query("UPDATE products SET category_id = COALESCE(category_id, ?), updated_at = ? WHERE id IN ($ph)", array_merge([$catId, $now], $vals));
                     break;
                 case 'delcat':
                     $db->query("DELETE FROM category_products WHERE category_id = ? AND product_id IN ($ph)", array_merge([$catId], $vals));
-                    $db->query("UPDATE products p SET p.category_id = (SELECT MIN(cp.category_id) FROM category_products cp WHERE cp.product_id = p.id)
-                        WHERE p.category_id = ? AND p.id IN ($ph)", array_merge([$catId], $vals));
+                    $db->query("UPDATE products p SET p.category_id = IF(p.category_id = ?, (SELECT MIN(cp.category_id) FROM category_products cp WHERE cp.product_id = p.id), p.category_id),
+                        p.updated_at = ? WHERE p.id IN ($ph)", array_merge([$catId, $now], $vals));
+                    $main = array_keys(array_filter($ch, static fn($c) => isset($c['main'])));
+                    $main = array_values(array_intersect($main, $part));
+                    if ($main) {
+                        [$mph, $mvals] = $db->in($main);
+                        foreach ($db->pairs("SELECT id, category_id FROM products WHERE id IN ($mph)", $mvals) as $pid => $cid) {
+                            unset($ch[(int) $pid]['main']);
+                            $ch[(int) $pid][] = ['category_id', ProductHistory::show('category_id', $catId), ProductHistory::show('category_id', $cid)];
+                        }
+                    }
                     break;
             }
         }
         if ($action === 'addcat' || $action === 'delcat') Cache::forget('admin.category_direct_counts');
-        CatalogIndexer::products($ids, $snap);
-        $this->log('products_bulk_' . $action, 'product', null, ['count' => $n, 'category' => $catId ?: null, 'percent' => $pct ?: null, 'ids' => array_slice($ids, 0, 200)]);
+        CatalogIndexer::products($changed, $snap);
+        $m = count($changed);
+        $this->log('products_bulk_' . $action, 'product', null, ['count' => $n, 'changed' => $m, 'category' => $catId ?: null, 'percent' => $pct ?: null, 'ids' => array_slice($changed, 0, 200)]);
+        $uid = Auth::id() ?: null;
+        $rows = [];
+        foreach ($ch as $pid => $items) $rows[] = [$pid, 'product_bulk', ['op' => $action, 'by' => $uid, 'ch' => array_values($items)]];
+        ProductHistory::log($rows, $now);
         $msg = self::BULK[$action];
         if ($cat) $msg = ($action === 'addcat' ? 'Добавлено в категорию «' : 'Убрано из категории «') . $cat['name'] . '»';
         if ($action === 'price') $msg = 'Цена изменена на ' . ($pct > 0 ? '+' : '') . rtrim(rtrim(number_format($pct, 2, '.', ''), '0'), '.') . '%';
-        return $this->bulkBack(rtrim($msg, '…') . ': ' . $n . ' ' . plural($n, 'товар', 'товара', 'товаров') . '.');
+        return $this->bulkBack(rtrim($msg, '…') . ': ' . $m . ' ' . plural($m, 'товар', 'товара', 'товаров')
+            . ($n > $m ? ' (ещё ' . ($n - $m) . ' ' . plural($n - $m, 'товар', 'товара', 'товаров') . ' — без изменений: уже в нужном состоянии)' : '') . '.');
     }
 
     private function bulkBack(string $msg, bool $error = false): Response
@@ -377,6 +444,26 @@ final class ProductsController extends BaseController
         return $p ? $this->form($p) : $this->notFoundPage();
     }
 
+    /** Вся история товара (из карточки — «Вся история», когда событий больше 10): последние HISTORY_ALL событий всех журналов */
+    public function history(string $id): Response
+    {
+        if (!ctype_digit($id)) return $this->notFoundPage();
+        ProductHistory::ensureSchema();
+        $p = App::db()->row('SELECT id, name, url, created_at, updated_at, source, supplier FROM products WHERE id = ?', [(int) $id]);
+        if (!$p) return $this->notFoundPage();
+        $hist = ProductHistory::events($p, self::HISTORY_ALL);
+        return $this->render('admin/products/history', [
+            'title'  => 'История: ' . $p['name'],
+            'back'   => ['/admin/products/' . (int) $p['id'] . '/', 'К товару'],
+            'styles' => ['admin/catalog.css'],
+            'p'      => $p,
+            'origin' => ProductHistory::origin($p),
+            'last'   => ProductHistory::lastChange($p, $hist['items'], SupplierOverview::productLinks((int) $p['id'])),
+            'hist'   => $hist,
+            'cap'    => self::HISTORY_ALL,
+        ]);
+    }
+
     private function notFoundPage(): Response
     {
         $r = $this->render('admin/forbidden', ['title' => 'Товар не найден', 'message' => 'Такого товара нет — возможно, он удалён.']);
@@ -386,6 +473,7 @@ final class ProductsController extends BaseController
 
     private function form(?array $p): Response
     {
+        ProductHistory::ensureSchema();                                     // products.source, индексы истории
         $db = App::db();
         $id = (int) ($p['id'] ?? 0);
         $features = $db->keyed('SELECT id, code, name, type, multiple, status FROM features ORDER BY sort, id');
@@ -411,6 +499,10 @@ final class ProductsController extends BaseController
             [$data, $links, $state, $errors] = $this->validate($id, $features, $p);
             if (!$errors) {
                 $newId = $this->save($id, $p, $data, $links, $state, $features);
+                if ($id && !$this->changes) {                              // сохранено без правок: ничего не записано, updated_at прежний
+                    $this->flash('Изменений нет — товар не изменён.');
+                    return Response::redirect('/admin/products/' . $id . '/');
+                }
                 if (!$id && $newId) {
                     $imgErrors = [];
                     foreach (self::files('images') as $file) {
@@ -422,7 +514,9 @@ final class ProductsController extends BaseController
                 CatalogIndexer::products([$newId], $this->snap);
                 Cache::forget('admin.category_direct_counts');
                 $auto = $this->autoName;
-                $this->log($id ? 'product_update' : 'product_create', 'product', $newId, ['name' => $auto['name'] ?? $data['name']] + ($auto ? ['auto_name' => $auto] : []));
+                // история товара: что изменилось («было → стало» у цены, наличия, названия, категории, статуса…; тексты — «изменено»)
+                $this->log($id ? 'product_update' : 'product_create', 'product', $newId, ['name' => $auto['name'] ?? $data['name']] + ($auto ? ['auto_name' => $auto] : [])
+                    + ($id ? ['ch' => $this->changes] : []));
                 $note = array_filter([
                     array_key_exists('name_uk', $auto) ? 'UA: ' . ($auto['name_uk'] !== null ? '«' . $auto['name_uk'] . '»' : 'пусто (как русское)') : '',
                     isset($auto['sku']) ? 'артикул: ' . ($auto['sku'] !== '' ? $auto['sku'] : 'пусто') : '']);
@@ -467,7 +561,16 @@ final class ProductsController extends BaseController
             return $out;
         });
 
+        // «Даты»: загружен (источник), изменён (кем/чем — только реальные изменения), последние 10 событий из журналов
+        $dates = null;
+        if ($id) {
+            $hist = ProductHistory::events($p, 10);
+            $dates = ['origin' => ProductHistory::origin($p), 'history' => $hist,
+                'last' => ProductHistory::lastChange($p, $hist['items'], SupplierOverview::productLinks($id))];
+        }
+
         return $this->render('admin/products/form', [
+            'dates'    => $dates,
             'title'    => $id ? 'Товар: ' . $p['name'] : 'Новый товар',
             'back'     => ['/admin/products/', 'Все товары'],
             'actions'  => $id ? '<a class="btn" href="/product/' . e(rawurlencode((string) $p['url'])) . '/" target="_blank" rel="noopener">На сайте ↗</a>' : '',
@@ -496,6 +599,9 @@ final class ProductsController extends BaseController
 
     /** Что дополнило автоназвание при сохранении (ProductName::fix): name / name_uk / sku — для сообщения */
     private array $autoName = [];
+
+    /** Что изменило сохранение (ProductHistory::describe + категории и характеристики); пусто — сохранено без правок */
+    private array $changes = [];
 
     /** Разбор и проверка формы: [данные products, категории, характеристики, ошибки]; $old — товар из базы (описания без правок) */
     private function validate(int $id, array $features, array $old): array
@@ -543,6 +649,10 @@ final class ProductsController extends BaseController
         $url = AdminCatalog::cleanUrl(Request::post('url'));
         if ($url === '') {
             $url = AdminCatalog::uniqueProductUrl(Str::slug($d['name'] !== '' ? $d['name'] : 'tovar'), $id);
+        } elseif ($id && $url === AdminCatalog::cleanUrl((string) ($old['url'] ?? ''))) {
+            // адрес не меняли — прежнее написание (у перенесённых бывает «…-utsenka-»: очистка сняла бы дефис, и сохранение
+            // без правок меняло бы адрес и ставило 301)
+            $url = (string) $old['url'];
         } elseif ($other = (int) $db->value('SELECT id FROM products WHERE url = ? AND id <> ?', [$url, $id])) {
             $errors['url'] = 'Адрес уже занят товаром №' . $other . '.';
         }
@@ -591,11 +701,12 @@ final class ProductsController extends BaseController
         return [$d, $links, $state, $errors];
     }
 
-    /** Запись товара. Возвращает id. */
+    /** Запись товара. Возвращает id. У существующего — только изменившееся ($this->changes; пусто — ничего не записано). */
     private function save(int $id, array $old, array $d, array $links, array $state, array $features): int
     {
         $db = App::db();
-        $this->snap = $id ? CatalogIndexer::snapshot([$id]) : null;
+        $this->snap = null;
+        $this->changes = [];
 
         // новые значения характеристик → id (для «Бренда» создаётся и бренд)
         foreach ($state as $fid => &$items) {
@@ -604,10 +715,20 @@ final class ProductsController extends BaseController
             $items = array_values(array_filter($items, static fn($it) => $it['id'] > 0));
         }
         unset($items);
+        // характеристики товара, как их показала форма (значения из справочника; ссылки на удалённые значения форма не видит)
+        $cur = [];
+        if ($id) {
+            foreach ($db->all('SELECT pf.feature_id, pf.value_id FROM product_features pf
+                JOIN feature_values fv ON fv.id = pf.value_id AND fv.feature_id = pf.feature_id WHERE pf.product_id = ?', [$id]) as $r) {
+                $cur[(int) $r['feature_id']][] = (int) $r['value_id'];
+            }
+        }
         $brandF = AdminCatalog::brandFeatureId();
         $sizeF = AdminCatalog::featureId('size');
-        $d['brand_id'] = isset($state[$brandF][0]) ? $state[$brandF][0]['id'] : null;
-        $d['size'] = isset($state[$sizeF][0]) ? mb_substr($state[$sizeF][0]['value'], 0, 64) : '';
+        // бренд и размерный ряд — из характеристик; если форма их не показывала (значение удалено из справочника) — прежние,
+        // иначе сохранение без правок стирало бы размер «39-40» у товара со ссылкой на удалённое значение
+        $d['brand_id'] = isset($state[$brandF][0]) ? $state[$brandF][0]['id'] : ($id && !isset($cur[$brandF]) && $old['brand_id'] !== null ? (int) $old['brand_id'] : null);
+        $d['size'] = isset($state[$sizeF][0]) ? mb_substr($state[$sizeF][0]['value'], 0, 64) : ($id && !isset($cur[$sizeF]) ? (string) $old['size'] : '');
 
         // название-код («60189A») → «Категория Бренд Код» из выбранных категории и бренда (UA — если пустое или тоже код,
         // артикул — если пуст). Нормальное название не трогается; адрес уже посчитан из введённого (validate).
@@ -618,38 +739,82 @@ final class ProductsController extends BaseController
         $texts = ['summary' => $d['summary'] !== '' ? $d['summary'] : null, 'description' => trim($d['description']) !== '' ? $d['description'] : null,
             'summary_uk' => $d['summary_uk'], 'description_uk' => $d['description_uk']];
         unset($d['summary'], $d['description'], $d['summary_uk'], $d['description_uk']);
-        $d['updated_at'] = date('Y-m-d H:i:s');
-
-        $id = $db->transaction(static function ($db) use ($id, $d, $texts, $links, $state) {
-            if ($id) {
-                $db->update('products', $d, 'id = ?', [$id]);
-            } else {
-                $d['created_at'] = $d['updated_at'];
-                $id = $db->insert('products', $d);
-            }
+        $now = date('Y-m-d H:i:s');
+        $writeTexts = static function ($db, int $id, array $texts): void {
             if (!array_filter($texts, static fn($v) => $v !== null)) {
                 $db->delete('product_texts', 'product_id = ?', [$id]);
             } else {
                 $db->upsert('product_texts', ['product_id' => $id] + $texts, array_keys($texts));
             }
-            // категории: удаляем лишние, добавляем новые (порядок существующих сохраняется)
-            $have = array_map('intval', $db->col('SELECT category_id FROM category_products WHERE product_id = ?', [$id]));
-            $drop = array_diff($have, $links);
-            if ($drop) {
-                [$ph, $vals] = $db->in($drop);
-                $db->query("DELETE FROM category_products WHERE product_id = ? AND category_id IN ($ph)", array_merge([$id], $vals));
-            }
-            $add = array_diff($links, $have);
-            $db->insertMany('category_products', array_map(static fn($c) => ['category_id' => $c, 'product_id' => $id, 'sort' => 0], array_values($add)), true);
-            // характеристики
-            $db->delete('product_features', 'product_id = ?', [$id]);
+        };
+        $feats = static function (int $id) use ($state): array {
             $rows = [];
             foreach ($state as $fid => $items) foreach ($items as $it) $rows[] = ['product_id' => $id, 'feature_id' => (int) $fid, 'value_id' => (int) $it['id']];
-            $db->insertMany('product_features', $rows, true);
-            return $id;
-        });
-        // новый товар — в снимок «пустым»: до сохранения у него не было ни фильтров, ни бренда
-        $this->snap ??= ['ids' => [$id], 'pairs' => [], 'brands' => [], 'big' => false];
+            return $rows;
+        };
+
+        if ($id) {
+            // Пишется только изменившееся: поля товара, тексты, категории, характеристики. Сохранение без правок ничего не пишет
+            // и не сдвигает updated_at — по нему «Изменён» в карточке, сортировка «Недавно изменённые» и защита своей выгрузки
+            // от затирания правок при импорте (Importer::buildUpdate: товар изменён на сайте после выгрузки — не перезаписывается)
+            $d = AdminCatalog::keepUnchanged($d, $old);                    // CRLF/LF и пробелы по краям — прежние байты
+            $texts = AdminCatalog::keepUnchanged($texts, $old);
+            $set = ProductHistory::changed($d, $old);
+            $txt = ProductHistory::changed($texts, $old);
+            $have = array_map('intval', $db->col('SELECT category_id FROM category_products WHERE product_id = ?', [$id]));
+            $catAdd = array_values(array_diff($links, $have));
+            $catDrop = array_values(array_diff($have, $links));
+            $want = [];
+            foreach ($state as $fid => $items) foreach ($items as $it) $want[(int) $fid][] = (int) $it['id'];
+            $featCh = [];
+            foreach (array_keys($cur + $want) as $fid) {
+                $a = array_values(array_unique($cur[$fid] ?? [])); $b = array_values(array_unique($want[$fid] ?? []));
+                sort($a); sort($b);
+                if ($a !== $b) $featCh[] = (int) $fid;
+            }
+            $this->changes = ProductHistory::describe($set + $txt, $old);
+            if ($catAdd || $catDrop) {
+                $this->changes[] = 'категории: ' . implode(', ', array_merge(
+                    array_map(static fn($c) => '+ «' . ProductHistory::categoryName($c) . '»', $catAdd),
+                    array_map(static fn($c) => '− «' . ProductHistory::categoryName($c) . '»', $catDrop)));
+            }
+            $names = [];
+            foreach ($featCh as $fid) {                                       // «Бренд» и «Размер» уже есть в полях товара
+                if (($fid === $brandF && array_key_exists('brand_id', $set)) || ($fid === $sizeF && array_key_exists('size', $set))) continue;
+                $names[] = (string) ($features[$fid]['name'] ?? '№' . $fid);
+            }
+            if ($names) $this->changes[] = 'характеристики: ' . implode(', ', $names);
+            if (!$this->changes) return $id;
+
+            $this->snap = CatalogIndexer::snapshot([$id]);                    // фильтры и бренд до записи
+            $set['updated_at'] = $now;
+            $db->transaction(static function ($db) use ($id, $set, $txt, $texts, $catAdd, $catDrop, $featCh, $writeTexts, $feats): void {
+                $db->update('products', $set, 'id = ?', [$id]);
+                if ($txt) $writeTexts($db, $id, $texts);
+                // категории: удаляем лишние, добавляем новые (порядок существующих сохраняется)
+                if ($catDrop) {
+                    [$ph, $vals] = $db->in($catDrop);
+                    $db->query("DELETE FROM category_products WHERE product_id = ? AND category_id IN ($ph)", array_merge([$id], $vals));
+                }
+                $db->insertMany('category_products', array_map(static fn($c) => ['category_id' => $c, 'product_id' => $id, 'sort' => 0], $catAdd), true);
+                if ($featCh) {
+                    $db->delete('product_features', 'product_id = ?', [$id]);
+                    $db->insertMany('product_features', $feats($id), true);
+                }
+            });
+        } else {
+            $d['created_at'] = $d['updated_at'] = $now;
+            $d['source'] = 'manual';                                          // «Загружен: вручную» (ProductHistory)
+            $id = $db->transaction(static function ($db) use ($d, $texts, $links, $writeTexts, $feats): int {
+                $id = $db->insert('products', $d);
+                $writeTexts($db, $id, $texts);
+                $db->insertMany('category_products', array_map(static fn($c) => ['category_id' => $c, 'product_id' => $id, 'sort' => 0], array_values($links)), true);
+                $db->insertMany('product_features', $feats($id), true);
+                return $id;
+            });
+            // новый товар — в снимок «пустым»: до сохранения у него не было ни фильтров, ни бренда
+            $this->snap = ['ids' => [$id], 'pairs' => [], 'brands' => [], 'big' => false];
+        }
 
         // смена адреса — 301 со старого (если отмечено)
         if (!empty($old['url']) && $old['url'] !== $d['url'] && Request::post('redirect') === '1') {
@@ -710,6 +875,7 @@ final class ProductsController extends BaseController
         if ($media !== '') {
             $r = AdminCatalog::addProductImageFromMedia($pid, $media);
             if (is_string($r)) return Response::json(['ok' => false, 'error' => $r, 'images' => self::imagesJson($pid)], 422);
+            self::touch($pid);
             Cache::flush();
             $this->log('product_images_upload', 'product', $pid, ['count' => 1, 'media' => mb_substr($media, 0, 255)]);
             return Response::json(['ok' => true, 'added' => 1, 'images' => self::imagesJson($pid)]);
@@ -721,7 +887,7 @@ final class ProductsController extends BaseController
             $r = AdminCatalog::addProductImage($pid, $f);
             if (is_string($r)) $errors[] = ($f['name'] ?? 'файл') . ': ' . $r; else $n++;
         }
-        if ($n) { Cache::flush(); $this->log('product_images_upload', 'product', $pid, ['count' => $n]); }
+        if ($n) { self::touch($pid); Cache::flush(); $this->log('product_images_upload', 'product', $pid, ['count' => $n]); }
         return Response::json(['ok' => $n > 0, 'added' => $n, 'error' => $errors ? implode('; ', $errors) : null, 'images' => self::imagesJson($pid)], $n ? 200 : 422);
     }
 
@@ -733,6 +899,7 @@ final class ProductsController extends BaseController
         App::db()->delete('product_images', 'id = ?', [(int) $img['id']]);
         AdminCatalog::deleteImageFiles($pid, (int) $img['id'], (string) $img['ext']);
         AdminCatalog::syncMainImage($pid);
+        self::touch($pid);
         Cache::flush();
         $this->log('product_image_delete', 'product', $pid, ['image' => (int) $img['id']]);
         return Response::json(['ok' => true, 'images' => self::imagesJson($pid)]);
@@ -746,7 +913,7 @@ final class ProductsController extends BaseController
         $have = array_map('intval', App::db()->col('SELECT id FROM product_images WHERE product_id = ? ORDER BY sort, id', [$pid]));
         $order = array_values(array_intersect($order, $have));
         $order = array_merge($order, array_values(array_diff($have, $order)));    // чего нет в запросе — в конец
-        self::applyImageOrder($pid, $order);
+        $this->reorder($pid, $have, $order);
         return Response::json(['ok' => true, 'images' => self::imagesJson($pid)]);
     }
 
@@ -756,8 +923,23 @@ final class ProductsController extends BaseController
         $have = $pid ? array_map('intval', App::db()->col('SELECT id FROM product_images WHERE product_id = ? ORDER BY sort, id', [$pid])) : [];
         $iid = ctype_digit($iid) ? (int) $iid : 0;
         if (!in_array($iid, $have, true)) return Response::json(['ok' => false, 'error' => 'Фото не найдено'], 404);
-        self::applyImageOrder($pid, array_merge([$iid], array_values(array_diff($have, [$iid]))));
+        $this->reorder($pid, $have, array_merge([$iid], array_values(array_diff($have, [$iid]))));
         return Response::json(['ok' => true, 'images' => self::imagesJson($pid)]);
+    }
+
+    /** Новый порядок фото — только если он другой: запись, дата изменения товара и история (сменилось главное фото или порядок) */
+    private function reorder(int $pid, array $have, array $order): void
+    {
+        if ($order === $have) return;
+        self::applyImageOrder($pid, $order);
+        self::touch($pid);
+        $this->log('product_images_sort', 'product', $pid, array_filter(['main' => ($order[0] ?? null) !== ($have[0] ?? null) ? 1 : null]) ?: null);
+    }
+
+    /** Фото добавлено, удалено или переставлено — реальное изменение товара: updated_at (у формы товара — свой расчёт в save) */
+    private static function touch(int $pid): void
+    {
+        App::db()->query('UPDATE products SET updated_at = ? WHERE id = ?', [date('Y-m-d H:i:s'), $pid]);
     }
 
     /** Порядок фото одним запросом; главное фото — первое */

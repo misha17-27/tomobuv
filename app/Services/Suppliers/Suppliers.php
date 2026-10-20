@@ -13,12 +13,14 @@ final class Suppliers
     public const LIST = [
         JongGolf::CODE => JongGolf::class,
         HitObuvi::CODE => HitObuvi::class,
+        Tomm::CODE => Tomm::class,
     ];
 
     /** Кратко для списка в админке */
     public const ABOUT = [
-        'jonggolf' => 'Товары по API поставщика (очередь выгрузки с подтверждением) — замена wa_loader_jonggolf.php старого сайта.',
+        'jonggolf' => 'Бренд Jong•Golf с официального сайта jonggolf.com: весь каталог в наличии — 1 запрос, полная сверка цен и наличия каждые 5 ч; карточки и фото — только для новых. Запасной источник — API поставщика (замена wa_loader_jonggolf.php).',
         'hitobuvi' => 'Товары со страниц сайта hit-obuvi.com.ua (списки категорий; фото — только для новых), бережно: пауза между запросами, robots.txt.',
+        'tomm' => 'Бренд Tom.m с официального сайта tomm.ua: весь каталог — 17 запросов, полная сверка цен и наличия каждые 5 ч; карточки и фото — только для новых.',
     ];
 
     /** @return array<string, class-string<Supplier>> */

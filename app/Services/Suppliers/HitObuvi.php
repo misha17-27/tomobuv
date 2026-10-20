@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace App\Services\Suppliers;
 
 use App\Core\App;
-use App\Core\Settings;
 use App\Services\Import\Importer;
 
 /**
@@ -25,15 +24,13 @@ use App\Services\Import\Importer;
  * Ошибки сайта: 429/5xx — пауза 60 с с удвоением (шаг заканчивается с wait), после 3 подряд — ошибка; 403 и проверка
  * Cloudflare — сразу ошибка «нужна проверка». Неполный проход (ошибка, лимит, остановка) товары не скрывает.
  * Без сети: src = file — сохранённые страницы из папки (общий кэш проверок или страницы прошлого запуска).
+ * Общее с другими загрузчиками со страниц сайта (наценка, режим по расписанию, ошибки сайта) — WebSupplier.
  */
-final class HitObuvi extends Supplier
+final class HitObuvi extends WebSupplier
 {
     public const CODE = 'hitobuvi';
     public const TITLE = 'Хит обуви';
     public const SITE = 'https://hit-obuvi.com.ua';
-    protected const LIVE_SRC = 'web';
-    public const CHECKS_MISSING = true;
-    public const COUNTS_REQUESTS = true;
     /** Корень раздела «Новинки» (весь каталог по дате, без категорий) — не обходится */
     private const SERVICE_ROOTS = ['/novinki', '/kozhanaya-obuv'];
 
@@ -50,7 +47,9 @@ final class HitObuvi extends Supplier
         'add_new' => '1', 'max_new' => '300', 'min_id' => '1550000',
         'update_existing' => '1', 'update_category' => '1', 'keep_manual_hidden' => '1',
         'hide_missing' => '1', 'missing_runs' => '2', 'adopt' => '0',
-        'skip_brands' => 'JONG GOLF',
+        // бренды со своим загрузчиком с официальных сайтов (Jong•Golf, Tom.m) — по бренду из названия и по производителю;
+        // написания сравниваются по ключу (регистр, кириллица = латиница, знаки и HTML-сущности не важны)
+        'skip_brands' => "JONG GOLF\nJong•Golf\nJong Golf\nJ&G\nJ&amp;G\nJ&amp;amp;G\nTOM.M\nTom.m\nTOMM\nТОМ.М",
         'attributes' => "size=Размер\ncolor=Цвет\nmaterial=Материал\nlining=Материал внутри\ngender=Пол\nbrand=Бренд",
         'photo_width' => '700', 'photo_height' => '700', 'photo_quality' => '90',
         'log_days' => '7', 'history_days' => '365',
@@ -59,48 +58,7 @@ final class HitObuvi extends Supplier
     /** Поля товара поставщика для характеристик (левая часть строк «поле=Характеристика») */
     public const FIELDS = ['size' => 'размерный ряд', 'color' => 'цвет', 'material' => 'материал верха', 'lining' => 'материал внутри (подкладка)',
         'gender' => 'пол (по разделу)', 'brand' => 'бренд', 'country' => 'страна производства', 'maker' => 'фабрика (производитель из описания)'];
-    public const ROUND_STEPS = ['0' => 'до копеек', '1' => 'до 1 грн', '5' => 'до 5 грн', '10' => 'до 10 грн'];
-    public const ROUND_MODES = ['math' => 'по правилам математики', 'up' => 'всегда вверх'];
-    public const MODES = ['quick' => 'быстрый (новые товары сверху списков)', 'full' => 'полный проход'];
-
-    // ================================================================== настройки
-
-    /** Включено владельцем и задана наценка (без неё цены были бы закупочными) */
-    public static function enabled(): bool
-    {
-        return self::on('enabled') && self::markup() !== null;
-    }
-
-    /** «Запустить сейчас» — и при выключенной автозагрузке (ручной запуск), но только с наценкой: цены поставщика — закупочные */
-    public static function manualAllowed(): bool
-    {
-        return self::markup() !== null;
-    }
-
-    public static function manualHint(): string
-    {
-        return self::markup() === null ? 'Сначала задайте наценку (коэффициент) в настройках — цены поставщика закупочные' : '';
-    }
-
-    /** Наценка: ['k', 'plus', 'step', 'mode'] или null — коэффициент не задан */
-    public static function markup(): ?array
-    {
-        $k = Importer::num(self::cfg('markup_k'));
-        if ($k === null || $k <= 0) return null;
-        return ['k' => $k, 'plus' => Importer::num(self::cfg('markup_plus')) ?? 0.0, 'step' => (int) self::cfg('round_step'), 'mode' => self::cfg('round_mode')];
-    }
-
-    /** Цена на сайте за пару: цена поставщика за пару × k + надбавка, с округлением; без наценки — как у поставщика */
-    public static function price(float $pair, ?array $m): float
-    {
-        if ($pair <= 0) return 0.0;
-        if ($m === null) return round($pair, 2);
-        $v = $pair * $m['k'] + $m['plus'];
-        $step = (int) $m['step'];
-        if ($step <= 0) return round($v, 2);
-        $v = $m['mode'] === 'up' ? ceil(round($v / $step, 6)) * $step : round($v / $step) * $step;
-        return max((float) $step, (float) $v);
-    }
+    // ================================================================== настройки (наценка, включение — WebSupplier)
 
     /** Разделы поставщика для обхода: [путь => название] (настройка roots, только известные разделы) */
     public static function roots(): array
@@ -127,31 +85,13 @@ final class HitObuvi extends Supplier
         }
         $roots = array_keys(HitObuviMap::roots());
         $in['roots'] = implode("\n", array_values(array_intersect($roots, array_map('strval', (array) ($post['roots'] ?? [])))));
-        foreach (['window_from' => [0, 23], 'window_to' => [0, 23], 'period' => [1, 168], 'full_hours' => [1, 720], 'full_from' => [0, 23], 'full_to' => [0, 23], 'max_requests' => [10, 5000],
-                     'page_limit' => [20, 200], 'quick_pages' => [1, 50], 'max_new' => [0, 20000], 'missing_runs' => [1, 10],
-                     'photo_width' => [0, 3000], 'photo_height' => [0, 3000], 'photo_quality' => [30, 100], 'log_days' => [1, 90], 'history_days' => [30, 3650]] as $k => [$min, $max]) {
-            if (!preg_match('/^\d{1,5}$/', $in[$k]) || (int) $in[$k] < $min || (int) $in[$k] > $max) $err[$k] = "Число от $min до $max";
-        }
-        if (!isset($err['window_from'], $err['window_to']) && (int) $in['window_from'] > (int) $in['window_to']) $err['window_to'] = 'Конец окна раньше начала';
-        if (!isset($err['full_from'], $err['full_to']) && (int) $in['full_from'] > (int) $in['full_to']) $err['full_to'] = 'Конец окна раньше начала';
-        $delay = Importer::num($in['delay']);
-        if ($delay === null || $delay < HitObuviClient::MIN_DELAY || $delay > 30) $err['delay'] = 'Пауза — от 1,5 до 30 с';
-        else $in['delay'] = rtrim(rtrim(number_format($delay, 1, '.', ''), '0'), '.');
+        self::checkCommon($in, $err, ['window_from' => [0, 23], 'window_to' => [0, 23], 'period' => [1, 168], 'full_hours' => [1, 720], 'full_from' => [0, 23], 'full_to' => [0, 23], 'max_requests' => [10, 5000],
+            'page_limit' => [20, 200], 'quick_pages' => [1, 50], 'max_new' => [0, 20000], 'missing_runs' => [1, 10],
+            'photo_width' => [0, 3000], 'photo_height' => [0, 3000], 'photo_quality' => [30, 100], 'log_days' => [1, 90], 'history_days' => [30, 3650]]);
         if ($in['min_id'] !== '' && !preg_match('/^\d{1,9}$/', $in['min_id'])) $err['min_id'] = 'Номер товара поставщика (цифры) или пусто';
-        if ($in['markup_k'] !== '') {
-            $k = Importer::num($in['markup_k']);
-            if ($k === null || $k < 0.5 || $k > 10) $err['markup_k'] = 'Коэффициент от 0,5 до 10 (1,2 — +20 %)';
-            else $in['markup_k'] = rtrim(rtrim(number_format($k, 4, '.', ''), '0'), '.');
-        }
-        $plus = Importer::num($in['markup_plus'] === '' ? '0' : $in['markup_plus']);
-        if ($plus === null || abs($plus) > 10000) $err['markup_plus'] = 'Надбавка — число от −10 000 до 10 000 грн';
-        else $in['markup_plus'] = rtrim(rtrim(number_format($plus, 2, '.', ''), '0'), '.');
-        if (!isset(self::ROUND_STEPS[$in['round_step']])) $in['round_step'] = '1';
-        if (!isset(self::ROUND_MODES[$in['round_mode']])) $in['round_mode'] = 'math';
         $in['skip_brands'] = mb_substr($in['skip_brands'], 0, 5000);
         [, $attrErr] = self::attributes($in['attributes']);
         if ($attrErr) $err['attributes'] = implode('; ', $attrErr);
-        if ($in['enabled'] === '1' && ($in['markup_k'] === '' || isset($err['markup_k']))) $err['enabled'] = 'Чтобы включить загрузку, укажите наценку (коэффициент): цены поставщика — закупочные';
         if ($in['enabled'] === '1' && $in['roots'] === '') $err['roots'] = 'Отметьте хотя бы один раздел поставщика';
         if ($err) return $err;
         self::store($in);
@@ -164,40 +104,7 @@ final class HitObuvi extends Supplier
         return JongGolf::featureLines($text ?? self::cfg('attributes'), self::FIELDS);
     }
 
-    // ================================================================== запуски
-
-    public static function emptyStats(): array
-    {
-        return ['pages' => 0, 'requests' => 0, 'products' => 0, 'created' => 0, 'updated' => 0, 'same' => 0, 'hidden_color' => 0, 'hidden_missing' => 0,
-            'skipped' => 0, 'errors' => 0, 'warnings' => 0, 'photos' => 0, 'existing' => 0, 'skip' => [], 'unmapped' => [], 'found' => [], 'new_cats' => []];
-    }
-
-    /**
-     * Из cron: как у всех поставщиков, но шагами не дольше 40 мин — полный проход (≈1,5 ч) продолжается следующим
-     * часовым cron (запуск без движения больше STALE = 15 мин считается прерванным и подхватывается)
-     */
-    public static function cron(callable $say, float $maxTime = 2400.0): void
-    {
-        parent::cron($say, $maxTime);
-    }
-
-    /**
-     * Режим боевого запуска «по расписанию»: полный (сверка цен и наличия всех товаров), если с начала последнего завершённого
-     * полного прохода прошло не меньше full_hours ч (−10 мин, как расписание) и сейчас ночное окно full_from–full_to
-     * (запоздал больше чем на сутки — полный и вне окна); иначе быстрый (только новые сверху списков)
-     */
-    public static function autoMode(?int $now = null): string
-    {
-        $now ??= time();
-        $last = App::db()->value("SELECT MAX(started_at) FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = ? AND status = 'done' AND state LIKE ?",
-            [self::CODE, self::LIVE_SRC, '%"mode":"full"%"complete":true%']);
-        $hours = max(1, (int) self::cfg('full_hours'));
-        $ago = $last ? $now - (int) strtotime((string) $last) : PHP_INT_MAX;
-        if ($ago < $hours * 3600 - 600) return 'quick';
-        $h = (int) date('G', $now);
-        $inWindow = $h >= (int) self::cfg('full_from') && $h <= (int) self::cfg('full_to');
-        return $inWindow || ($last && $ago >= ($hours + 24) * 3600) ? 'full' : 'quick';
-    }
+    // ================================================================== запуски (статистика, cron по 40 мин, режим по расписанию — WebSupplier)
 
     /**
      * Начать запуск. $o: src — web | file; dir — папка сохранённых страниц для src = file (общий кэш проверок, страницы
@@ -275,12 +182,6 @@ final class HitObuvi extends Supplier
         }
         usort($out, static fn($a, $b) => [$a[2], $a[0]] <=> [$b[2], $b[0]]);
         return array_map(static fn($x) => [$x[0], $x[1]], $out);
-    }
-
-    protected static function failure(\Throwable $e): array
-    {
-        // ошибка сайта поставщика (HitObuviError) — ожидаемая: в отчёт запуска, не в журнал ошибок сайта
-        return [$e instanceof \RuntimeException ? $e->getMessage() : 'Ошибка: ' . $e->getMessage(), $e instanceof HitObuviError];
     }
 
     /** Клиент запуска: пауза и лимит из настроек, сквозной кэш или папка сохранённых страниц */
@@ -389,31 +290,8 @@ final class HitObuvi extends Supplier
                 self::save($run);
                 self::flushLog();
             }
-        } catch (HitObuviError $e) {
-            $st['requests'] = $client->used();
-            $run['stats']['requests'] = $client->used();
-            if ($e->kind === 'retry') {
-                $st['fails'] = (int) ($st['fails'] ?? 0) + 1;
-                if ($st['fails'] >= 3) throw new HitObuviError($e->getMessage() . ' — третий раз подряд, загрузка остановлена (товары не скрываются)', 'retry', $e->http);
-                $pause = 60 * (2 ** ($st['fails'] - 1));
-                $st['retry_at'] = time() + $pause;
-                $st['wait'] = 1;
-                $run['stats']['warnings']++;
-                self::log($id, 'warn', $e->getMessage() . ' — пауза ' . $pause . ' с, затем повтор (' . $st['fails'] . ' из 3)');
-                self::save($run);
-                self::flushLog();
-                return;
-            }
-            if ($e->kind === 'limit') {
-                self::log($id, 'warn', $e->getMessage() . ' — проход неполный: остальное — в следующий запуск, товары не скрываются');
-                $run['stats']['warnings']++;
-                $st['complete'] = false;
-                $st['phase'] = 'finish';
-                self::save($run);
-                self::flushLog();
-                return;
-            }
-            throw $e;
+        } catch (SupplierError $e) {
+            self::onSiteError($run, $e, $client);                          // 429/5xx — пауза, лимит — проход неполный, прочее — ошибка запуска
         }
     }
 
@@ -550,26 +428,15 @@ final class HitObuvi extends Supplier
         if ($gone) self::log((int) $run['id'], 'info', 'Нет в меню поставщика (категория убрана или переименована): ' . implode('; ', array_slice($gone, 0, 20)));
     }
 
-    /** «: по связи 10, по forsage-коду 3…» */
-    public static function foundText(array $found): string
+    public static function viaNames(): array
     {
-        if (!$found) return '';
-        $names = HitObuviSync::VIA;
-        $parts = [];
-        foreach ($found as $k => $n) $parts[] = ($names[$k] ?? $k) . ' — ' . $n;
-        return ' (найдено: ' . implode(', ', $parts) . ')';
+        return HitObuviSync::VIA;
     }
 
     /** Проверка связи: robots.txt и первая страница первого раздела (2 запроса); у поставщика ничего не меняется */
     public static function test(int $userId = 0, string $origin = 'admin'): array
     {
-        self::ensureSchema();
-        $db = App::db();
-        $id = $db->insert('supplier_runs', ['supplier' => self::CODE, 'kind' => 'test', 'src' => self::LIVE_SRC, 'origin' => $origin, 'status' => 'running',
-            'user_id' => $userId ?: null, 'stats' => '{}', 'state' => '{}', 'started_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
-        $t = microtime(true);
-        try {
-            $c = self::client([]);
+        return self::testRun($userId, $origin, self::client([]), static function (HitObuviClient $c): string {
             $root = array_key_first(self::roots()) ?? '/zhenskaya-obuv';
             $url = self::pageUrl($root, 0, 20);
             if (!$c->allowed($url)) throw new HitObuviError('robots.txt поставщика запрещает ' . $root, 'robots');
@@ -578,23 +445,9 @@ final class HitObuvi extends Supplier
             $p = HitObuviParser::listPage($r['body']);
             if (!$p['items']) throw new \RuntimeException('Страница ' . $url . ' получена, но товары не читаются (сменился шаблон сайта?)');
             $first = $p['items'][0];
-            $msg = sprintf('Связь есть (%.1f с, запросов %d): «%s» — в разделе ≈%s товаров; первый: «%s», ящик %s грн, пара %s грн, %s.', microtime(true) - $t, $c->used(),
+            return sprintf('«%s» — в разделе ≈%s товаров; первый: «%s», ящик %s грн, пара %s грн, %s.',
                 $p['h1'], number_format((int) $p['last_start'] + count($p['items']), 0, '', ' '), $first['name'], self::num((float) $first['price_box']), self::num((float) $first['price_unit']), $first['desc']['size'] ?? '—');
-            self::log($id, 'info', $msg);
-            self::flushLog();
-            self::finishRun($id, 'done');
-            return ['ok' => true, 'message' => $msg];
-        } catch (\Throwable $e) {
-            self::log($id, 'error', $e->getMessage());
-            self::flushLog();
-            self::finishRun($id, 'error', mb_substr($e->getMessage(), 0, 1000));
-            return ['ok' => false, 'error' => $e->getMessage()];
-        }
-    }
-
-    private static function num(float $v): string
-    {
-        return rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+        });
     }
 
     protected static function phaseLabel(array $st): string
@@ -611,11 +464,6 @@ final class HitObuvi extends Supplier
         };
     }
 
-    protected static function waitLabel(array $st): string
-    {
-        return (int) ($st['retry_at'] ?? 0) > time() ? ' — пауза поставщика до ' . date('H:i:s', (int) $st['retry_at']) : ' — ждёт окончания перестройки индекса каталога';
-    }
-
     protected static function percent(array $run): ?int
     {
         $st = $run['state'];
@@ -626,41 +474,8 @@ final class HitObuvi extends Supplier
         return (int) floor(((int) ($st['r'] ?? 0) + $inRoot) / $roots * 100);
     }
 
-    protected static function progressLine(array $p): string
-    {
-        $s = $p['stats'];
-        return $p['label'] . ': запросов ' . ($s['requests'] ?? 0) . ', товаров ' . $s['products'] . ', добавлено ' . $s['created'] . ', изменено ' . $s['updated']
-            . ', без изменений ' . $s['same'] . ', найдено чужих ' . ($s['existing'] ?? 0) . ', пропущено ' . $s['skipped'];
-    }
-
-    protected static function stopNote(array $run): string
-    {
-        return ' — проход неполный, товары не скрываются';
-    }
-
     public static function skipReasons(): array
     {
         return HitObuviSync::SKIP;
-    }
-
-    /** Уже есть хоть один запуск с сайта (для подсказок на экране) */
-    public static function lastWeb(): ?array
-    {
-        $id = App::db()->value("SELECT id FROM supplier_runs WHERE supplier = ? AND src = ? AND kind IN ('run', 'dry') ORDER BY id DESC LIMIT 1", [self::CODE, self::LIVE_SRC]);
-        return $id ? self::run((int) $id) : null;
-    }
-
-    /** Связанных товаров: всего, скрыто загрузчиком */
-    public static function linkCounts(): array
-    {
-        $r = App::db()->row('SELECT COUNT(*) total, SUM(hidden) hidden, SUM(missed > 0) missed FROM supplier_links WHERE supplier = ?', [self::CODE]);
-        return ['total' => (int) ($r['total'] ?? 0), 'hidden' => (int) ($r['hidden'] ?? 0), 'missed' => (int) ($r['missed'] ?? 0)];
-    }
-
-    /** Сохранить настройку одной строкой (для CLI проверок) */
-    public static function set(string $k, string $v): void
-    {
-        if (!array_key_exists($k, self::DEFAULTS)) throw new \InvalidArgumentException('Нет такой настройки: ' . $k);
-        Settings::set(self::CODE . '.' . $k, $v);
     }
 }

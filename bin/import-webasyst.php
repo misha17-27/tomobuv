@@ -182,6 +182,10 @@ $steps['brands'] = function () use ($old, $new) {
 
 $steps['products'] = function () use ($old, $new) {
     foreach (['products', 'product_texts', 'product_images', 'category_products', 'product_features', 'product_related', 'product_sets', 'product_set_items'] as $t) $new->query("TRUNCATE $t");
+    // когда перенесены товары: история товара в админке (ProductHistory) — правки до этого были на старом сайте,
+    // а записи журналов о товарах с теми же id до нового переноса относятся к прежним данным и не показываются
+    $new->upsert('settings', ['name' => 'webasyst.products_at', 'value' => date('Y-m-d H:i:s')], ['value']);
+    \App\Services\ProductHistory::ensureSchema();                          // колонка products.source (если bin/install.php не запускали)
     $sizeF = (int) $old->value("SELECT id FROM shop_feature WHERE code = 'size'");
     $brandF = (int) $old->value("SELECT id FROM shop_feature WHERE code = 'brand'");
     $pairsF = (int) $old->value("SELECT id FROM shop_feature WHERE code = 'kol_vo_par'");
@@ -237,6 +241,7 @@ $steps['products'] = function () use ($old, $new) {
                 'meta_title' => nz($p['meta_title']), 'meta_keywords' => nz($p['meta_keywords']), 'meta_description' => nz($p['meta_description']),
                 'supplier' => $supplier, 'supplier_code' => $scode, 'id_1c' => nz($p['id_1c']),
                 'created_at' => dt($p['create_datetime']) ?? '2011-01-01 00:00:00', 'updated_at' => dt($p['edit_datetime']),
+                'source' => 'webasyst',                                       // админка: «Загружен: перенос с Webasyst» (ProductHistory)
             ];
             if (trim((string) $p['summary']) !== '' || trim((string) $p['description']) !== '') {
                 $texts[] = ['product_id' => $id, 'summary' => nz($p['summary']), 'description' => nz($p['description'])];
@@ -282,7 +287,7 @@ $steps['products'] = function () use ($old, $new) {
     // На старом сайте такие товары добавляют до самого переключения. Украинское название — здесь, если у категорий уже
     // есть name_uk, иначе его заполнит bin/i18n-seed-uk.php (ProductName::generated) после сида категорий.
     ProductName::reset();
-    $named = ProductName::scan(true);
+    $named = ProductName::scan(true, 'перенос с Webasyst');
     say('Названия-коды дополнены категорией и брендом: ' . count(array_filter($named, static fn($x) => isset($x['set']['name'])))
         . ' (изменено товаров: ' . count($named) . ')');
 

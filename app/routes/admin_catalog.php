@@ -18,6 +18,7 @@ $router->get('/admin/products/slug.json', [ProductsController::class, 'slug']);
 $router->post('/admin/products/bulk/', [ProductsController::class, 'bulk']);
 $router->any('/admin/products/new/', [ProductsController::class, 'create']);
 $router->any('/admin/products/{id}/', [ProductsController::class, 'edit']);
+$router->get('/admin/products/{id}/history/', [ProductsController::class, 'history']);
 $router->post('/admin/products/{id}/delete/', [ProductsController::class, 'delete']);
 $router->post('/admin/products/{id}/images/', [ProductsController::class, 'upload']);
 $router->post('/admin/products/{id}/images/sort/', [ProductsController::class, 'sortImages']);

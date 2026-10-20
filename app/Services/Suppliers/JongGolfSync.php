@@ -10,7 +10,6 @@ use App\Services\AdminCatalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
 use App\Services\Import\Importer;
-use App\Services\ProductName;
 
 /**
  * Обработка товаров Jong•Golf порциями — правила старого загрузчика (wa_loader_jonggolf.php → load_products)
@@ -33,6 +32,8 @@ use App\Services\ProductName;
  */
 final class JongGolfSync extends SupplierSync
 {
+    use JongGolfShared;
+
     protected const SUPPLIER = JongGolf::class;
     private const PORTION = 20;                 // товаров поставщика (≈80 цветов) за транзакцию
     private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, box_qty, min_qty, size,
@@ -228,90 +229,10 @@ final class JongGolfSync extends SupplierSync
 
     // ================================================================== поиск существующих товаров
 
+    /** Поиск товаров сайта для цветов страницы (общий с сайтом бренда — JongGolfShared::lookup) */
     private function match(array &$items): void
     {
-        if (!$items) return;
-        $db = App::db();
-        $codes = array_values(array_unique(array_column($items, 'code')));
-        [$ph, $v] = $db->in($codes);
-        // 1. связь «код цвета → товар»
-        $links = [];
-        foreach ($db->all("SELECT l.code, l.hidden, l.cost, p.id FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND l.code IN ($ph)",
-            array_merge([JongGolf::CODE], $v)) as $r) $links[(string) $r['code']] = ['id' => (int) $r['id'], 'hidden' => (int) $r['hidden'], 'cost' => $r['cost'] !== null ? (float) $r['cost'] : null];
-        $ids = array_column($links, 'id');
-        // 2. название старого загрузчика (так он искал: WHERE name = ? по всей таблице, без учёта регистра)
-        $names = [];
-        foreach ($items as $it) if (!isset($links[$it['code']])) $names[$it['supname']] = 1;
-        $byName = [];
-        if ($names) {
-            [$nph, $nv] = $db->in(array_keys($names));
-            foreach ($db->all('SELECT id, name, supplier FROM products WHERE name IN (' . $nph . ')', $nv) as $r) {
-                if (!in_array((string) $r['supplier'], ['', JongGolf::CODE], true)) continue;     // чужой поставщик с тем же названием — не наш
-                $k = Importer::nk((string) $r['name']);
-                if (!isset($byName[$k]) || $r['supplier'] === JongGolf::CODE) $byName[$k] = (int) $r['id'];
-            }
-            $ids = array_merge($ids, array_values($byName));
-        }
-        // 3. запасной поиск по коду среди товаров без поставщика (заведены вручную: название «Весна-Осень Jong•Golf C31140-3»,
-        //    артикул = код, бывает с кириллической «С»)
-        $variants = [];
-        foreach ($items as $it) {
-            if (isset($links[$it['code']]) || isset($byName[Importer::nk($it['supname'])])) continue;
-            foreach (self::variants($it['aid']) as $var) $variants[$var] = $it['code'];
-        }
-        $byCode = [];
-        if ($variants) {
-            foreach (array_chunk(array_keys($variants), 500) as $part) {
-                [$cph, $cv] = $db->in($part);
-                foreach ($db->all("SELECT id, name, sku FROM products WHERE sku IN ($cph) AND (supplier IS NULL OR supplier = '' OR supplier = ?)", array_merge($cv, [JongGolf::CODE])) as $r) {
-                    $code = JongGolf::code((string) $r['sku']);
-                    $parts = preg_split('/\s+/u', trim((string) $r['name'])) ?: [];
-                    if (JongGolf::code((string) end($parts)) !== $code) continue;    // название должно кончаться этим кодом
-                    $byCode[$code][(int) $r['id']] = 1;
-                }
-            }
-            foreach ($byCode as $c => $set) $ids = array_merge($ids, array_keys($set));
-        }
-        $rows = [];
-        if ($ids) {
-            [$iph, $iv] = $db->in(array_values(array_unique($ids)));
-            $rows = $db->keyed('SELECT ' . self::EX_COLS . " FROM products WHERE id IN ($iph)", $iv);
-            $cats = [];
-            foreach ($db->all("SELECT product_id, category_id FROM category_products WHERE product_id IN ($iph)", $iv) as $r) $cats[(int) $r['product_id']][] = (int) $r['category_id'];
-            $imgs = [];
-            foreach ($db->all("SELECT id, product_id, ext FROM product_images WHERE product_id IN ($iph)", $iv) as $r) $imgs[(int) $r['product_id']][(int) $r['id']] = (string) $r['ext'];
-            foreach ($rows as $pid => &$r) { $r['cats'] = $cats[$pid] ?? []; $r['images'] = $imgs[$pid] ?? []; }
-            unset($r);
-        }
-        foreach ($items as &$it) {
-            if (isset($links[$it['code']]) && isset($rows[$links[$it['code']]['id']])) {
-                $it['ex'] = $rows[$links[$it['code']]['id']]; $it['via'] = 'link'; $it['link'] = $links[$it['code']];
-            } elseif (($pid = $byName[Importer::nk($it['supname'])] ?? null) && isset($rows[$pid])) {
-                $it['ex'] = $rows[$pid]; $it['via'] = 'name';
-            } elseif (isset($byCode[$it['code']])) {
-                $found = array_keys($byCode[$it['code']]);
-                if (count($found) > 1) { $it['via'] = 'ambiguous'; $it['msg'] = 'ID ' . implode(', ', $found); }
-                elseif (isset($rows[$found[0]])) { $it['ex'] = $rows[$found[0]]; $it['via'] = 'code'; }
-            }
-        }
-        unset($it);
-    }
-
-    /** Написания кода с кириллическими двойниками латинских букв («C31095-4» → «С31095-4») — для поиска по артикулу */
-    private static function variants(string $aid): array
-    {
-        $lat = JongGolf::code($aid);
-        $out = [$lat => 1, trim($aid) => 1];
-        $pairs = ['A' => 'А', 'B' => 'В', 'C' => 'С', 'E' => 'Е', 'H' => 'Н', 'K' => 'К', 'M' => 'М', 'O' => 'О', 'P' => 'Р', 'T' => 'Т', 'X' => 'Х'];
-        $pos = [];
-        foreach (mb_str_split($lat) as $i => $ch) if (isset($pairs[$ch])) $pos[] = $i;
-        $pos = array_slice($pos, 0, 3);                                     // до 8 вариантов
-        for ($mask = 1; $mask < (1 << count($pos)); $mask++) {
-            $chars = mb_str_split($lat);
-            foreach ($pos as $b => $i) if ($mask & (1 << $b)) $chars[$i] = $pairs[$chars[$i]];
-            $out[implode('', $chars)] = 1;
-        }
-        return array_keys($out);
+        $this->lookup($items, self::EX_COLS, $this->cfg['update_features'] === '1', $this->cfg['update_description'] === '1');
     }
 
     /** Повтор кода цвета в порции или раньше в этом запуске — второй раз не обрабатывается */
@@ -373,13 +294,16 @@ final class JongGolfSync extends SupplierSync
                     $upd += ['name' => $name, 'name_uk' => $nameUk] + $this->metas($name, $nameUk);
                 }
                 if ($c['update_features'] === '1') {
-                    $it['features'] = true;
                     if ($it['size'] !== '') $upd['size'] = mb_substr($it['size'], 0, 64);
                     $it['brand_ref'] = $this->brandRef($it['brand'], $it['brand_raw']);
                     if (is_int($it['brand_ref'])) $upd['brand_id'] = $it['brand_ref'];
                     elseif ($it['brand_ref'] === null) $upd['brand_id'] = null;
+                    $it['features'] = !$this->sameFeatures($it, $ex);           // переписываются, только если отличаются
                 }
-                if ($c['update_description'] === '1' && trim($it['desc']) !== '') $it['texts'] = ['description' => HtmlSanitizer::supplier($it['desc'])];
+                if ($c['update_description'] === '1' && trim($it['desc']) !== '') {
+                    $html = HtmlSanitizer::supplier($it['desc']);
+                    if (trim((string) ($ex['desc'] ?? '')) !== trim($html)) $it['texts'] = ['description' => $html];
+                }
                 // фото: нет главного (или его строки / файла) либо «Заменить имеющиеся фото»
                 $main = $ex['image_id'] !== null && isset($ex['images'][(int) $ex['image_id']]);
                 if ($main && $c['photo_check_file'] === '1' && !is_file(Image::originalPath((int) $ex['id'], (int) $ex['image_id'], (string) ($ex['image_ext'] ?: 'jpg')))) $main = false;
@@ -440,30 +364,6 @@ final class JongGolfSync extends SupplierSync
         $it['why'] = $why;
         $it['msg'] = $msg;
         $it['level'] = $level;
-    }
-
-    /** Название нового товара (или при «менять название»): [RU, UA | null] */
-    private function names(array $it, ?int $catId): array
-    {
-        if ($this->cfg['name_mode'] === 'supplier') return [mb_substr($it['supname'], 0, 255), null];
-        // бренд — раскодированное название поставщика («J&G», а не «J&amp;amp;G» из старой базы); «Не указано» правило пропускает
-        [$ru, $uk] = ProductName::build(['name' => $it['aid'], 'category_id' => $catId, 'brand_name' => $it['brand']]);
-        return [$ru, $uk !== $ru ? $uk : null];
-    }
-
-    /** SEO по шаблонам настроек (как product_meta_* старого загрузчика; UA — с украинским названием) */
-    private function metas(string $name, ?string $nameUk): array
-    {
-        $c = $this->cfg;
-        $uk = $nameUk ?? $name;
-        return [
-            'meta_title' => mb_substr(JongGolf::meta($c['meta_title'], $name), 0, 500) ?: null,
-            'meta_description' => JongGolf::meta($c['meta_description'], $name) ?: null,
-            'meta_keywords' => JongGolf::meta($c['meta_keywords'], $name, true) ?: null,
-            'meta_title_uk' => mb_substr(JongGolf::meta($c['meta_title_uk'], $uk), 0, 500) ?: null,
-            'meta_description_uk' => JongGolf::meta($c['meta_description_uk'], $uk) ?: null,
-            'meta_keywords_uk' => JongGolf::meta($c['meta_keywords_uk'], $uk, true) ?: null,
-        ];
     }
 
     private static function show(string $col, $v, self $s): string
@@ -528,6 +428,20 @@ final class JongGolfSync extends SupplierSync
             $it['photo'] = false;
             $it['warn'][] = 'фото не загружено: ' . $err;
             if ($it['action'] === 'update') $it['changes'] = array_values(array_diff($it['changes'], ['фото']));
+        }
+        unset($it);
+        // «Заменить имеющиеся фото»: скачанное после холста — тот же файл, что главное фото товара: замены нет (иначе каждый проход
+        // заменял бы фото и сдвигал updated_at — и у товара с несколькими фото, и доп. фото пропадали бы); не осталось изменений — «без изменений»
+        foreach ($items as $i => &$it) {
+            if ($it['action'] === 'update' && !empty($it['photo']) && isset($photos[$i]['file']) && $it['ex']['image_id'] !== null
+                && isset($it['ex']['images'][(int) $it['ex']['image_id']])) {
+                $orig = Image::originalPath((int) $it['ex']['id'], (int) $it['ex']['image_id'], (string) ($it['ex']['image_ext'] ?: 'jpg'));
+                if (is_file($orig) && md5_file($orig) === md5_file((string) $photos[$i]['file'])) {
+                    $it['photo'] = false;
+                    $it['changes'] = array_values(array_diff($it['changes'], ['фото']));
+                }
+            }
+            if ($it['action'] === 'update' && !$it['upd'] && empty($it['relink']) && empty($it['features']) && empty($it['texts']) && empty($it['photo'])) $it['action'] = 'same';
         }
         unset($it);
         $upIds = [];
@@ -664,25 +578,6 @@ final class JongGolfSync extends SupplierSync
         if ($changed) {
             $snap['ids'] = array_values(array_unique(array_merge($snap['ids'], $changed)));
             CatalogIndexer::products($changed, $snap, false);              // кэш — один раз в конце запуска
-        }
-    }
-
-    private function categoryFilters(array $cats): void
-    {
-        if (!$cats) return;
-        $db = App::db();
-        $fids = array_keys($this->attrIds());
-        [$ph, $v] = $db->in($cats);
-        foreach ($db->pairs("SELECT id, filter FROM categories WHERE id IN ($ph)", $v) as $cid => $filter) {
-            $filter = trim((string) $filter);
-            if ($filter !== '' && $this->cfg['category_filter'] !== 'always') continue;
-            $list = $filter !== '' ? explode(',', $filter) : ['price'];
-            $new = $list;
-            foreach ($fids as $fid) if (!in_array((string) $fid, $new, true)) $new[] = (string) $fid;
-            if ($new !== $list) {
-                $db->update('categories', ['filter' => mb_substr(implode(',', $new), 0, 255)], 'id = ?', [(int) $cid]);
-                JongGolf::log($this->runId, 'info', 'Фильтр категории «' . ($this->ci['path'][(int) $cid] ?? $cid) . '»: ' . implode(',', $new));
-            }
         }
     }
 

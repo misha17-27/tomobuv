@@ -1,15 +1,17 @@
 <?php
 /**
- * Запуск автозагрузки поставщика (Jong•Golf, Хит обуви): ход (шаги выполняет suppliers.js), итоги и отчёт (как log/*.html старого загрузчика).
+ * Запуск автозагрузки поставщика (Jong•Golf, Хит обуви, Tom.m): ход (шаги выполняет suppliers.js), итоги и отчёт (как log/*.html старого загрузчика).
  * @var array $run @var array $progress @var array $lines @var string $level @var array $counts @var \App\Core\Paginator $pg
  * @var bool $autostart @var string $base @var ?string $sup класс адаптера (по умолчанию Jong•Golf)
  */
 use App\Controllers\Admin\SuppliersController;
-use App\Services\Suppliers\HitObuvi;
 use App\Services\Suppliers\JongGolf;
+use App\Services\Suppliers\WebSupplier;
 
 $sup ??= JongGolf::class;
-$hit = $sup === HitObuvi::class;
+// со страниц сайта поставщика (Хит обуви, Tom.m, Jong•Golf с сайта бренда); запуск Jong•Golf по API — нет
+$hit = is_subclass_of($sup, WebSupplier::class) && $sup::webRun($run);
+$saved = in_array($run['src'], ['file', 'pages'], true);   // сохранённые страницы (без запросов к сайту)
 
 $fmt = static fn($n) => number_format((int) $n, 0, '', ' ');
 $s = $run['stats'];
@@ -40,6 +42,7 @@ $money = static fn($v) => $v === null ? '' : rtrim(rtrim(number_format((float) $
       <div class="stat"><span id="jg-c-same"><?= $fmt($s['same']) ?></span>Без изменений</div>
       <div class="stat"><span id="jg-c-hidden"><?= $fmt($s['hidden_color'] + $s['hidden_missing']) ?></span><?= $dry ? 'Будет скрыто' : 'Скрыто' ?></div>
       <?php if ($hit): ?><div class="stat"><span id="jg-c-existing"><?= $fmt($s['existing'] ?? 0) ?></span>Есть на сайте (Forsage, вручную)</div><?php endif; ?>
+      <?php if ($sup::TRACKS_STOCK): ?><div class="stat"><span><?= $fmt($s['out'] ?? 0) ?></span><?= $dry ? 'Будет «нет в наличии»' : 'Нет в наличии у поставщика' ?></div><?php endif; ?>
       <div class="stat"><span id="jg-c-skipped"><?= $fmt($s['skipped']) ?></span>Пропущено</div>
       <div class="stat<?= $s['errors'] ? ' warn' : '' ?>"><span id="jg-c-errors"><?= $fmt($s['errors']) ?></span>Ошибок</div>
     </div>
@@ -47,8 +50,9 @@ $money = static fn($v) => $v === null ? '' : rtrim(rtrim(number_format((float) $
     <dl class="detail jg-facts">
       <div><dt>Начат</dt><dd><?= e(date('d.m.Y H:i:s', strtotime((string) $run['started_at']))) ?> · <?= e(['cron' => 'по расписанию', 'cli' => 'из командной строки', 'admin' => 'из админки'][$run['origin']] ?? $run['origin']) ?></dd></div>
       <?php if ($hit): ?>
-      <div><dt>Данные</dt><dd><?= $run['src'] === 'file' ? 'сохранённые страницы (без запросов к сайту)' : 'сайт поставщика, ' . e(HitObuvi::MODES[$run['state']['mode'] ?? ''] ?? '') ?> · страниц <?= $fmt($s['pages']) ?> · запросов <?= $fmt($s['requests'] ?? 0) ?></dd></div>
-      <?php if (!empty($s['found'])): ?><div><dt>Найдено на сайте</dt><dd><?= e(ltrim(HitObuvi::foundText($s['found']), ' ')) ?></dd></div><?php endif; ?>
+      <div><dt>Данные</dt><dd><?= $saved ? 'сохранённые страницы (без запросов к сайту)' : 'сайт поставщика, ' . e(!empty($run['state']['aids']) || !empty($run['state']['ids']) ? 'только выбранные товары' : ($sup::MODES[$run['state']['mode'] ?? ''] ?? '')) ?> · страниц <?= $fmt($s['pages']) ?> · запросов <?= $fmt($s['requests'] ?? 0) ?></dd></div>
+      <?php if (!empty($s['photo_robots'])): ?><div><dt>Фото</dt><dd class="jg-red">закрыты robots.txt поставщика — не запрошено главных фото: <?= $fmt($s['photo_robots']) ?><?= !empty($s['photo_robots_extra']) ? ', доп. фото: ' . $fmt($s['photo_robots_extra']) : '' ?></dd></div><?php endif; ?>
+      <?php if (!empty($s['found'])): ?><div><dt>Найдено на сайте</dt><dd><?= e(ltrim($sup::foundText($s['found']), ' ')) ?></dd></div><?php endif; ?>
       <?php else: ?>
       <div><dt>Данные</dt><dd><?= $run['src'] === 'file' ? 'сохранённый ответ поставщика (файл)' : 'API поставщика' ?><?= ($s['queue'] ?? null) !== null ? ' · в первой странице очереди — ' . $fmt($s['queue']) . ' товаров' : '' ?> · страниц <?= $fmt($s['pages']) ?></dd></div>
       <div><dt>Подтверждения</dt><dd><?= !empty($run['state']['callback']) ? 'отправляются поставщику после записи каждой страницы (подтверждено товаров: ' . $fmt($s['confirmed'] ?? 0) . ')' : 'не отправляются' . ($dry ? ' (пробный прогон)' : '') ?></dd></div>

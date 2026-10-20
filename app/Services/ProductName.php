@@ -101,10 +101,11 @@ final class ProductName
 
     /**
      * Все товары с названием-кодом, которым правило что-то меняет: [id => ['old' => строка товара, 'set' => поля]].
-     * $apply — записать (updated_at = сейчас; url не меняется). Индекс каталога и кэш — на вызывающем.
+     * $apply — записать (updated_at = сейчас; url не меняется) и отметить в истории товара (admin_log product_autoname,
+     * «было → стало»; $by — чем: «перенос с Webasyst», «bin/product-names.php»). Индекс каталога и кэш — на вызывающем.
      * Товары с названием-кодом, которым менять нечего, — в ProductName::$bareLeft.
      */
-    public static function scan(bool $apply = false): array
+    public static function scan(bool $apply = false, string $by = 'bin/product-names.php'): array
     {
         $db = App::db();
         $out = [];
@@ -126,8 +127,10 @@ final class ProductName
         if ($apply && $out) {
             $now = date('Y-m-d H:i:s');
             foreach (array_chunk($out, 200, true) as $part) {
-                $db->transaction(static function ($db) use ($part, $now): void {
+                $db->transaction(static function ($db) use ($part, $now, $by): void {
                     foreach ($part as $id => $x) $db->update('products', $x['set'] + ['updated_at' => $now], 'id = ?', [$id]);
+                    ProductHistory::log(array_map(static fn($id, $x) => [$id, 'product_autoname', ['src' => $by,
+                        'ch' => ProductHistory::describe($x['set'], $x['old'])]], array_keys($part), $part), $now);
                 });
             }
         }

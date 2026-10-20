@@ -1,6 +1,6 @@
 <?php
 /**
- * Вкладка «Обзор» страницы поставщика — одна для всех (Jong•Golf, Хит обуви): ход запуска (опрос без перезагрузки,
+ * Вкладка «Обзор» страницы поставщика — одна для всех (Jong•Golf, Хит обуви, Tom.m): ход запуска (опрос без перезагрузки,
  * шаги — suppliers.js), товары поставщика на сайте, сверка наличия, изменения цен, последние запуски, пропущенное.
  * ?list=price|hidden|missing|back|new — полный список с фильтрами и страницами.
  * @var string $sup класс адаптера @var string $base @var array $ov @var array $live @var array $ovRuns @var string $list @var array $f
@@ -16,10 +16,11 @@ $pctCell = static function ($p): string {
     if ($p === null) return '<span class="muted">—</span>';
     return '<span class="' . ($p > 0 ? 'sup-up' : 'sup-down') . '">' . ($p > 0 ? '+' : '−') . e(rtrim(rtrim(number_format(abs((float) $p), 1, ',', ''), '0'), ',')) . '%</span>';
 };
-$prod = static function (array $r): string {
+$prod = static function (array $r) use ($sup): string {
     $pid = (int) $r['product_id'];
     if (($r['name'] ?? null) === null) return '<span class="muted">товар №' . $pid . ' удалён</span>';
-    $h = '<a href="/admin/products/' . $pid . '/">' . e((string) $r['name']) . '</a><small>№' . $pid . ($r['code'] !== '' ? ' · у поставщика ' . e((string) $r['code']) : '');
+    $code = (string) $r['code'] !== '' ? $sup::codeLabel((string) $r['code'], isset($r['ext_id']) ? (string) $r['ext_id'] : null) : '';
+    $h = '<a href="/admin/products/' . $pid . '/">' . e((string) $r['name']) . '</a><small>№' . $pid . ($code !== '' ? ' · у поставщика ' . e($code) : '');
     $h .= (int) $r['status'] === 1 ? ' · <a href="/product/' . e(rawurlencode((string) $r['url'])) . '/" target="_blank" rel="noopener">на сайте ↗</a>' : ' · скрыт';
     return $h . '</small>';
 };
@@ -78,9 +79,9 @@ $s = $p['stats'] ?? [];
 
 <div class="sup-ov-grid">
   <section class="card" aria-labelledby="ov-av">
-    <div class="card-hd"><h2 id="ov-av">Сверка наличия</h2><span class="hint">вернулось за 30 дн.: <?= $fmt($ov['back_30']) ?> · скрыто за 30 дн.: <?= $fmt($ov['hidden_30']) ?></span></div>
+    <div class="card-hd"><h2 id="ov-av">Сверка наличия</h2><span class="hint">вернулось за 30 дн.: <?= $fmt($ov['back_30']) ?> · скрыто за 30 дн.: <?= $fmt($ov['hidden_30']) ?><?= $sup::TRACKS_STOCK ? ' · «нет в наличии» за 30 дн.: ' . $fmt($ov['out_30']) : '' ?></span></div>
     <div class="pad">
-      <?php foreach (['hidden', 'missing', 'back'] as $k): [$rows0, $total0] = $prev[$k]; ?>
+      <?php foreach (array_values(array_filter(['out', 'hidden', 'missing', 'unlinked', 'back'], static fn($k) => isset($prev[$k]))) as $k): [$rows0, $total0] = $prev[$k]; ?>
         <?php if ($k === 'missing' && !$checksMissing): ?>
           <h3 class="sup-h3">Нет у поставщика — ещё на сайте</h3>
           <p class="hint">У этого поставщика товар, которого нет в выгрузке, скрывается в том же запуске («Полное обновление»), отдельной сверки по проходам нет.</p>
@@ -89,10 +90,15 @@ $s = $p['stats'] ?? [];
         <h3 class="sup-h3"><?= e(SupplierOverview::LISTS[$k]) ?><?= $k === 'back' ? ' (30 дн.)' : '' ?> <i class="pill"><?= $fmt($total0) ?></i>
           <?php if ($total0 > count($rows0)): ?><a href="<?= e($listUrl($k)) ?>">все →</a><?php endif; ?></h3>
         <?php if ($k === 'missing'): ?><p class="hint">Товара не было в последних полных проходах; скрывается после <?= $fmt($ov['missing_runs']) ?> проходов подряд (сбой одной страницы ничего не скрывает).</p><?php endif; ?>
+        <?php if ($k === 'out'): ?><p class="hint">У поставщика есть, но «нет в наличии»: на сайте товар остаётся с пометкой «нет в наличии» и прежней ценой; появится у поставщика — снова «в наличии».</p><?php endif; ?>
+        <?php if ($k === 'unlinked'): ?><p class="hint">Товары бренда на сайте, которых загрузчик не нашёл у поставщика (после первого полного боевого прохода — это «нет у бренда»: старые цвета, опечатки в кодах, дубли).
+          Загрузчик их не трогает — скрыть или исправить код решает владелец.</p><?php endif; ?>
         <?php if ($rows0): ?>
         <div class="table-scroll"><table class="grid sup-mini"><tbody>
           <?php foreach ($rows0 as $r): ?><tr><td><?= $prod($r) ?></td>
-            <td class="nowrap right"><?php if ($k === 'missing'): ?>нет <?= (int) $r['missed'] ?> из <?= $fmt($ov['missing_runs']) ?><small>был <?= e($dt($r['seen_at'])) ?></small>
+            <td class="nowrap right"><?php if ($k === 'unlinked'): ?><?= e((string) ($r['supplier'] ?: 'заведён вручную')) ?><small>с <?= e($dt($r['created_at'])) ?></small>
+              <?php elseif ($k === 'out'): ?><?= !empty($r['out_at']) ? 'с ' . e($dt($r['out_at'])) : 'нет в наличии' ?><small>проверен <?= e($dt($r['seen_at'])) ?></small>
+              <?php elseif ($k === 'missing'): ?>нет <?= (int) $r['missed'] ?> из <?= $fmt($ov['missing_runs']) ?><small>был <?= e($dt($r['seen_at'])) ?></small>
               <?php elseif ($k === 'hidden'): ?><?= !empty($r['hidden_at']) ? 'скрыт ' . e($dt($r['hidden_at'])) : 'скрыт загрузчиком' ?><?= $r['seen_at'] ? '<small>был у поставщика ' . e($dt($r['seen_at'])) . '</small>' : '' ?>
               <?php else: ?><?= e($dt($r['created_at'])) ?><small><?= e((string) $r['note']) ?></small><?php endif; ?></td></tr>
           <?php endforeach; ?>
@@ -132,7 +138,7 @@ $s = $p['stats'] ?? [];
   <?php foreach ($ovRuns as $r): $rs = $r['stats']; $dry = $r['kind'] === 'dry'; ?>
     <tr class="<?= $r['status'] === 'running' ? 'unread' : '' ?>"><td><a href="<?= e($base . 'runs/' . (int) $r['id'] . '/') ?>">№<?= (int) $r['id'] ?></a></td>
       <td class="nowrap"><?= e($dt($r['started_at'])) ?><small><?= e(SupplierOverview::duration((int) $r['duration'])) ?> · <?= e(['cron' => 'по расписанию', 'cli' => 'командная строка', 'admin' => 'из админки'][$r['origin']] ?? $r['origin']) ?></small></td>
-      <td class="nowrap"><?= e($dry ? 'Пробный' : ($sup::KINDS[$r['kind']] ?? $r['kind'])) ?><small><?= $r['src'] === 'file' ? 'сохранённые данные' : e($r['mode'] === 'full' ? 'полный проход' : ($r['mode'] === 'quick' ? 'быстрый' : '')) ?></small></td>
+      <td class="nowrap"><?= e($dry ? 'Пробный' : ($sup::KINDS[$r['kind']] ?? $r['kind'])) ?><small><?= in_array($r['src'], ['file', 'pages'], true) ? 'сохранённые данные' : e($r['mode'] === 'full' ? 'полный проход' : ($r['mode'] === 'quick' ? 'быстрый' : ($r['src'] === 'api' ? 'API' : ''))) ?></small></td>
       <td><span class="st <?= ['done' => 'st-completed', 'error' => 'st-refunded', 'stopped' => 'st-deleted', 'running' => 'st-processing'][$r['status']] ?? '' ?>"><?= e($sup::STATUSES[$r['status']] ?? $r['status']) ?></span>
         <?php if ($r['error']): ?><small><?= e(mb_strimwidth((string) $r['error'], 0, 120, '…')) ?></small><?php endif; ?></td>
       <td class="right"><?= $fmt($rs['products']) ?></td>
@@ -192,10 +198,19 @@ $s = $p['stats'] ?? [];
       <td class="right"><?= $pctCell($r['pct']) ?></td>
       <td><?= $r['run_id'] ? '<a href="' . e($base . 'runs/' . (int) $r['run_id'] . '/') . '">№' . (int) $r['run_id'] . '</a>' : '—' ?></td></tr>
     <?php endforeach; ?>
-    <?php elseif ($list === 'hidden' || $list === 'missing'): ?>
-    <thead><tr><th>Товар</th><th class="right">Цена поставщика</th><th>Был у поставщика</th><th><?= $list === 'hidden' ? 'Скрыт' : 'Нет у поставщика' ?></th></tr></thead><tbody>
+    <?php elseif ($list === 'unlinked'): ?>
+    <thead><tr><th>Товар</th><th class="right">Цена</th><th>Откуда</th><th>Заведён</th></tr></thead><tbody>
+    <?php foreach ($rows as $r): ?><tr><td><?= $prod($r) ?></td><td class="right"><?= e($money($r['price'])) ?><?= (int) $r['in_stock'] ? '' : '<small>нет в наличии</small>' ?></td>
+      <td><?= e((string) ($r['supplier'] ?: 'вручную')) ?></td><td class="nowrap"><?= e($dt($r['created_at'])) ?></td></tr>
+    <?php endforeach; ?>
+    <?php elseif ($list === 'hidden' || $list === 'missing' || $list === 'out'): ?>
+    <thead><tr><th>Товар</th><th class="right">Цена поставщика</th><th>Был у поставщика</th><th><?= ['hidden' => 'Скрыт', 'missing' => 'Нет у поставщика', 'out' => 'Нет в наличии с'][$list] ?></th></tr></thead><tbody>
     <?php foreach ($rows as $r): ?><tr><td><?= $prod($r) ?></td><td class="right"><?= e($money($r['cost'])) ?></td><td class="nowrap"><?= e($dt($r['seen_at'])) ?></td>
-      <td class="nowrap"><?= $list === 'hidden' ? (!empty($r['hidden_at']) ? e($dt($r['hidden_at'])) : 'загрузчиком (дата не записана)') : (int) $r['missed'] . ' полн. проходов из ' . $fmt($ov['missing_runs']) ?></td></tr>
+      <td class="nowrap"><?= match ($list) {
+          'hidden' => !empty($r['hidden_at']) ? e($dt($r['hidden_at'])) : 'загрузчиком (дата не записана)',
+          'out' => !empty($r['out_at']) ? e($dt($r['out_at'])) : '—',
+          default => (int) $r['missed'] . ' полн. проходов из ' . $fmt($ov['missing_runs']),
+      } ?></td></tr>
     <?php endforeach; ?>
     <?php else: ?>
     <thead><tr><th>Дата</th><th>Товар</th><?php if ($list === 'new'): ?><th class="right">Цена поставщика</th><th class="right">На сайте</th><?php else: ?><th>Что было</th><?php endif; ?><th>Запуск</th></tr></thead><tbody>

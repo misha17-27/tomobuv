@@ -1,13 +1,14 @@
 <?php
 /**
- * Админка → «Каталог → Поставщики»: список поставщиков и страница каждого (Jong•Golf — API, Хит обуви — страницы сайта).
- * Только администратор (SuppliersController, HitObuviController).
+ * Админка → «Каталог → Поставщики»: список поставщиков и страница каждого (Jong•Golf — сайт бренда jonggolf.com или API, Хит обуви — страницы сайта,
+ * Tom.m — сайт бренда tomm.ua). Только администратор (SuppliersController, HitObuviController, TommController).
  * @var App\Core\Router $router
  */
 declare(strict_types=1);
 
 use App\Controllers\Admin\HitObuviController;
 use App\Controllers\Admin\SuppliersController;
+use App\Controllers\Admin\TommController;
 
 $router->get('/admin/suppliers/', [SuppliersController::class, 'home']);
 $router->get('/admin/suppliers/jonggolf/', [SuppliersController::class, 'index']);
@@ -20,6 +21,7 @@ $router->post('/admin/suppliers/jonggolf/start/', [SuppliersController::class, '
 $router->get('/admin/suppliers/jonggolf/runs/{id}/', [SuppliersController::class, 'showRun']);
 $router->post('/admin/suppliers/jonggolf/runs/{id}/step/', [SuppliersController::class, 'step']);
 $router->post('/admin/suppliers/jonggolf/runs/{id}/stop/', [SuppliersController::class, 'stop']);
+$router->post('/admin/suppliers/jonggolf/map/sections/', [SuppliersController::class, 'mapSections']);
 $router->post('/admin/suppliers/jonggolf/map/upload/', [SuppliersController::class, 'mapUpload']);
 $router->post('/admin/suppliers/jonggolf/map/save/', [SuppliersController::class, 'mapSave']);
 $router->post('/admin/suppliers/jonggolf/map/add/', [SuppliersController::class, 'mapAdd']);
@@ -38,3 +40,13 @@ $router->post('/admin/suppliers/hitobuvi/runs/{id}/stop/', [HitObuviController::
 $router->post('/admin/suppliers/hitobuvi/map/save/', [HitObuviController::class, 'mapSave']);
 $router->post('/admin/suppliers/hitobuvi/map/type/', [HitObuviController::class, 'mapAddType']);
 $router->post('/admin/suppliers/hitobuvi/map/{id}/delete/', [HitObuviController::class, 'mapDelete']);
+
+$router->get('/admin/suppliers/tomm/', [TommController::class, 'index']);
+$router->get('/admin/suppliers/tomm/progress/', [TommController::class, 'progress']);
+$router->post('/admin/suppliers/tomm/settings/', [TommController::class, 'saveSettings']);
+$router->post('/admin/suppliers/tomm/test/', [TommController::class, 'test']);
+$router->post('/admin/suppliers/tomm/start/', [TommController::class, 'start']);
+$router->get('/admin/suppliers/tomm/runs/{id}/', [TommController::class, 'showRun']);
+$router->post('/admin/suppliers/tomm/runs/{id}/step/', [TommController::class, 'step']);
+$router->post('/admin/suppliers/tomm/runs/{id}/stop/', [TommController::class, 'stop']);
+$router->post('/admin/suppliers/tomm/map/save/', [TommController::class, 'mapSave']);

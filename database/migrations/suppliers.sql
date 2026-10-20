@@ -126,7 +126,8 @@ DEALLOCATE PREPARE st;
 -- supplier_links.cost — цена поставщика за пару в последнем проходе (закупочная, без наценки): «было → стало» у поставщика.
 -- supplier_changes   — что загрузчик реально записал (пробные прогоны не пишут): kind new — добавлен, price — цена
 --                      поставщика или наша цена изменилась (old/new_cost — у поставщика за пару, old/new_price — на сайте),
---                      hidden — скрыт загрузчиком (пропал у поставщика / цвет закончился), back — снова есть у поставщика.
+--                      hidden — скрыт загрузчиком (пропал у поставщика / цвет закончился), back — снова есть у поставщика (или снова в наличии),
+--                      out — нет в наличии у поставщика (на сайте «нет в наличии»), edit — прочие изменения записи («было → стало» в note).
 --                      Хранится «{код}.history_days» дней (по умолчанию 365) — Supplier::cleanup.
 SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'supplier_links' AND COLUMN_NAME = 'cost') = 0, 'ALTER TABLE `supplier_links` ADD COLUMN `cost` DECIMAL(12,2) NULL AFTER `seen_at`', 'DO 0');
 PREPARE st FROM @s;
@@ -139,7 +140,7 @@ CREATE TABLE IF NOT EXISTS `supplier_changes` (
   `run_id`     INT UNSIGNED  NULL,
   `product_id` INT UNSIGNED  NOT NULL,
   `code`       VARCHAR(100)  NOT NULL DEFAULT '',     -- товар у поставщика (supplier_links.code)
-  `kind`       VARCHAR(8)    NOT NULL,                -- new | price | hidden | back
+  `kind`       VARCHAR(8)    NOT NULL,                -- new | price | hidden | out | back | edit
   `old_cost`   DECIMAL(12,2) NULL,                    -- цена поставщика за пару: было / стало
   `new_cost`   DECIMAL(12,2) NULL,
   `old_price`  DECIMAL(12,2) NULL,                    -- цена на сайте за пару (с наценкой): было / стало

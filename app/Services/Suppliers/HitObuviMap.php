@@ -163,7 +163,12 @@ final class HitObuviMap
     /** Подкатегория-ряд («32-38») категории сайта для размеров товара; нет такой — сама категория */
     public static function sizeChild(int $catId, string $size): int
     {
-        $row = self::row($size);
+        return self::child($catId, self::row($size));
+    }
+
+    /** Подкатегория-ряд $row («32-38») категории сайта (правило рядов — у вызывающего: Jong•Golf — JongGolfMap::row); нет такой — сама категория */
+    public static function child(int $catId, ?string $row): int
+    {
         if ($row === null) return $catId;
         if (self::$children === null) {
             self::$children = [];
@@ -203,28 +208,31 @@ final class HitObuviMap
         self::forget();
     }
 
-    /** Сохранить правки строк: [id строки => ['category_id' => int (0 — нет), 'by_size' => 0|1, 'mode' => …]]. @return int изменено */
-    public static function assign(array $changes): int
+    /**
+     * Сохранить правки строк: [id строки => ['category_id' => int (0 — нет), 'by_size' => 0|1, 'mode' => …]]. Общая для
+     * таблиц kind cat/type любого поставщика ($supplier, допустимые режимы категорий — $catModes). @return int изменено
+     */
+    public static function assign(array $changes, string $supplier = self::CODE, array $catModes = self::CAT_MODES): int
     {
         $ci = Importer::categoryIndex();
         $db = App::db();
         $n = 0;
         $now = date('Y-m-d H:i:s');
-        $rows = $db->keyed('SELECT id, kind, category_id, by_size, `mode` FROM supplier_category_map WHERE supplier = ?', [self::CODE]);
-        $db->transaction(static function ($db) use ($changes, $ci, $now, $rows, &$n): void {
+        $rows = $db->keyed('SELECT id, kind, category_id, by_size, `mode` FROM supplier_category_map WHERE supplier = ?', [$supplier]);
+        $db->transaction(static function ($db) use ($changes, $ci, $now, $rows, $supplier, $catModes, &$n): void {
             foreach ($changes as $id => $ch) {
                 $r = $rows[(int) $id] ?? null;
                 if (!$r) continue;
                 $cid = (int) ($ch['category_id'] ?? 0);
                 if ($cid && (!isset($ci['cats'][$cid]) || (int) $ci['cats'][$cid]['type'] !== 0)) continue;
-                $modes = $r['kind'] === 'type' ? self::TYPE_MODES : self::CAT_MODES;
+                $modes = $r['kind'] === 'type' ? self::TYPE_MODES : $catModes;
                 $mode = (string) ($ch['mode'] ?? $r['mode']);
                 if (!isset($modes[$mode])) $mode = (string) $r['mode'];
                 $set = ['category_id' => $cid ?: null, 'by_size' => !empty($ch['by_size']) ? 1 : 0, 'mode' => $mode];
                 if ((int) $r['category_id'] === $cid && (int) $r['by_size'] === $set['by_size'] && (string) $r['mode'] === $mode) continue;
                 $set['target'] = $cid ? mb_substr((string) $ci['path'][$cid], 0, 500) : '';
                 $set['updated_at'] = $now;
-                $n += $db->update('supplier_category_map', $set, 'id = ? AND supplier = ?', [(int) $id, self::CODE]);
+                $n += $db->update('supplier_category_map', $set, 'id = ? AND supplier = ?', [(int) $id, $supplier]);
             }
         });
         self::forget();
@@ -257,11 +265,11 @@ final class HitObuviMap
         self::forget();
     }
 
-    /** Счётчики для экрана: всего категорий, загружаемых, без категории сайта (загружаемые), правил по типу */
-    public static function count(): array
+    /** Счётчики для экрана: всего категорий, загружаемых, без категории сайта (загружаемые), правил по типу ($supplier — чья таблица) */
+    public static function count(string $supplier = self::CODE): array
     {
         $r = App::db()->row("SELECT SUM(kind = 'cat') cats, SUM(kind = 'cat' AND `mode` <> 'skip') active,
-            SUM(kind = 'cat' AND `mode` = '' AND category_id IS NULL) unresolved, SUM(kind = 'type') types FROM supplier_category_map WHERE supplier = ?", [self::CODE]);
+            SUM(kind = 'cat' AND `mode` = '' AND category_id IS NULL) unresolved, SUM(kind = 'type') types FROM supplier_category_map WHERE supplier = ?", [$supplier]);
         return ['cats' => (int) ($r['cats'] ?? 0), 'active' => (int) ($r['active'] ?? 0), 'unresolved' => (int) ($r['unresolved'] ?? 0), 'types' => (int) ($r['types'] ?? 0)];
     }
 

@@ -158,11 +158,9 @@ final class HitObuviParser
         return ['/' . implode('/', $parts), null];
     }
 
-    /** Признаки защиты Cloudflare / «проверки браузера» в ответе */
+    /** Признаки защиты Cloudflare / «проверки браузера» в ответе (общая проверка клиента — SiteClient::challenge) */
     public static function challenge(string $body, array $headers): bool
     {
-        if (isset($headers['cf-mitigated'])) return true;
-        $head = substr($body, 0, 20000);
-        return (bool) preg_match('~challenge-platform|cf-challenge|Just a moment\.\.\.|Attention Required! \| Cloudflare|cf_chl_~i', $head);
+        return SiteClient::challenge($body, $headers);
     }
 }

@@ -11,6 +11,7 @@ use App\Core\Str;
 use App\Services\AdminCatalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
+use App\Services\ProductHistory;
 use App\Services\ProductName;
 
 /**
@@ -182,6 +183,7 @@ final class Importer
     public static function ensureSchema(): void
     {
         if (self::$schemaOk) return;
+        ProductHistory::ensureSchema();                                     // products.source (новые товары — «импорт»), история товара
         Cache::remember('import.schema.3', 86400, static function (): int {
             $db = App::db();
             $ok = (int) $db->value("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
@@ -1281,6 +1283,7 @@ final class Importer
             'box_qty' => max(1, $box), 'min_qty' => max(1, (int) ($f['min_qty'] ?? $box)), 'size' => $f['size'] ?? '',
             'stock' => $f['stock'] ?? null, 'in_stock' => $inStock, 'status' => $f['status'] ?? (int) $opt['new_status'],
             'supplier' => $supplier, 'supplier_code' => $f['supplier_code'] ?? null, 'created_at' => $now, 'updated_at' => $now,
+            'source' => 'import',                                           // «Загружен: импорт» (ProductHistory)
         ];
         foreach (self::TEXT_COLS as $c => $_) $it['row'][$c] = ($f[$c] ?? '') !== '' ? $f[$c] : null;   // все строки пачки — с одинаковым набором колонок
         // название-код («88888X») → «Категория Бренд Код», как в админке (ProductName); адрес — из кода в файле
@@ -1608,6 +1611,17 @@ final class Importer
                 . ' ON DUPLICATE KEY UPDATE changed = GREATEST(changed, VALUES(changed)), created = GREATEST(created, VALUES(created)),
                     conflict = GREATEST(conflict, VALUES(conflict))', $params);
         }
+
+        // 9a. история товара (карточка → «Даты»): import_seen хранит только «изменён» и живёт 30 дней — что изменилось
+        // («было → стало» из плана строки) пишется по записи на товар в admin_log (product_import, в той же транзакции)
+        $by = (int) ($job['user_id'] ?? 0) ?: null;
+        $hist = [];
+        foreach ($items as $it) {
+            if (!$it['id']) continue;
+            if ($it['action'] === 'create') $hist[] = [(int) $it['id'], 'product_import', ['job' => $jobId, 'by' => $by, 'new' => 1]];
+            elseif ($it['action'] === 'update' && $it['changes']) $hist[] = [(int) $it['id'], 'product_import', ['job' => $jobId, 'by' => $by, 'ch' => $it['changes']]];
+        }
+        ProductHistory::log($hist, $now);
 
         // 10. ошибки, пропуски, изменённые на сайте и предупреждения
         $err = []; $cnt = ['create' => 0, 'update' => 0, 'same' => 0, 'skip' => 0, 'error' => 0, 'conflict' => 0];
@@ -2012,11 +2026,15 @@ final class Importer
             } elseif ($missing && count($missing) > $active * 0.5) {
                 $state['hide_note'] = 'Скрытие отменено: пришлось бы скрыть ' . count($missing) . ' из ' . $active . ' товаров поставщика — похоже, файл неполный.';
             } elseif ($missing) {
+                $now = date('Y-m-d H:i:s');
                 foreach (array_chunk($missing, 1000) as $part) {
                     [$ph, $vals] = $db->in($part);
-                    $db->query("UPDATE products SET status = 0, updated_at = NOW() WHERE id IN ($ph)", $vals);
+                    $db->query("UPDATE products SET status = 0, updated_at = ? WHERE id IN ($ph)", array_merge([$now], $vals));
                 }
                 $hiddenIds = $missing;
+                $by = (int) ($job['user_id'] ?? 0) ?: null;
+                ProductHistory::log(array_map(static fn($pid) => [$pid, 'product_import', ['job' => $jobId, 'by' => $by, 'hide' => 1,
+                    'ch' => [['status', ProductHistory::show('status', 1), ProductHistory::show('status', 0)]]]], $missing), $now);
             }
             $state['hidden'] = count($hiddenIds);
         }
@@ -2268,10 +2286,12 @@ final class Importer
         $db->insertMany('import_errors', $errs);
         if ($pids) {                                                          // главное фото — первое по порядку
             [$ph, $v] = $db->in(array_keys($pids));
+            // первое фото у найденного товара — его изменение (updated_at); у созданного этим заданием дата остаётся датой загрузки
             $db->query("UPDATE products p SET
+                p.updated_at = IF(EXISTS (SELECT 1 FROM import_seen s WHERE s.job_id = ? AND s.product_id = p.id AND s.created = 1), p.updated_at, ?),
                 p.image_id = (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.sort, i.id LIMIT 1),
                 p.image_ext = (SELECT i.ext FROM product_images i WHERE i.product_id = p.id ORDER BY i.sort, i.id LIMIT 1)
-                WHERE p.id IN ($ph) AND p.image_id IS NULL", $v);
+                WHERE p.id IN ($ph) AND p.image_id IS NULL", array_merge([$jobId, date('Y-m-d H:i:s')], $v));
         }
         return count($items);
     }

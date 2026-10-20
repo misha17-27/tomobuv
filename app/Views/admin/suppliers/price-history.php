@@ -18,7 +18,7 @@ $admin = Auth::isAdmin();
   <h2 id="h-supprice">Цена у поставщика: история</h2>
   <?php foreach ($supLinks as $l): ?>
     <p class="ac-small">
-      <b><?= $admin && $l['base'] ? '<a href="' . e($l['base']) . '">' . e($l['title']) . '</a>' : e($l['title']) ?></b>, код <?= e((string) $l['code']) ?>:
+      <b><?= $admin && $l['base'] ? '<a href="' . e($l['base']) . '">' . e($l['title']) . '</a>' : e($l['title']) ?></b>, код <?= e((string) ($l['label'] ?? $l['code'])) ?>:
       за пару <b><?= e($money($l['cost'])) ?></b> грн<?= $l['seen_at'] ? ' · был у поставщика ' . e($dt($l['seen_at'])) : '' ?>
       <?= (int) $l['hidden'] ? '<br><span class="sup-warn">скрыт загрузчиком — нет у поставщика</span>' : ((int) $l['missed'] > 0 ? '<br><span class="sup-warn">не было в ' . (int) $l['missed'] . ' последних полных проходах</span>' : '') ?>
     </p>

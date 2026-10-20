@@ -32,6 +32,26 @@ abstract class Supplier
     public const CHECKS_MISSING = false;
     /** Считает ли адаптер запросы к сайту поставщика (stats.requests) */
     public const COUNTS_REQUESTS = false;
+    /** Переносит ли наличие у поставщика на сайт («нет в наличии» без скрытия): список «Нет в наличии у поставщика» в «Обзоре» */
+    public const TRACKS_STOCK = false;
+
+    /**
+     * Бренды сайта, весь товар которых — от этого поставщика (официальный сайт бренда): «Обзор» показывает их товары без связи
+     * с поставщиком — после полного прохода это «есть у нас, нет у поставщика». [] — поставщик не одного бренда.
+     */
+    public static function ownBrandIds(): array
+    {
+        return [];
+    }
+
+    /**
+     * Код товара у поставщика для людей («Обзор», карточка товара): по умолчанию — код связи (supplier_links.code);
+     * адаптер, у которого код связи — служебный id (Tom.m: id товара на сайте бренда), показывает артикул ($ext — ext_id)
+     */
+    public static function codeLabel(string $code, ?string $ext = null): string
+    {
+        return $code;
+    }
 
     /** Запуск без движения дольше стольких секунд считается прерванным (как busy.txt старого загрузчика — 15 мин) */
     public const STALE = 900;
@@ -161,11 +181,24 @@ abstract class Supplier
         return self::dueAt($now, (int) static::cfg('window_from'), (int) static::cfg('window_to'), (int) static::cfg('period'), static::lastStart());
     }
 
-    /** Начало последнего боевого запуска (timestamp) или null */
+    /** Начало последнего боевого запуска (timestamp) или null; у адаптера с выбором источника — с любого из них */
     protected static function lastStart(): ?int
     {
-        $last = App::db()->value("SELECT MAX(started_at) FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = ?", [static::CODE, static::LIVE_SRC]);
+        [$ph, $v] = App::db()->in(static::liveSrcs());
+        $last = App::db()->value("SELECT MAX(started_at) FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src IN ($ph)", array_merge([static::CODE], $v));
         return $last ? (int) strtotime((string) $last) : null;
+    }
+
+    /** supplier_runs.src боевого запуска сейчас (адаптер с выбором источника — Jong•Golf: сайт бренда или API — по настройке) */
+    protected static function liveSrc(): string
+    {
+        return static::LIVE_SRC;
+    }
+
+    /** Источники боевых запусков для расписания: сменили источник — следующий запуск всё равно через период после прошлого */
+    protected static function liveSrcs(): array
+    {
+        return [static::liveSrc()];
     }
 
     /** Правило расписания без базы (для проверки): час $now в [$from; $to] и с $last прошло не меньше $period ч − 10 мин */
@@ -216,7 +249,7 @@ abstract class Supplier
             if ($stale) static::finishRun((int) $stale['id'], 'stopped', $stale['kind'] === 'run' ? 'остановлен: автозагрузка выключена' : 'прерван: не было движения больше ' . intdiv(static::STALE, 60) . ' мин');
             [$due, $why] = static::due();
             if (!$due) { $say('Автозагрузка ' . static::TITLE . ': не запускаю — ' . $why); return; }
-            $id = static::start('run', ['src' => static::LIVE_SRC, 'origin' => 'cron']);
+            $id = static::start('run', ['src' => static::liveSrc(), 'origin' => 'cron']);
             $say('Запуск №' . $id . ' начат');
         }
         static::drive($id, $say, $maxTime);

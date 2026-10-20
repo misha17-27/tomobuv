@@ -103,9 +103,16 @@ $paths = AdminCatalog::paths($cats);
           <option value="custom"<?= $badgeCustom ? ' selected' : '' ?>>Свой текст…</option></select></label>
       <label class="fld" id="badge-custom"<?= $badgeCustom ? '' : ' hidden' ?>><span>Текст бейджа</span><input type="text" name="badge_custom" value="<?= $badgeCustom ? e($badge) : '' ?>" maxlength="64"></label>
       <?php if ($id): ?>
-        <p class="muted ac-small">№<?= $id ?> · создан <?= e(date('d.m.Y H:i', strtotime((string) $p['created_at']))) ?><?= $p['updated_at'] ? ' · изменён ' . e(date('d.m.Y H:i', strtotime((string) $p['updated_at']))) : '' ?></p>
+        <p class="muted ac-small">Товар №<?= $id ?></p>
       <?php endif; ?>
     </section>
+
+    <?php if (!empty($dates)): ?>
+    <section class="card ac-dates" aria-labelledby="h-dates">
+      <h2 id="h-dates">Даты</h2>
+      <?= $view->partial('admin/products/dates', ['origin' => $dates['origin'], 'last' => $dates['last'], 'hist' => $dates['history'], 'full' => false]) ?>
+    </section>
+    <?php endif; ?>
 
     <?= $view->partial('admin/suppliers/price-history', ['supLinks' => $supLinks ?? [], 'supHistory' => $supHistory ?? []]) ?>
 
