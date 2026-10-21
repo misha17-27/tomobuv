@@ -161,7 +161,7 @@ class SiteClient
         }
         if ($this->offline !== null) return ['code' => 0, 'body' => '', 'type' => '', 'url' => $url, 'time' => 0.0, 'cached' => true, 'missing' => true];
         if (!$this->allowed($url)) throw static::err('robots.txt поставщика запрещает адрес ' . parse_url($url, PHP_URL_PATH) . ' — не запрашиваю', 'robots');
-        $r = $this->fetch($url, $image ? 60 : 90, $plain ? null : $this->cookie);
+        $r = $this->fetch($url, $image ? 45 : 30, $plain ? null : $this->cookie);   // страница обычно 1–7 с; молчащий сайт не держит шаг минутами
         if ($this->cacheDir !== null && $r['code'] === 200) {
             @mkdir($this->cacheDir, 0775, true);
             $file = $this->cacheDir . '/' . self::cacheName($key);
