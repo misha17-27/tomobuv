@@ -81,8 +81,9 @@ function media(?string $path): string
     $path = (string) $path;
     if ($path === '' || preg_match('#^https?://#', $path)) return $path;
     $remote = (string) App::config('images.remote_base', '');
-    if ($remote !== '' && (str_starts_with($path, '/wa-data/') || str_starts_with($path, '/uploads/user/')) && !is_file(PUBLIC_DIR . $path)) {
-        return rtrim($remote, '/') . $path;
+    if ((str_starts_with($path, '/wa-data/') || str_starts_with($path, '/uploads/')) && !is_file(PUBLIC_DIR . $path)) {
+        // файла нет: разработка — с живого сайта; сервер — '' (картинка не перенесена: шаблон не рисует <img>)
+        return $remote !== '' ? rtrim($remote, '/') . $path : '';
     }
     return $path;
 }

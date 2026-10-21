@@ -21,7 +21,7 @@ $since = (int) Settings::get('since_year', 2011);
           <a class="btn btn-o" href="<?= e($s['link']) ?>"<?= $i ? ' tabindex="-1"' : '' ?>><?= e($s['button'] ?: t('Смотреть')) ?> <?= icon('arrow', 'width:18px') ?></a>
         </div>
         <?php /* на телефоне картинка слайда скрыта (.slide .pic{display:none}): пустышка вместо неё — 140 КБ не отнимают канал у первого экрана */ ?>
-        <div class="pic"><picture><source media="(max-width:680px)" srcset="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><img src="<?= e(media($s['image'])) ?>" alt="" <?= $i ? 'loading="lazy"' : 'fetchpriority="high"' ?> width="762" height="350"></picture></div>
+        <?php if (($pic = media($s['image'])) !== ''): ?><div class="pic"><picture><source media="(max-width:680px)" srcset="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><img src="<?= e($pic) ?>" alt="" <?= $i ? 'loading="lazy"' : 'fetchpriority="high"' ?> width="762" height="350"></picture></div><?php endif; ?>
       </div>
     <?php endforeach; ?>
     <div class="dots"><?php foreach ($slides as $i => $s): ?><button class="<?= $i ? '' : 'on' ?>" data-i="<?= $i ?>" aria-label="Слайд <?= $i + 1 ?>"></button><?php endforeach; ?></div>
@@ -51,7 +51,7 @@ $since = (int) Settings::get('since_year', 2011);
   <div class="sh"><h2><?= e(t('Популярные категории')) ?></h2></div>
   <div class="cats">
     <?php foreach ($cats as $c): $kids = Catalog::children((int) $c['id']); ?>
-      <div class="cat"><a class="ph" href="<?= e(Catalog::categoryUrl($c)) ?>"><img src="<?= e(media($c['image'])) ?>" alt="<?= e($c['name']) ?>" loading="lazy" width="300" height="225"></a>
+      <div class="cat"><a class="ph" href="<?= e(Catalog::categoryUrl($c)) ?>"><img src="<?= e(Catalog::coverImage($c)) ?>" alt=""<?= e($c['name']) ?>" loading="lazy" width="300" height="225"></a>
         <div class="b"><h3><a href="<?= e(Catalog::categoryUrl($c)) ?>"><?= e(nice_case($c['name'])) ?></a></h3>
           <div class="chips"><?php foreach (array_slice($kids, 0, 5) as $s): ?><a class="chip" href="<?= e(Catalog::categoryUrl($s)) ?>"><?= e(nice_case($s['name'])) ?></a><?php endforeach; ?><?php if (count($kids) > 5): ?><a class="chip" href="<?= e(Catalog::categoryUrl($c)) ?>"><?= e(t('ещё')) ?> <?= count($kids) - 5 ?></a><?php endif; ?></div>
         </div></div>
@@ -79,7 +79,7 @@ $since = (int) Settings::get('since_year', 2011);
 
 <?php if ($wide): ?>
 <section class="sec"><div class="wrap banners">
-  <?php foreach ($wide as $b): ?><a class="bnr" href="<?= e($b['link']) ?>"><img src="<?= e(media($b['image'])) ?>" alt="" loading="lazy"><div><h3><?= e($b['title']) ?></h3><span class="btn btn-w"><?= e($b['button'] ?: t('Перейти')) ?> <?= icon('arrow', 'width:18px') ?></span></div></a><?php endforeach; ?>
+  <?php foreach ($wide as $b): ?><a class="bnr" href="<?= e($b['link']) ?>"><?php if (($bi = media($b['image'])) !== ''): ?><img src="<?= e($bi) ?>" alt="" loading="lazy"><?php endif; ?><div><h3><?= e($b['title']) ?></h3><span class="btn btn-w"><?= e($b['button'] ?: t('Перейти')) ?> <?= icon('arrow', 'width:18px') ?></span></div></a><?php endforeach; ?>
 </div></section>
 <?php endif; ?>
 

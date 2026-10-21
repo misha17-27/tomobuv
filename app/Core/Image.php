@@ -31,8 +31,11 @@ final class Image
         $ext = $ext ?: 'jpg';
         $name = $filename !== '' ? $filename : (string) $imageId;
         $path = '/wa-data/public/shop/products/' . self::productDir($productId) . '/images/' . $imageId . '/' . $name . '.' . $size . '.' . $ext;
+        if (is_file(self::originalPath($productId, (int) $imageId, $ext))) return $path;
         $remote = (string) App::config('images.remote_base', '');
-        return ($remote !== '' && !is_file(self::originalPath($productId, (int) $imageId, $ext))) ? rtrim($remote, '/') . $path : $path;
+        if ($remote !== '') return rtrim($remote, '/') . $path;   // разработка: фото с живого сайта
+        // ни оригинала, ни готовой миниатюры (фото не перенесено) — заглушка вместо битой картинки (404)
+        return is_file(self::thumbPath($productId, (int) $imageId, $name, $size, $ext)) ? $path : '/assets/img/no-photo.svg';
     }
 
     /** Фото для карточки/строки товара */

@@ -32,7 +32,7 @@ $cnt = static fn(int $n): string => number_format($n, 0, '.', ' ') . ' ' . plura
       <div class="br-tiles">
         <?php foreach ($top as $b): ?>
           <a class="br-tile" href="<?= e(Catalog::brandUrl($b)) ?>" data-name="<?= e(mb_strtolower((string) $b['name'])) ?>">
-            <span class="br-logo"><?php if (!empty($b['image'])): ?><img src="<?= e(media((string) $b['image'])) ?>" alt="" loading="lazy" width="120" height="60"><?php else: ?><span><?= e(mb_strtoupper(mb_substr(trim((string) $b['name']), 0, 2))) ?></span><?php endif; ?></span>
+            <span class="br-logo"><?php if (!empty($b['image']) && media((string) $b['image']) !== ''): ?><img src="<?= e(media((string) $b['image'])) ?>" alt="" loading="lazy" width="120" height="60"><?php else: ?><span><?= e(mb_strtoupper(mb_substr(trim((string) $b['name']), 0, 2))) ?></span><?php endif; ?></span>
             <b><?= e($b['name']) ?></b><small><?= e($cnt((int) $b['product_count'])) ?></small>
           </a>
         <?php endforeach; ?>

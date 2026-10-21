@@ -81,6 +81,26 @@ final class Catalog
         return $row;
     }
 
+    /**
+     * Картинка плитки категории: своя (если файл есть на сервере), иначе фото свежего товара этой категории
+     * с перенесённым оригиналом (фото товаров приносят загрузчики поставщиков), иначе заглушка. Кэш — час.
+     */
+    public static function coverImage(array $c): string
+    {
+        $own = media((string) ($c['image'] ?? ''));
+        if ($own !== '') return $own;
+        return Cache::remember('catalog.cover.' . (int) $c['id'], 3600, static function () use ($c): string {
+            $rows = App::db()->all('SELECT p.id, p.image_id, p.image_ext FROM catalog_index ci JOIN products p ON p.id = ci.product_id
+                WHERE ci.category_id = ? AND p.status = 1 AND p.image_id IS NOT NULL ORDER BY ci.in_stock DESC, ci.created_at DESC LIMIT 40', [(int) $c['id']]);
+            foreach ($rows as $r) {
+                if (is_file(\App\Core\Image::originalPath((int) $r['id'], (int) $r['image_id'], (string) ($r['image_ext'] ?: 'jpg')))) {
+                    return \App\Core\Image::url((int) $r['id'], (int) $r['image_id'], (string) ($r['image_ext'] ?: 'jpg'), '400');
+                }
+            }
+            return '/assets/img/no-photo.svg';
+        });
+    }
+
     public static function categoryUrl(array $c): string
     {
         return '/category/' . $c['url'] . '/';

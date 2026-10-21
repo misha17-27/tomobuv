@@ -14,7 +14,7 @@ $summary = trim((string) ($full['summary'] ?? ''));
   <div class="page-head brand-head">
     <?= $view->partial('front/partials/crumbs', ['items' => [['name' => t('Бренды'), 'url' => '/brand/'], ['name' => (string) $brand['name']]]]) ?>
     <div class="bh">
-      <?php if (!empty($brand['image'])): ?><span class="bh-logo"><img src="<?= e(media((string) $brand['image'])) ?>" alt="<?= e($brand['name']) ?>" width="120" height="60"></span><?php endif; ?>
+      <?php if (!empty($brand['image']) && media((string) $brand['image']) !== ''): ?><span class="bh-logo"><img src="<?= e(media((string) $brand['image'])) ?>" alt="<?= e($brand['name']) ?>" width="120" height="60"></span><?php endif; ?>
       <div>
         <h1><?= e($seo->h1) ?></h1>
         <?php if ($summary !== '' && $showText): ?><p class="ph-note"><?= e($summary) ?></p><?php endif; ?>
