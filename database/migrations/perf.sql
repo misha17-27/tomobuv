@@ -12,9 +12,20 @@ SET @db = DATABASE();
 -- по индексу не читают — сортировали все 57 тыс. строк «Женской обуви» (~40 мс на каждую страницу).
 -- product_rid = 4294967295 − product_id: «product_rid DESC» = «product_id ASC», и весь ORDER BY идёт
 -- в одну сторону — обратным проходом по индексу (0,3 мс на 1-й странице, ~3 мс на 300-й).
--- Колонка вычисляемая: CatalogIndexer и AdminCatalog её не заполняют, она считается сама.
+-- Колонка вычисляемая: CatalogIndexer и AdminCatalog её не заполняют, она считается сама. Выражение — XOR, а не вычитание:
+-- для 32-битных номеров 4294967295 ^ id = 4294967295 − id, но вычитание из беззнакового зависит от sql_mode
+-- (NO_UNSIGNED_SUBTRACTION), и новые MariaDB такое выражение в вычисляемой колонке запрещают (ошибка 1901).
 SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'catalog_index' AND COLUMN_NAME = 'product_rid') = 0,
-    'ALTER TABLE `catalog_index` ADD COLUMN `product_rid` INT UNSIGNED AS (4294967295 - `product_id`) STORED', 'DO 0');
+    'ALTER TABLE `catalog_index` ADD COLUMN `product_rid` INT UNSIGNED AS (4294967295 ^ `product_id`) STORED', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;
+
+-- База, созданная до перехода на XOR (выражение с вычитанием): перевести колонку на XOR — иначе дамп такой базы
+-- не загрузится в новую MariaDB (ошибка 1901). Значения те же, индексы перестраиваются сами.
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'catalog_index' AND COLUMN_NAME = 'product_rid'
+        AND GENERATION_EXPRESSION LIKE '%-%') > 0,
+    'ALTER TABLE `catalog_index` MODIFY COLUMN `product_rid` INT UNSIGNED AS (4294967295 ^ `product_id`) STORED', 'DO 0');
 PREPARE st FROM @s;
 EXECUTE st;
 DEALLOCATE PREPARE st;
