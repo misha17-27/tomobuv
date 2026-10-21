@@ -26,3 +26,8 @@ node_modules/
 /*.html
 __pycache__/
 *.pyc
+
+# хостинг и сайт пишут сами (cPanel: AutoSSL, журнал PHP)
+/public/.well-known/
+error_log
+/storage/php-cli-path

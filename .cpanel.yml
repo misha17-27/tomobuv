@@ -1,0 +1,8 @@
+---
+# cPanel → Git Version Control → Manage → Pull or Deploy → «Deploy HEAD Commit».
+# Сайт работает прямо из папки репозитория (public_html → public/), файлы никуда не копируются.
+# bin/deploy.sh: миграции, сброс кэша, при первом деплое — config.php из образца и public_html → public/.
+# Журнал: storage/logs/deploy.log (File Manager).
+deployment:
+  tasks:
+    - /bin/bash bin/deploy.sh
