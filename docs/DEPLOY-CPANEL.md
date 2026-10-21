@@ -1,7 +1,7 @@
 # Деплой на cPanel из GitHub (без терминала)
 
 Код берётся только из GitHub: `https://github.com/misha17-27/tomobuv.git`. Сайт работает прямо из папки репозитория
-`~/repositories/tomobuv-site-site` — `public_html` становится ссылкой на её `public/`, код и настройки снаружи не видны.
+`~/repositories/tomobuv-site` — `public_html` становится ссылкой на её `public/`, код и настройки снаружи не видны.
 
 ## Первый раз
 
@@ -40,9 +40,9 @@ Cron Jobs → задание «раз в 5 минут» с командой, ч�
 `PHP` — путь из `storage/php-cli-path` (например `/opt/cpanel/ea-php83/root/usr/bin/php`):
 
 ```
-cd ~/repositories/tomobuv-site-site && PHP bin/import-webasyst.php > ~/import.log 2>&1
-cd ~/repositories/tomobuv-site-site && PHP bin/i18n-seed-uk.php > ~/seed.log 2>&1
-cd ~/repositories/tomobuv-site-site && PHP bin/create-admin.php you@mail.com 'Пароль_от_10_символов' admin > ~/admin.log 2>&1
+cd ~/repositories/tomobuv-site && PHP bin/import-webasyst.php > ~/import.log 2>&1
+cd ~/repositories/tomobuv-site && PHP bin/i18n-seed-uk.php > ~/seed.log 2>&1
+cd ~/repositories/tomobuv-site && PHP bin/create-admin.php you@mail.com 'Пароль_от_10_символов' admin > ~/admin.log 2>&1
 ```
 
-Постоянный cron сайта (раз в час): `cd ~/repositories/tomobuv-site-site && PHP bin/cron.php > /dev/null 2>&1`.
+Постоянный cron сайта (раз в час): `cd ~/repositories/tomobuv-site && PHP bin/cron.php > /dev/null 2>&1`.
