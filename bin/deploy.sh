@@ -4,6 +4,7 @@
 #   2) нет config/config.php — создаётся из config.example.php со случайным app_key: дальше владелец вписывает
 #      доступ к базе в File Manager и снова жмёт Deploy;
 #   3) php bin/install.php (миграции, повторный запуск безопасен) и bin/cache-clear.php;
+#   0) блок версии PHP, который cPanel MultiPHP дописывает в public/.htaccess, сохраняется (bin/deploy-lib.sh);
 #   4) первый деплой: если ~/public_html пустой (только cgi-bin, .well-known, страница-заглушка хостинга),
 #      он переименовывается в public_html.before-tomobuv-<дата> и заменяется ссылкой на public/ репозитория.
 #      Непустой public_html не трогается — только сообщение в журнале.
@@ -16,6 +17,9 @@ LOG="$REPO/storage/logs/deploy.log"
 log() { echo "$*" | tee -a "$LOG"; }
 
 log "=== $(date '+%Y-%m-%d %H:%M:%S') деплой $(git log --oneline -1 2>/dev/null)"
+# shellcheck source=bin/deploy-lib.sh
+source "$REPO/bin/deploy-lib.sh"
+keep_cpanel_files   # блок версии PHP от cPanel в public/.htaccess не должен блокировать Deploy
 
 # 1. PHP 8.1+ для консоли
 PHP="${PHP_BIN:-}"
