@@ -494,6 +494,11 @@ GET_LOCK + метка `storage/import/hitobuvi/last-request`, User-Agent `Tomobu
   не параллельно). Сводка — `bin/legacy-products.php --stats`.
 - Первая загрузка «Хит обуви» после пересборки — `bin/supplier-hitobuvi.php --load` (лимиты новых и запросов — только этого запуска,
   в `state`: `HitObuvi::client`, `HitObuviSync::override`; продолжает прерванный боевой запуск), по кругу — `D:\tomobuv.com.ua\load-hitobuvi.bat`.
+- Фото оставленных товаров без `images.remote_base` — `bin/fetch-legacy-photos.php` (без класса): строки `product_images` товаров сайта
+  без файла `Image::originalPath` → оригинал из копии старого `wa-data` (`--from-dir`) или старого сайта по HTTP (`--base`, размер
+  `970` — крупнейший открытый у Webasyst; один поток, пауза, повторы, адрес самого сайта не принимается); проверка `getimagesizefromstring`
+  (тип = расширение в базе), атомарная запись, размеры в базе — по файлу; порции `--limit`/`--time`, блокировка, «не скачалось» по источникам —
+  `storage/fetch-legacy-photos.json`; добавлено — `Cache::flush`. Код выхода 2 — переносить нечего.
 
 ## Опт
 
