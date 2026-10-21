@@ -383,7 +383,8 @@ final class TommSync extends WebSync
                 $it['relink'] = true;
             }
             if ($it['cat_id'] === null && !$it['map']['skip']) $it['warn'][] = 'раздел «' . $it['map']['key'] . '» не сопоставлен — категория не проверена';
-            if ($ex['image_id'] === null && $it['photo_urls'] && $c['add_photos'] === '1') $it['photo'] = true;
+            // нет фото: нет записи о фото ИЛИ запись есть, а файла оригинала нет (не перенесён со старого сайта)
+            if (!self::photoOnDisk($ex) && $it['photo_urls'] && $c['add_photos'] === '1') $it['photo'] = true;
             $this->diff($it, $ex, $upd);
             if (!empty($it['relink']) && !isset($it['upd']['category_id'])) $it['changes'][] = 'привязка к категории → ' . ($this->ci['path'][$it['cat_id']] ?? $it['cat_id']);
             if (!empty($it['photo'])) $it['changes'][] = 'фото';
@@ -549,6 +550,7 @@ final class TommSync extends WebSync
         // 5. фото: все (главное — первое)
         foreach ($items as $i => &$it) {
             if (!$it['id'] || empty($it['photo']) || !isset($photos[$i]['file']) || !in_array($it['action'], ['create', 'update'], true)) continue;
+            if ($it['action'] === 'update') self::dropMissingImages((int) $it['id']);   // записи о фото без файлов — убрать
             $this->storePhotos($it, $photos[$i], $moved, $now);
         }
         unset($it);

@@ -492,6 +492,28 @@ abstract class SupplierSync
         foreach ($photos as $p) if (isset($p['file'])) @unlink($p['file']);
     }
 
+    /** У товара есть главное фото и его оригинал на диске ($ex — строка products с image_id, image_ext) */
+    protected static function photoOnDisk(array $ex): bool
+    {
+        return !empty($ex['image_id'])
+            && is_file(\App\Core\Image::originalPath((int) $ex['id'], (int) $ex['image_id'], (string) (($ex['image_ext'] ?? '') ?: 'jpg')));
+    }
+
+    /** Убрать записи product_images без файла оригинала (фото не перенесено); главное фото — сбросить, если пропало */
+    protected static function dropMissingImages(int $pid): int
+    {
+        $db = App::db();
+        $gone = [];
+        foreach ($db->all('SELECT id, ext FROM product_images WHERE product_id = ?', [$pid]) as $r) {
+            if (!is_file(\App\Core\Image::originalPath($pid, (int) $r['id'], (string) ($r['ext'] ?: 'jpg')))) $gone[] = (int) $r['id'];
+        }
+        if (!$gone) return 0;
+        [$ph, $vals] = $db->in($gone);
+        $db->query("DELETE FROM product_images WHERE id IN ($ph)", $vals);
+        $db->query("UPDATE products SET image_id = NULL WHERE id = ? AND image_id IN ($ph)", array_merge([$pid], $vals));
+        return count($gone);
+    }
+
     /**
      * Фото товара: строка product_images → файл оригинала (путь как в Webasyst, Image::originalPath) → главное фото.
      * Замена ($replace — старые [iid => ext]): старые строки удаляются сразу, их файлы — после COMMIT ($it['drop_files']).
