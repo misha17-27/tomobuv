@@ -17,7 +17,12 @@ final class ErrorController
      */
     public static function notFound(): Response
     {
-        $path = Request::path();
+        return self::redirect(Request::path()) ?? self::page();
+    }
+
+    /** Редирект из таблицы redirects для пути (без /ua — Response::send добавит префикс к Location), иначе null */
+    public static function redirect(string $path): ?Response
+    {
         try {
             $r = App::db()->row('SELECT id, to_url, code FROM redirects WHERE from_url = ?', [$path]);
             if ($r) {
@@ -27,6 +32,12 @@ final class ErrorController
         } catch (\Throwable $e) {
             // база недоступна — просто 404
         }
+        return null;
+    }
+
+    /** Страница 404 (без проверки редиректов) */
+    public static function page(): Response
+    {
         $seo = Seo::make(t('Страница не найдена'));
         $seo->robots = 'noindex, follow';
         return Response::html(View::render('errors/404', ['seo' => $seo]), 404);

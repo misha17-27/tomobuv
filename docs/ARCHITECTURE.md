@@ -19,7 +19,8 @@ app/
   Services/          ← бизнес-логика: Catalog (справочники из кэша), Products (карточки), CatalogIndexer, …
   Controllers/Front/ ← витрина;  Controllers/Admin/ ← админка (наследуют BaseController)
   Views/layouts/     ← front.php, admin.php;  Views/front/, Views/admin/, Views/errors/, Views/emails/
-bin/                 ← CLI: install, import-webasyst, reindex, cache-clear, cron, create-admin, build-assets, product-names, supplier-jonggolf, supplier-hitobuvi, supplier-tomm, seo-autofix
+bin/                 ← CLI: install, import-webasyst, reindex, cache-clear, cron, create-admin, build-assets, product-names, supplier-jonggolf, supplier-hitobuvi, supplier-tomm, seo-autofix,
+                        catalog-reset (пересборка каталога), legacy-products (старые адреса удалённых товаров)
 config/              ← config.php (секреты, не в git) и config.example.php
 database/schema.sql  ← схема БД
 storage/             ← кэш, логи, сессии, загрузки (не в git, закрыта от веба)
@@ -142,6 +143,8 @@ Sitemap: `/sitemap.xml` → `sitemap-shop-N.xml` (по 10 000 адресов), `
 `AdminCatalog::addRedirects`), объединение значений «Бренд» (страницы брендов-источников → 301 на оставшийся бренд).
 Удаление товара, категории, бренда, инфо-страницы, статьи — `AdminCatalog::dropRedirectsTo`: редиректы, ведущие на удалённый
 адрес (в любом написании to_url: «/x/», «/x», %XX, с /ua, ?параметрами, #якорем), удаляются — иначе вели бы на 404.
+Товары, удалённые пересборкой каталога, — своя карта адресов `legacy_products` (301 на новую карточку той же модели или категорию,
+раздел «Пересборка каталога» ниже); порядок для `/product/{url}/` без товара: redirects → legacy_products → 404.
 
 ### Норма и движок шаблонов
 
@@ -454,6 +457,43 @@ GET_LOCK + метка `storage/import/hitobuvi/last-request`, User-Agent `Tomobu
   «кожзам» → «искусственная кожа»; составной «текстиль+кожзам» — как уже есть на сайте через «-» в любом порядке, `TommSync::combo`),
   все фото → GD 700×700, SEO — шаблоны сайта; не больше `max_new` (500) за запуск и `max_requests` (1 500) запросов — загрузка
   бренда с нуля (≈1 150 в наличии) за 3 запуска. Пропал с сайта бренда — скрыть после 2 полных проходов (`WebSync::finish`).
+
+## Пересборка каталога и старые адреса товаров (`CatalogReset`, `LegacyProducts`)
+
+Решение владельца (октябрь 2026): все товары, кроме Tom.m и Jong•Golf, удаляются, каталог заново собирают загрузчики. Порядок
+действий, копия и восстановление — docs/INSTALL.md → «Пересборка каталога».
+- `App\Services\CatalogReset` (CLI `bin/catalog-reset.php`: `--dry-run` по умолчанию, `--confirm=N`, `--purge-files`) — состав «оставить»:
+  связь `supplier_links` с tomm / jonggolf, `products.supplier`, бренды по ключу `HitObuviSync::bkey` (Tom.m, TOM.M, ТОМ.М, Tomm.m;
+  Jong•Golf, JONG GOLF, J&G и HTML-сущности) и из настроек загрузчиков, «Не указано» + jonggolf, товар без бренда и поставщика
+  с кодом модели бренда (`CODE_RE`: «60123B», «B31130-4» — заведены вручную на старом сайте). Удаление — под `CatalogIndexer::exclusive`,
+  пачками (2 000) одной транзакцией под `CatalogIndexer::locked` (взятой до транзакции) по таблицам `TABLES` с индексом по товару
+  (`batch`: индекс, подписи, категории, характеристики, фото, тексты, отзывы, связи и журнал загрузчиков, журнал SEO, машинные записи
+  истории `admin_log`, сами товары); перед удалением пачка перепроверяется `FOR UPDATE` (товар, который за это время взял загрузчик
+  Tom.m/Jong•Golf или получил их бренд, остаётся). Таблицы без индекса по товару (`tail`: корзины, подборки, импорт, отчёты загрузчиков,
+  заявки — ссылка NULL) — после пачек, «строки без товара» (LEFT JOIN, частями по заданию / запуску). Затем `CatalogIndexer::rebuildAll`
+  (индекс, фильтры, счётчики категорий и брендов), `Cache::flush`. `order_items` (снимок позиции) и журнал сотрудников не трогаются.
+  Состояние — `storage/catalog-reset.json`: повтор после обрыва доделывает (подтверждение — число первого запуска или остаток).
+  Файлы фото (`public/wa-data`) — отдельно, после проверки нового каталога (`purgeFiles`: только товаров из карты, которых больше нет).
+- `legacy_products` (database/migrations/legacy-urls.sql; `LegacyProducts::ensureSchema`) — строка на удалённый товар: url (как
+  products.url, уникальный; /ua/ — тот же адрес с префиксом), old_id, название, артикул, ряд, ящик, цена, статус, категория
+  и `cat_path` (цепочка предков на момент удаления), бренд, поставщик, `forsage_code` (products.supplier_code у Forsage), ключи
+  сопоставления (md5: `name_key` — название + ряд, `art_key` — бренд + тип + «хвост» + ряд, `code_key` — бренд + код модели + ряд,
+  `own_key` — код модели Tom.m/Jong•Golf + ряд), `new_product_id` / `matched_by` / `matched_at`, `hits` / `last_hit_at`; `alias = 1` —
+  старый адрес из `redirects`, который вёл на удалённый товар. `capture($ids)` пишет карту до удаления (повтор обновляет те же адреса,
+  сопоставление того же товара сохраняется); `dropBusy()` убирает строки, чей адрес снова у товара.
+- 301: `ProductController::show/reviews` → товара нет → `ErrorController::redirect` (свой редирект) → `LegacyProducts::resolve($url)`:
+  новая карточка (`new_product_id`, status 1) — `/product/{новый}/`; иначе своя категория, если видимая, иначе ближайший видимый
+  предок по дереву сейчас, затем по `cat_path` (категорию удалили), иначе `/`; на /ua/ префикс добавляет `Response::send`. Нет в карте —
+  прежний 404 (`ErrorController::page`). Ответ 301 не кэшируется (кэш страниц — только 200).
+- `LegacyProducts::match()` — только однозначные (ключ есть ровно у одного товара сайта; несколько старых адресов на одну карточку — можно),
+  правила по очереди: `forsage` (forsage_code = `supplier_links.ext_id` «Хит обуви» — код из адреса у поставщика, R2 загрузчика),
+  `name` (R3), `article` (R4), `code`, `own` (дубли Tom.m под другим брендом: «Ok Shoes T10862D» → «TOM.M T-10862-D»). Кандидаты — товары
+  сайта, кроме тех, что сами в карте (карта пишется заранее). Новая карточка удалена — строка снова в очереди. Вызовы: `bin/cron.php`
+  после загрузчиков, конец боевого прохода «Хит обуви» (`HitObuvi::matchLegacy`, строка в отчёте), `bin/catalog-reset.php` после
+  удаления, `bin/legacy-products.php --match`; товары сайта не менялись (число и max id) — выход сразу (подпись в кэше; GET_LOCK —
+  не параллельно). Сводка — `bin/legacy-products.php --stats`.
+- Первая загрузка «Хит обуви» после пересборки — `bin/supplier-hitobuvi.php --load` (лимиты новых и запросов — только этого запуска,
+  в `state`: `HitObuvi::client`, `HitObuviSync::override`; продолжает прерванный боевой запуск), по кругу — `D:\tomobuv.com.ua\load-hitobuvi.bat`.
 
 ## Опт
 

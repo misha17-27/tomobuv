@@ -18,6 +18,7 @@ use App\Core\Settings;
 use App\Core\View;
 use App\Services\Cart;
 use App\Services\Catalog;
+use App\Services\LegacyProducts;
 use App\Services\Products;
 use App\Services\SeoVars;
 
@@ -27,6 +28,8 @@ use App\Services\SeoVars;
  *
  * SEO: свои meta_* товара, иначе шаблоны seo.product_meta_* (App\Core\Seo::pick подгоняет длину под норму) с переменными
  * {$product.name}, {$product.format_price}, {$product.box_qty}, {$product.sizes}, {$category.full_name}… (App\Services\SeoVars).
+ * Товара с адресом нет — свой редирект из «Редиректов», затем адрес товара, удалённого при пересборке каталога
+ * (App\Services\LegacyProducts: 301 на новую карточку той же модели или на категорию), иначе 404 (gone).
  */
 final class ProductController
 {
@@ -41,7 +44,7 @@ final class ProductController
     public function show(string $url): Response
     {
         $p = self::find($url);
-        if (!$p) return Response::notFound();
+        if (!$p) return self::gone($url);
         if ($url !== $p['url']) return self::toCanonical($p['link']);
         $pid = $p['id'];
 
@@ -97,7 +100,7 @@ final class ProductController
     public function reviews(string $url): Response
     {
         $p = self::find($url);
-        if (!$p) return Response::notFound();
+        if (!$p) return self::gone($url);
         if ($url !== $p['url']) return self::toCanonical($p['link'] . 'reviews/');
         $res = self::reviewsPage($p);
         return $res->status === 200 ? $res->cache(3600) : $res;
@@ -186,6 +189,20 @@ final class ProductController
         // остаток задан и меньше одного ящика — купить нельзя (корзина откажет), показываем «Нет в наличии»
         if ($p['in_stock'] && Cart::maxBoxes($p) === 0) $p['in_stock'] = 0;
         return $p;
+    }
+
+    /**
+     * Товара нет: редирект из таблицы redirects (админка, «Редиректы») важнее; затем карта товаров, удалённых при пересборке
+     * каталога (LegacyProducts::resolve — новая карточка той же модели, иначе видимая категория / её предок, иначе главная) —
+     * 301 (на /ua/ Response::send добавит префикс: /ua/product/старый/ → /ua/category/…/); иначе прежний 404.
+     * Отзывы удалённого товара (/product/{url}/reviews/) ведут туда же, куда сама карточка.
+     */
+    private static function gone(string $url): Response
+    {
+        $own = ErrorController::redirect(Request::path());
+        if ($own) return $own;
+        $to = LegacyProducts::resolve($url);
+        return $to !== null ? Response::redirect($to, 301) : ErrorController::page();
     }
 
     /**

@@ -36,3 +36,13 @@ foreach (\App\Services\Suppliers\Suppliers::all() as $code => $cls) {
         echo $code . ': ошибка — ' . $e->getMessage() . "\n";
     }
 }
+
+// Старые адреса товаров, удалённых при пересборке каталога (bin/catalog-reset.php), → новые карточки тех же моделей, которые
+// только что загрузили поставщики (LegacyProducts::match: только однозначные; товары сайта не менялись — сразу выход)
+try {
+    $m = \App\Services\LegacyProducts::match();
+    if ($m['matched']) echo 'старые адреса: сопоставлено ' . $m['matched'] . ', без новой карточки ' . $m['left'] . "\n";
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron legacy: ' . $e->getMessage());
+    echo 'старые адреса: ошибка — ' . $e->getMessage() . "\n";
+}

@@ -5,6 +5,7 @@ namespace App\Services\Suppliers;
 
 use App\Core\App;
 use App\Services\Import\Importer;
+use App\Services\LegacyProducts;
 
 /**
  * Загрузка товаров поставщика «Хит обуви» (hit-obuvi.com.ua, Joomla + JoomShopping) по страницам категорий его сайта —
@@ -109,7 +110,9 @@ final class HitObuvi extends WebSupplier
     /**
      * Начать запуск. $o: src — web | file; dir — папка сохранённых страниц для src = file (общий кэш проверок, страницы
      * прошлого запуска); cache — сквозной кэш для src = web (проверки: повторно не скачивать); mode — quick | full | auto;
-     * limit — не больше N товаров; ids — только эти товары поставщика (проверка); origin — admin | cron | cli; user_id.
+     * limit — не больше N товаров; ids — только эти товары поставщика (проверка); origin — admin | cron | cli; user_id;
+     * max_new / max_requests — лимиты только этого запуска вместо настроек (первая загрузка после пересборки каталога:
+     * bin/supplier-hitobuvi.php --load, ≈45 тыс. новых — по фото на каждый; настройки не меняются).
      * Боевой запуск с сайта — только при включённой загрузке и заданной наценке; запись по файлу — только из CLI.
      */
     public static function start(string $kind, array $o = []): int
@@ -143,6 +146,8 @@ final class HitObuvi extends WebSupplier
             'limit' => isset($o['limit']) && (int) $o['limit'] > 0 ? (int) $o['limit'] : null, 'ids' => $ids ?: null,
             'linked_max' => (int) App::db()->value('SELECT COALESCE(MAX(CAST(code AS UNSIGNED)), 0) FROM supplier_links WHERE supplier = ?', [self::CODE]),
             'fails' => 0, 'retry_at' => 0, 'requests' => 0, 'debug' => App::isDebug(),
+            'max_new' => isset($o['max_new']) ? max(0, (int) $o['max_new']) : null,
+            'max_requests' => isset($o['max_requests']) ? max(10, (int) $o['max_requests']) : null,
         ];
         $id = self::createRun($kind, $src, $origin, !empty($o['user_id']) ? (int) $o['user_id'] : null, $state);
         $m = self::markup();
@@ -153,7 +158,8 @@ final class HitObuvi extends WebSupplier
         };
         self::log($id, 'info', 'Загрузчик стартовал ' . date('d.m.Y H:i:s') . ' — ' . $what . '; ' . ($src === 'file'
                 ? 'страниц в папке: ' . count($files)
-                : 'режим: ' . self::MODES[$mode] . ', разделы: ' . implode(', ', $roots) . ', по ' . (int) self::cfg('page_limit') . ' товаров на странице, пауза ' . self::cfg('delay') . ' с, не больше ' . (int) self::cfg('max_requests') . ' запросов')
+                : 'режим: ' . self::MODES[$mode] . ', разделы: ' . implode(', ', $roots) . ', по ' . (int) self::cfg('page_limit') . ' товаров на странице, пауза ' . self::cfg('delay') . ' с, не больше ' . ($state['max_requests'] ?? (int) self::cfg('max_requests')) . ' запросов'
+                    . ($state['max_new'] !== null ? ', новых — не больше ' . ($state['max_new'] ?: 'без ограничения') . ' (лимиты этого запуска)' : ''))
             . ($state['limit'] ? ', не больше ' . $state['limit'] . ' товаров' : '') . ($ids ? ', только товары ' . implode(', ', $ids) : '') . '. '
             . ($m ? 'Наценка: ×' . $m['k'] . ($m['plus'] ? ' + ' . $m['plus'] . ' грн' : '') . ', округление ' . self::ROUND_STEPS[(string) $m['step']] . ($m['step'] ? ' (' . self::ROUND_MODES[$m['mode']] . ')' : '')
                 : 'Наценка НЕ задана — в отчёте цены поставщика (закупочные).'));
@@ -184,10 +190,10 @@ final class HitObuvi extends WebSupplier
         return array_map(static fn($x) => [$x[0], $x[1]], $out);
     }
 
-    /** Клиент запуска: пауза и лимит из настроек, сквозной кэш или папка сохранённых страниц */
+    /** Клиент запуска: пауза и лимит из настроек (лимит запросов — свой у запуска, если задан), сквозной кэш или папка сохранённых страниц */
     private static function client(array $st): HitObuviClient
     {
-        $c = new HitObuviClient((float) (Importer::num(self::cfg('delay')) ?? 2.0), max(10, (int) self::cfg('max_requests')), $st['dir'] ?? null, $st['cache'] ?? null);
+        $c = new HitObuviClient((float) (Importer::num(self::cfg('delay')) ?? 2.0), max(10, (int) ($st['max_requests'] ?? self::cfg('max_requests'))), $st['dir'] ?? null, $st['cache'] ?? null);
         $c->setUsed((int) ($st['requests'] ?? 0));
         return $c;
     }
@@ -239,7 +245,7 @@ final class HitObuvi extends WebSupplier
                         [$page, $meta] = self::loadPage($id, (int) $st['page']);
                         $items = $page['items'];
                         if ($st['ids']) $items = array_values(array_filter($items, static fn($p) => in_array((int) $p['id'], $st['ids'], true)));
-                        $sync ??= new HitObuviSync($id, $dry, $run['stats'], $client);
+                        $sync ??= self::sync($id, $dry, $run, $client);
                         $left = $st['limit'] !== null ? max(0, (int) $st['limit'] - (int) $run['stats']['products']) : null;
                         $st['pos'] = $sync->process($items, (int) $st['pos'], $meta, $deadline, $left, static function (int $pos) use (&$run, &$st, $id, $client): bool {
                             $st['pos'] = $pos;
@@ -267,8 +273,9 @@ final class HitObuvi extends WebSupplier
                         break;
 
                     case 'finish':
-                        $sync ??= new HitObuviSync($id, $dry, $run['stats'], $client);
+                        $sync ??= self::sync($id, $dry, $run, $client);
                         $sync->finish(!empty($st['complete']) && $st['mode'] === 'full', static fn(): bool => !self::stopped($id));
+                        if (!$dry) self::matchLegacy($id);
                         $s = $run['stats'];
                         self::log($id, 'info', '==========');
                         self::log($id, 'info', 'Запросов к сайту поставщика: ' . $s['requests'] . ', страниц списков: ' . $s['pages'] . ', товаров на них: ' . $s['products']);
@@ -293,6 +300,14 @@ final class HitObuvi extends WebSupplier
         } catch (SupplierError $e) {
             self::onSiteError($run, $e, $client);                          // 429/5xx — пауза, лимит — проход неполный, прочее — ошибка запуска
         }
+    }
+
+    /** Порции запуска: настройки поставщика, лимит новых — свой у запуска, если задан (--load) */
+    private static function sync(int $id, bool $dry, array &$run, HitObuviClient $client): HitObuviSync
+    {
+        $sync = new HitObuviSync($id, $dry, $run['stats'], $client);
+        if (isset($run['state']['max_new'])) $sync->override(['max_new' => (string) (int) $run['state']['max_new']]);
+        return $sync;
     }
 
     /**
@@ -431,6 +446,22 @@ final class HitObuvi extends WebSupplier
     public static function viaNames(): array
     {
         return HitObuviSync::VIA;
+    }
+
+    /**
+     * Конец боевого прохода: старые адреса товаров, удалённых при пересборке каталога, → только что добавленные карточки
+     * тех же моделей (LegacyProducts::match — forsage-код связи, название, бренд+артикул+ряд; только однозначные).
+     * Ошибка сопоставления запуск не останавливает — строка в отчёте.
+     */
+    private static function matchLegacy(int $id): void
+    {
+        try {
+            $m = LegacyProducts::match();
+            if ($m['matched']) self::log($id, 'info', 'Старые адреса удалённых товаров: сопоставлено с новыми карточками ' . $m['matched']
+                . ' (' . implode(', ', array_map(static fn($k, $v) => (LegacyProducts::VIA[$k] ?? $k) . ' ' . $v, array_keys($m['by']), $m['by'])) . '), ещё без карточки ' . $m['left']);
+        } catch (\Throwable $e) {
+            self::log($id, 'warn', 'Старые адреса удалённых товаров: сопоставление не выполнено — ' . $e->getMessage());
+        }
     }
 
     /** Проверка связи: robots.txt и первая страница первого раздела (2 запроса); у поставщика ничего не меняется */

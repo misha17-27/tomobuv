@@ -73,6 +73,13 @@ final class HitObuviSync extends WebSync
         foreach (preg_split('~\r\n|\n~', $this->cfg['skip_brands']) ?: [] as $b) if (($k = self::bkey($b)) !== '') $this->skipBrands[$k] = trim($b);
     }
 
+    /** Свои значения настроек для этого запуска (только известные ключи; --load — лимит новых) */
+    public function override(array $cfg): self
+    {
+        foreach ($cfg as $k => $v) if (array_key_exists($k, $this->cfg)) $this->cfg[$k] = (string) $v;
+        return $this;
+    }
+
     // ================================================================== ключи
 
     /** Ключ бренда: верхний регистр, кириллические двойники → латиница, без пробелов и знаков («Ok Shoes» = «OK-SHOES») */
