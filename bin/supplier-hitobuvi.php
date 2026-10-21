@@ -6,6 +6,13 @@
  *                                                   если загрузка включена, задана наценка, час в окне и прошёл период (bin/cron.php делает то же)
  *   php bin/supplier-hitobuvi.php --now [--mode=quick|full] [--limit=N]
  *                                                 — боевой запуск сейчас, вне расписания (нужна наценка; автозагрузка может быть выключена)
+ *   php bin/supplier-hitobuvi.php --load [--max-new=50000] [--max-requests=60000]
+ *                                                 — первая (массовая) загрузка после пересборки каталога (D:\tomobuv.com.ua\load-hitobuvi.bat
+ *                                                   запускает по кругу): продолжить прерванный боевой запуск (окно закрыли — любой
+ *                                                   давности), иначе начать полный проход с лимитами только этого запуска
+ *                                                   (0 — без ограничения; настройки не меняются); не дольше 6 ч за вызов.
+ *                                                   Код выхода: 0 — есть что продолжать, 2 — всё загружено (полный проход без
+ *                                                   отложенных по лимиту), 3 — запуск остановлен в админке, 1 — ошибка
  *   php bin/supplier-hitobuvi.php --test          — проверка связи: robots.txt и первая страница раздела (2 запроса)
  *   php bin/supplier-hitobuvi.php --dry-run [--source=web|last|<папка>] [--mode=quick|full] [--limit=N] [--ids=1,2] [--cache=<папка>]
  *                                                 — пробный прогон: в каталог не пишет; web — страницы с сайта поставщика (бережно:
@@ -54,6 +61,33 @@ try {
         if (!$st['cats'] && !$st['types']) { $say('Таблица категорий уже заполнена — без --force не меняется'); exit(0); }
         $say('Таблица категорий: категорий поставщика ' . $st['cats'] . ', правил по типу ' . $st['types'] . ($st['unresolved'] ? '; нет на сайте: ' . implode(', ', $st['unresolved']) : ''));
         exit(0);
+    }
+    if (isset($opts['load'])) {
+        // первая загрузка: прерванный боевой запуск — продолжить (его шаги двигает только этот процесс: блокировка запусков)
+        $o = ['origin' => 'cli', 'src' => 'web', 'mode' => 'full',
+            'max_new' => isset($opts['max-new']) ? max(0, (int) $opts['max-new']) : 50000,
+            'max_requests' => isset($opts['max-requests']) ? max(100, (int) $opts['max-requests']) : 60000];
+        $cur = App::db()->row("SELECT id FROM supplier_runs WHERE supplier = ? AND status = 'running' AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [HitObuvi::CODE]);
+        if ($cur) {
+            $id = (int) $cur['id'];
+            $say('Продолжаю запуск №' . $id);
+            HitObuvi::log($id, 'info', 'Продолжение (bin/supplier-hitobuvi.php --load)');
+            HitObuvi::flushLog();
+        } else {
+            $id = HitObuvi::start('run', $o);
+            $say('Запуск №' . $id . ' (полный проход, новых — не больше ' . ($o['max_new'] ?: 'без ограничения') . ', запросов — не больше ' . $o['max_requests'] . ')');
+        }
+        HitObuvi::drive($id, $say, 6 * 3600.0);
+        $run = HitObuvi::run($id) ?? $fail('запуск не найден');
+        if ($run['status'] === 'error') $fail((string) $run['error']);
+        $s = $run['stats'];
+        $say('Запуск №' . $id . ': ' . HitObuvi::STATUSES[$run['status']] . ', добавлено ' . $s['created'] . ', изменено ' . $s['updated'] . ', запросов ' . $s['requests']
+            . ', отложено по лимиту новых ' . (int) ($s['skip']['limit_new'] ?? 0));
+        if ($run['status'] === 'running') exit(0);                            // время вышло / шаги у другого процесса — продолжить
+        if ($run['status'] === 'stopped') { $say('Запуск остановлен («Остановить» в админке) — загрузка не продолжается'); exit(3); }
+        $all = $run['status'] === 'done' && !empty($run['state']['complete']) && ($run['state']['mode'] ?? '') === 'full' && empty($s['skip']['limit_new']);
+        if ($all) $say('Всё загружено: полный проход без отложенных по лимиту новых товаров');
+        exit($all ? 2 : 0);
     }
     if (isset($opts['report'])) {
         $run = HitObuvi::run((int) $opts['report']) ?? $fail('запуск не найден');
