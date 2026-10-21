@@ -51,6 +51,14 @@ if [ "$CONFIG_NEW" = "0" ]; then
   if run_php bin/install.php >>"$LOG" 2>&1; then
     log "Миграции: готово"
     run_php bin/cache-clear.php >>"$LOG" 2>&1 && log "Кэш сброшен"
+    # Режим «Сайт обновляется» (503, public/index.php): база без товаров — включить; товары появились — снять,
+    # если режим включал сам деплой (в файле «auto»). Файл, созданный владельцем вручную, деплой не трогает.
+    N="$(run_php -r 'require "app/bootstrap.php"; echo (int) App\Core\App::db()->value("SELECT COUNT(*) FROM products");' 2>/dev/null)"
+    if [ "${N:-0}" = "0" ]; then
+      [ -f storage/maintenance ] || { echo auto > storage/maintenance; log "В базе нет товаров — включён режим «Сайт обновляется» (503). Снимется сам, когда загрузите данные и снова нажмёте Deploy."; }
+    elif [ -f storage/maintenance ] && [ "$(cat storage/maintenance 2>/dev/null)" = "auto" ]; then
+      rm -f storage/maintenance && log "Товаров в базе: $N — режим «Сайт обновляется» снят"
+    fi
   else
     log "ОШИБКА в bin/install.php — подробности выше в этом журнале (часто: неверный доступ к базе в config/config.php)"
   fi

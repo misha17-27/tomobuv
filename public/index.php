@@ -6,6 +6,19 @@
  */
 declare(strict_types=1);
 
+// Режим «Сайт обновляется»: есть файл storage/maintenance → 503 с Retry-After (поисковики не выкидывают страницы
+// из индекса). Админка работает — в ней загружают данные; статика (assets, wa-data, uploads, .well-known) отдаётся
+// Apache без PHP. Ставит и снимает bin/deploy.sh (пустая база) или владелец — создать/удалить файл в File Manager.
+if (is_file(__DIR__ . '/../storage/maintenance')
+    && !preg_match('#^/(admin|ua/admin)(/|$)#', (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH))) {
+    http_response_code(503);
+    header('Retry-After: 3600');
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    readfile(__DIR__ . '/../app/Views/errors/maintenance.html');
+    exit;
+}
+
 require __DIR__ . '/../app/bootstrap.php';
 
 use App\Core\PageCache;
