@@ -46,6 +46,24 @@ try {
     echo 'водяной знак: ошибка — ' . $e->getMessage() . "\n";
 }
 
+// SEO (SeoFix, «SEO → Исправить автоматически»): стандартные шаблоны («только опт по всей Украине»), title/description вне нормы,
+// одинаковые title у новых товаров — раз в сутки после ночных загрузок (с 7:00) и сразу, когда в коде новые стандартные шаблоны
+// (SeoFix::VERSION). Запуск с изменениями — пакет в журнале автоисправления (откат там же); без изменений — ничего не пишется.
+try {
+    $seoDay = STORAGE . '/seo-autofix-day';
+    $seoNew = (int) \App\Core\Settings::get('seo.standard_version', '0') < \App\Services\SeoFix::VERSION;
+    if (\App\Services\SeoFix::hasTables() && ($seoNew || ((int) date('G') >= 7 && @file_get_contents($seoDay) !== date('Y-m-d')))) {
+        @ini_set('memory_limit', '1024M');
+        $r = \App\Services\SeoFix::run(true, ['source' => 'cron', 'note' => $seoNew ? 'новые стандартные шаблоны (версия ' . \App\Services\SeoFix::VERSION . ')' : 'ежедневно']);
+        @file_put_contents($seoDay, date('Y-m-d'));
+        if ($seoNew) \App\Core\Settings::set('seo.standard_version', (string) \App\Services\SeoFix::VERSION);   // и без изменений (свои шаблоны)
+        echo 'SEO: ' . ($r['changes'] ? 'исправлено ' . $r['changes'] . ' (пакет №' . $r['batch'] . ')' : 'всё в норме') . "\n";
+    }
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron seo: ' . $e->getMessage());
+    echo 'SEO: ошибка — ' . $e->getMessage() . "\n";
+}
+
 // Старые адреса товаров, удалённых при пересборке каталога (bin/catalog-reset.php), → новые карточки тех же моделей, которые
 // только что загрузили поставщики (LegacyProducts::match: только однозначные; товары сайта не менялись — сразу выход)
 try {

@@ -148,7 +148,7 @@ $rulesLine = static function (array $rules) use ($fmt): string {
         <tr class="<?= $b['reverted_at'] ? 'is-draft' : '' ?>">
           <td><b><?= (int) $b['id'] ?></b></td>
           <td><?= e(date('d.m.Y H:i', strtotime((string) $b['created_at']))) ?></td>
-          <td><?= e(['admin' => 'админка', 'cli' => 'командная строка', 'import' => 'перенос с Webasyst', 'i18n' => 'сид переводов'][$b['source']] ?? $b['source']) ?>
+          <td><?= e(['admin' => 'админка', 'cli' => 'командная строка', 'cron' => 'автоматически (cron)', 'import' => 'перенос с Webasyst', 'i18n' => 'сид переводов'][$b['source']] ?? $b['source']) ?>
             <?= $b['user_name'] ? '<small>' . e($b['user_name']) . '</small>' : '' ?><small><?= e(str_replace(',', ', ', (string) $b['parts'])) ?></small></td>
           <td class="right"><?= $fmt($b['changes']) ?></td>
           <td><small><?= $rulesLine((array) ($sum['rules'] ?? [])) ?></small>
