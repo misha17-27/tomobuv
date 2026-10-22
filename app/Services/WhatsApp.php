@@ -45,14 +45,21 @@ final class WhatsApp
         };
     }
 
-    /** Номера получателей: «+38 (093) 275-30-70, 0507616901» → ['380932753070', '380507616901'] */
+    /**
+     * Номера получателей: «+38 (093) 275-30-70, 0507616901» → ['380932753070', '380507616901']. Номера — через запятую,
+     * точку с запятой или с новой строки; пробелы, скобки и дефисы внутри номера не мешают («+38 093 275 30 70»). Кусок,
+     * в котором цифр больше, чем у одного номера, — несколько номеров через пробел («0931112233 0504445566»).
+     */
     public static function recipients(?string $raw = null): array
     {
         $out = [];
-        foreach (preg_split('/[\s,;]+/', $raw ?? self::cfg('to')) ?: [] as $p) {
-            $d = preg_replace('/\D+/', '', (string) $p);
-            if (strlen($d) === 10 && $d[0] === '0') $d = '38' . $d;
-            if (strlen($d) >= 11 && strlen($d) <= 15) $out[$d] = $d;
+        foreach (preg_split('/[,;\r\n]+/', $raw ?? self::cfg('to')) ?: [] as $part) {
+            $parts = strlen((string) preg_replace('/\D+/', '', $part)) > 15 ? (preg_split('/\s+/', trim($part)) ?: []) : [$part];
+            foreach ($parts as $p) {
+                $d = (string) preg_replace('/\D+/', '', (string) $p);
+                if (strlen($d) === 10 && $d[0] === '0') $d = '38' . $d;
+                if (strlen($d) >= 11 && strlen($d) <= 15) $out[$d] = $d;
+            }
         }
         return array_values($out);
     }

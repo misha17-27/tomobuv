@@ -12,3 +12,7 @@ CREATE TABLE IF NOT EXISTS notify_log (
   KEY channel (channel, created_at),
   KEY ref (ref_type, ref_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Получатель новых заказов по умолчанию (решение владельца 22.10.2026): только если номер ещё не задан — правки в
+-- «Настройки → WhatsApp» не перезаписываются (INSERT IGNORE: строка уже есть — ничего не делается)
+INSERT IGNORE INTO settings (name, value) VALUES ('whatsapp.to', '+380507616901');
