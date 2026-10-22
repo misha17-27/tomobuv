@@ -758,7 +758,7 @@ final class AdminCatalog
                     ? 'Пусто — на украинской версии будет: <i>' . e(str_limit((string) $o['tpl_uk'], 220)) . '</i>'
                     : 'Пусто — на украинской версии показывается русский текст.';
             } else {
-                $empty = !empty($o['tpl']) ? 'Пусто — по шаблону: <i>' . e((string) $o['tpl']) . '</i>' : e((string) ($o['empty'] ?? ''));
+                $empty = !empty($o['tpl']) ? 'Пусто — заполняется автоматически по шаблону: <i>' . e((string) $o['tpl']) . '</i>' : e((string) ($o['empty'] ?? ''));
             }
             $hint = trim((string) ($o['hint'] ?? '') . ' ' . $empty);
             $hint = $hint !== '' ? '<small class="hint">' . $hint . '</small>' : '';

@@ -88,7 +88,7 @@ $noUk = array_values(array_filter($templates, static fn($t) => $t['used'] && $t[
       <h2>Что видят поисковики</h2>
       <p class="muted">В <a href="/sitemap.xml" target="_blank" rel="noopener">sitemap.xml</a> — <b><?= $fmt($sitemap['total']) ?></b>
         <?= plural((int) $sitemap['total'], 'адрес', 'адреса', 'адресов') ?> русской версии (и столько же украинской, /ua/…), у каждого поисковик берёт title (заголовок в выдаче) и description (текст под ним).
-        Пустое поле — не всегда ошибка: если своего нет, сайт строит его из SEO-шаблона — это <b>По шаблону</b>, исправлять не нужно.
+        Пустое поле — не всегда ошибка: если своего нет, сайт строит его из SEO-шаблона — это <b>Автоматически</b>, исправлять не нужно.
         <b>Нет</b> — пусто, и шаблона тоже нет; <b>Длина</b> — своё значение (или результат шаблона) короче или длиннее, чем покажет Google
         (title <?= SeoAudit::TITLE_MIN ?>–<?= SeoAudit::TITLE_MAX ?>, description <?= SeoAudit::DESC_MIN ?>–<?= SeoAudit::DESC_MAX ?> символов).</p>
 

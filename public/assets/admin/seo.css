@@ -17,7 +17,7 @@
 .seo-split-row small{grid-column:2;color:var(--steel);font-size:12px}
 .seo-bar{display:flex;height:10px;border-radius:99px;overflow:hidden;background:var(--line-2)}
 .seo-bar i{display:block;height:100%;min-width:3px}
-.seo-bar i.ok{background:var(--ok)}.seo-bar i.warn{background:var(--warn)}.seo-bar i.auto{background:#c7d0de}.seo-bar i.none{background:var(--bad)}
+.seo-bar i.ok{background:var(--ok)}.seo-bar i.warn{background:var(--warn)}.seo-bar i.auto{background:#8fd3ad}.seo-bar i.none{background:var(--bad)}
 
 /* итоги: счётчики-ссылки на фильтр таблицы */
 a.seo-count:hover{text-decoration:none;color:var(--ink)}
