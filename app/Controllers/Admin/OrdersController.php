@@ -704,7 +704,7 @@ final class OrdersController extends BaseController
         $words = array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($q)) ?: [], static fn($w) => mb_strlen($w) >= 3);
         if ($words && count($ids) < 20) {
             $ft = implode(' ', array_map(static fn($w) => '+' . $w . '*', $words));
-            $ids = array_merge($ids, array_map('intval', $db->col('SELECT id FROM products WHERE MATCH(name, sku) AGAINST(? IN BOOLEAN MODE)
+            $ids = array_merge($ids, array_map('intval', $db->col('SELECT id FROM products WHERE MATCH(name, name_uk, sku) AGAINST(? IN BOOLEAN MODE)
                 ORDER BY status DESC, id DESC LIMIT 20', [$ft])));
         }
         if (count($ids) < 5) {

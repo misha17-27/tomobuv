@@ -237,7 +237,7 @@ final class ProductsController extends BaseController
         $words = array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($q), -1, PREG_SPLIT_NO_EMPTY) ?: [], static fn($x) => mb_strlen($x) >= 3);
         if ($words) {
             $against = implode(' ', array_map(static fn($x) => '+' . $x . '*', array_slice($words, 0, 8)));
-            $ids = array_merge($ids, $db->col('SELECT id FROM products WHERE MATCH(name, sku) AGAINST (? IN BOOLEAN MODE) ORDER BY id DESC LIMIT ' . $limit, [$against]));
+            $ids = array_merge($ids, $db->col('SELECT id FROM products WHERE MATCH(name, name_uk, sku) AGAINST (? IN BOOLEAN MODE) ORDER BY id DESC LIMIT ' . $limit, [$against]));
         }
         if (!$ids && mb_strlen($q) >= 2) {
             $sub = '%' . addcslashes($q, '%_\\') . '%';
