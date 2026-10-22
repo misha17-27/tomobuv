@@ -133,6 +133,7 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
           <label class="fld"><span>Качество JPEG</span><input name="photo_quality" type="number" min="30" max="100" value="<?= e($cfg['photo_quality']) ?>"></label>
         </div>
         <p class="hint">Берётся большое фото (796×596), вписывается в холст через GD и сохраняется в папку фото сайта. На фото поставщика — его водяной знак «hit-obuvi.com.ua».</p>
+        <label class="check"><input type="checkbox" name="watermark" value="1"<?= $on('watermark') ? ' checked' : '' ?>> <span>Заменять надпись «hit-obuvi.com.ua» на фото на «tomobuv.com.ua» — у новых фото сразу, у загруженных раньше — по cron (раз в час, под новым адресом фото); фото без надписи поставщика не меняются</span></label>
       </div>
 
       <div class="card">

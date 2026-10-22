@@ -6,11 +6,12 @@
  *                                                   если загрузка включена, задана наценка, час в окне и прошёл период (bin/cron.php делает то же)
  *   php bin/supplier-hitobuvi.php --now [--mode=quick|full] [--limit=N]
  *                                                 — боевой запуск сейчас, вне расписания (нужна наценка; автозагрузка может быть выключена)
- *   php bin/supplier-hitobuvi.php --load [--max-new=50000] [--max-requests=60000]
+ *   php bin/supplier-hitobuvi.php --load [--max-new=50000] [--max-requests=60000] [--minutes=360]
  *                                                 — первая (массовая) загрузка после пересборки каталога (D:\tomobuv.com.ua\load-hitobuvi.bat
- *                                                   запускает по кругу): продолжить прерванный боевой запуск (окно закрыли — любой
- *                                                   давности), иначе начать полный проход с лимитами только этого запуска
- *                                                   (0 — без ограничения; настройки не меняются); не дольше 6 ч за вызов.
+ *                                                   запускает по кругу, на хостинге — bin/load-hitobuvi.sh из cron): продолжить прерванный
+ *                                                   боевой запуск (окно закрыли — любой давности), иначе начать полный проход с лимитами
+ *                                                   только этого запуска (0 — без ограничения; настройки не меняются); не дольше
+ *                                                   --minutes мин за вызов (по умолчанию 6 ч).
  *                                                   Код выхода: 0 — есть что продолжать, 2 — всё загружено (полный проход без
  *                                                   отложенных по лимиту), 3 — запуск остановлен в админке, 1 — ошибка
  *   php bin/supplier-hitobuvi.php --test          — проверка связи: robots.txt и первая страница раздела (2 запроса)
@@ -23,6 +24,10 @@
  *   php bin/supplier-hitobuvi.php --seed-map [--force]  — таблица категорий из черновика (database/suppliers/hitobuvi.php);
  *                                                   --force — заменить правки владельца черновиком
  *   php bin/supplier-hitobuvi.php --report=<ID>   — отчёт запуска
+ *   php bin/supplier-hitobuvi.php --watermark [--dry-run]
+ *                                                 — надпись «hit-obuvi.com.ua» на фото, загруженных раньше, → «tomobuv.com.ua» (то же
+ *                                                   делает bin/cron.php порциями); --dry-run — сколько фото из первых 200 с надписью
+ *   php bin/supplier-hitobuvi.php --watermark-file=<фото.jpg> --out=<результат.jpg>  — проверка замены на одном файле
  *
  * cron — общий bin/cron.php (раз в час); отдельно:
  *   15 * * * * /usr/bin/php /home/USER/tomobuv/bin/supplier-hitobuvi.php >> /home/USER/tomobuv/storage/logs/hitobuvi-cron.log 2>&1
@@ -67,17 +72,31 @@ try {
         $o = ['origin' => 'cli', 'src' => 'web', 'mode' => 'full',
             'max_new' => isset($opts['max-new']) ? max(0, (int) $opts['max-new']) : 50000,
             'max_requests' => isset($opts['max-requests']) ? max(100, (int) $opts['max-requests']) : 60000];
+        // «всё загружено» — полный проход завершён без отложенных по лимиту новых; неполный (раздел поставщика 404 или пустая
+        // страница списка) — если ничего не добавил: повторять его бесполезно (лишних проходов — не больше одного)
+        $isAll = static fn(array $r): bool => $r['status'] === 'done' && ($r['state']['mode'] ?? '') === 'full'
+            && empty($r['stats']['skip']['limit_new']) && (!empty($r['state']['complete']) || (int) $r['stats']['created'] === 0);
         $cur = App::db()->row("SELECT id FROM supplier_runs WHERE supplier = ? AND status = 'running' AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [HitObuvi::CODE]);
+        $last = $cur ? null : App::db()->row("SELECT id, status, error FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [HitObuvi::CODE]);
         if ($cur) {
             $id = (int) $cur['id'];
             $say('Продолжаю запуск №' . $id);
             HitObuvi::log($id, 'info', 'Продолжение (bin/supplier-hitobuvi.php --load)');
             HitObuvi::flushLog();
+        } elseif ($last && $last['status'] === 'stopped' && $last['error'] === 'остановлен вручную') {
+            // «Остановить» в админке между вызовами (cron, окно .bat) — новый проход не начинать; продолжить — «Запустить сейчас»
+            // (остановленный иначе — прерван пробным прогоном, автозагрузка выключена — не мешает)
+            $say('Последний запуск остановлен в админке — новый не начинаю (продолжить: «Запустить сейчас» в админке)');
+            exit(3);
+        } elseif ($last && $last['status'] === 'done' && ($lr = HitObuvi::run((int) $last['id'])) && $isAll($lr)) {
+            // проход довёл до конца не этот процесс (bin/cron.php, вкладка админки) — новый не нужен
+            $say('Всё загружено: последний полный проход №' . $last['id'] . ' закончен');
+            exit(2);
         } else {
             $id = HitObuvi::start('run', $o);
             $say('Запуск №' . $id . ' (полный проход, новых — не больше ' . ($o['max_new'] ?: 'без ограничения') . ', запросов — не больше ' . $o['max_requests'] . ')');
         }
-        HitObuvi::drive($id, $say, 6 * 3600.0);
+        HitObuvi::drive($id, $say, isset($opts['minutes']) ? max(1, min(360, (int) $opts['minutes'])) * 60.0 : 6 * 3600.0);
         $run = HitObuvi::run($id) ?? $fail('запуск не найден');
         if ($run['status'] === 'error') $fail((string) $run['error']);
         $s = $run['stats'];
@@ -85,9 +104,28 @@ try {
             . ', отложено по лимиту новых ' . (int) ($s['skip']['limit_new'] ?? 0));
         if ($run['status'] === 'running') exit(0);                            // время вышло / шаги у другого процесса — продолжить
         if ($run['status'] === 'stopped') { $say('Запуск остановлен («Остановить» в админке) — загрузка не продолжается'); exit(3); }
-        $all = $run['status'] === 'done' && !empty($run['state']['complete']) && ($run['state']['mode'] ?? '') === 'full' && empty($s['skip']['limit_new']);
-        if ($all) $say('Всё загружено: полный проход без отложенных по лимиту новых товаров');
+        $all = $isAll($run);
+        if ($all) $say('Всё загружено: полный проход без отложенных по лимиту новых товаров'
+            . (empty($run['state']['complete']) ? ' (неполный: раздел поставщика не прочитан — см. отчёт запуска)' : ''));
         exit($all ? 2 : 0);
+    }
+    if (isset($opts['watermark'])) {
+        $r = \App\Services\Suppliers\HitObuviWatermark::backlog($say, 3600.0, isset($opts['dry-run']));
+        $say(isset($opts['dry-run']) ? 'Проверено ' . $r['checked'] . ', с надписью поставщика ' . $r['replaced'] . ' (ничего не записано)'
+            : ($r['done'] ? 'Готово' : 'Осталось ' . $r['left'] . ' — продолжит cron или повторный запуск'));
+        exit(0);
+    }
+    if (isset($opts['watermark-file'])) {
+        $in = (string) $opts['watermark-file'];
+        $im = is_file($in) ? @imagecreatefromstring((string) file_get_contents($in)) : false;
+        if (!$im) $fail('не читается: ' . $in);
+        $box = \App\Services\Suppliers\HitObuviWatermark::find($im);
+        if ($box === null) { $say('Надпись поставщика не найдена — фото не меняется'); exit(0); }
+        \App\Services\Suppliers\HitObuviWatermark::apply($im);
+        $out = (string) ($opts['out'] ?? preg_replace('/(\.\w+)?$/', '-tomobuv.jpg', $in, 1));
+        imagejpeg($im, $out, 90);
+        $say('Надпись в ' . implode(',', $box) . ' заменена → ' . $out);
+        exit(0);
     }
     if (isset($opts['report'])) {
         $run = HitObuvi::run((int) $opts['report']) ?? $fail('запуск не найден');

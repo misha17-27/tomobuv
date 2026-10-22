@@ -419,6 +419,12 @@ final class HitObuviSync extends WebSync
 
     // ================================================================== запись
 
+    /** Водяной знак поставщика на фото → свой (настройка watermark; фото без него — как есть) */
+    protected function retouch(\GdImage $canvas): void
+    {
+        if ($this->cfg['watermark'] === '1') HitObuviWatermark::apply($canvas);
+    }
+
     protected function apply(array &$items, array $photos, array &$moved): void
     {
         $db = App::db();

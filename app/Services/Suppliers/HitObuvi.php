@@ -53,9 +53,11 @@ final class HitObuvi extends WebSupplier
         'skip_brands' => "JONG GOLF\nJong•Golf\nJong Golf\nJ&G\nJ&amp;G\nJ&amp;amp;G\nTOM.M\nTom.m\nTOMM\nТОМ.М",
         'attributes' => "size=Размер\ncolor=Цвет\nmaterial=Материал\nlining=Материал внутри\ngender=Пол\nbrand=Бренд",
         'photo_width' => '700', 'photo_height' => '700', 'photo_quality' => '90',
+        // водяной знак поставщика «hit-obuvi.com.ua» на фото → «tomobuv.com.ua» (HitObuviWatermark; загруженные раньше — cron)
+        'watermark' => '1',
         'log_days' => '7', 'history_days' => '365',
     ];
-    public const BOOLS = ['enabled', 'add_new', 'update_existing', 'update_category', 'keep_manual_hidden', 'hide_missing', 'adopt'];
+    public const BOOLS = ['enabled', 'add_new', 'update_existing', 'update_category', 'keep_manual_hidden', 'hide_missing', 'adopt', 'watermark'];
     /** Поля товара поставщика для характеристик (левая часть строк «поле=Характеристика») */
     public const FIELDS = ['size' => 'размерный ряд', 'color' => 'цвет', 'material' => 'материал верха', 'lining' => 'материал внутри (подкладка)',
         'gender' => 'пол (по разделу)', 'brand' => 'бренд', 'country' => 'страна производства', 'maker' => 'фабрика (производитель из описания)'];
@@ -256,6 +258,7 @@ final class HitObuvi extends WebSupplier
                             return !self::stopped($id);
                         });
                         $st['count'] = count($items);
+                        $st['fails'] = 0;                                    // порция прошла — сбои сайта считаются подряд (как у Tom.m)
                         if ($sync->deferred()) {
                             if (empty($st['waits'])) self::log($id, 'info', 'Идёт перестройка индекса каталога или скачивание фото не уложилось в шаг — запись порции продолжится следующим шагом');
                             $st['waits'] = (int) ($st['waits'] ?? 0) + 1;

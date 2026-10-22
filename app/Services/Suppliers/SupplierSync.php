@@ -450,7 +450,8 @@ abstract class SupplierSync
     {
         $sup = static::SUPPLIER;
         $c = $this->cfg;
-        return $sup::dir($this->runId) . '/photo-' . md5($url . '|' . $c['photo_width'] . 'x' . $c['photo_height'] . 'q' . $c['photo_quality']) . '.jpg';
+        return $sup::dir($this->runId) . '/photo-' . md5($url . '|' . $c['photo_width'] . 'x' . $c['photo_height'] . 'q' . $c['photo_quality']
+            . (($c['watermark'] ?? '0') === '1' ? 'wm' : '')) . '.jpg';
     }
 
     /**
@@ -480,11 +481,17 @@ abstract class SupplierSync
         $tw = max(1, (int) round($w * $scale)); $th = max(1, (int) round($h * $scale));
         imagecopyresampled($canvas, $img, intdiv($cw - $tw, 2), intdiv($ch - $th, 2), 0, 0, $tw, $th, $w, $h);
         imagedestroy($img);
+        $this->retouch($canvas);
         $tmp = $dst . '.part';                                              // целиком или никак: недописанный файл не примется за готовый
         $ok = imagejpeg($canvas, $tmp, max(30, min(100, (int) $this->cfg['photo_quality'])));
         imagedestroy($canvas);
         if (!$ok || !@rename($tmp, $dst)) { @unlink($tmp); return ['error' => 'не удалось сохранить JPEG']; }
         return ['file' => $dst, 'w' => $cw, 'h' => $ch];
+    }
+
+    /** Правка готового холста перед сохранением (адаптер: «Хит обуви» — замена водяного знака поставщика) */
+    protected function retouch(\GdImage $canvas): void
+    {
     }
 
     protected function dropPhotos(array $photos): void

@@ -37,6 +37,15 @@ foreach (\App\Services\Suppliers\Suppliers::all() as $code => $cls) {
     }
 }
 
+// Фото «Хит обуви», загруженные до замены водяного знака: надпись поставщика → «tomobuv.com.ua» под новым адресом фото
+// (HitObuviWatermark::backlog — порциями не дольше 10 мин; новые фото загрузчик обрабатывает сам; всё сделано — сразу выход)
+try {
+    \App\Services\Suppliers\HitObuviWatermark::backlog(static function (string $m): void { echo $m . "\n"; }, 600.0);
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron watermark: ' . $e->getMessage());
+    echo 'водяной знак: ошибка — ' . $e->getMessage() . "\n";
+}
+
 // Старые адреса товаров, удалённых при пересборке каталога (bin/catalog-reset.php), → новые карточки тех же моделей, которые
 // только что загрузили поставщики (LegacyProducts::match: только однозначные; товары сайта не менялись — сразу выход)
 try {
