@@ -15,3 +15,4 @@ $router->post('/admin/seo/refresh/', [SeoController::class, 'refresh']);
 $router->get('/admin/seo/autofix/', [SeoController::class, 'autofix']);
 $router->post('/admin/seo/autofix/', [SeoController::class, 'autofixApply']);
 $router->post('/admin/seo/autofix/{id}/revert/', [SeoController::class, 'autofixRevert']);
+$router->post('/admin/seo/autofix/cron/', [SeoController::class, 'autofixCron']);

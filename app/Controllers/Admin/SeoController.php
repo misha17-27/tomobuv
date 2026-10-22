@@ -8,6 +8,7 @@ use App\Core\Cache;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Settings;
 use App\Services\SeoAudit;
 use App\Services\SeoFix;
 
@@ -188,6 +189,18 @@ final class SeoController extends BaseController
         $this->log('seo_autofix_revert', 'seo_fix_batch', (int) $id, ['restored' => $r['restored'], 'skipped' => $r['skipped']]);
         $this->flash('Пакет № ' . (int) $id . ' откачен: возвращено ' . number_format($r['restored'], 0, '', ' ')
             . ($r['skipped'] ? ', пропущено ' . number_format($r['skipped'], 0, '', ' ') . ' (значение меняли после пакета — список в строке пакета)' : '') . '.');
+        return Response::redirect('/admin/seo/autofix/#batches');
+    }
+
+    /** Ежедневное автоисправление из bin/cron.php (настройка seo.autofix_cron, по умолчанию включено) — вкл./выкл. */
+    public function autofixCron(): Response
+    {
+        if (!Auth::isAdmin()) return $this->adminOnly();
+        $on = Request::post('on') === '1';
+        Settings::set('seo.autofix_cron', $on ? '1' : '0');
+        $this->log('seo_autofix_cron', 'setting', null, ['on' => $on]);
+        $this->flash($on ? 'Ежедневное автоисправление включено (каждое утро с 7:00 после ночных загрузок).'
+            : 'Ежедневное автоисправление выключено — только кнопка «Применить».');
         return Response::redirect('/admin/seo/autofix/#batches');
     }
 

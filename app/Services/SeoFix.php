@@ -223,6 +223,8 @@ final class SeoFix
     private array $ours = [];
     /** Различение одинаковых title товаров (dedupeTitles): [id][язык] => [base, title] */
     private array $dedupe = [];
+    /** Запуск из cron: поля, которые вернул откат пакета, — «сущность|id|поле» => возвращённое значение (restoredFields) */
+    private array $restored = [];
 
     private function __construct(bool $apply, array $opt)
     {
@@ -233,6 +235,7 @@ final class SeoFix
         $this->examplesPer = (int) ($opt['examples'] ?? 6);
         $this->now = date('Y-m-d H:i:s');
         $this->raw = App::db()->pairs('SELECT name, value FROM settings');
+        if (($opt['source'] ?? '') === 'cron') $this->restored = self::restoredFields();
         $this->store = trim((string) ($this->raw['store_name'] ?? '')) ?: 'Tomobuv';
         $this->report = ['apply' => $apply, 'batch' => null, 'parts' => $this->parts, 'changes' => 0, 'rules' => [],
             'groups' => [], 'examples' => [], 'left' => [], 'templates' => [], 'time' => 0.0];
@@ -325,14 +328,16 @@ final class SeoFix
             if ($withSettings && isset(self::TEMPLATES[$key])) {
                 [$stdRu, $stdUk] = self::TEMPLATES[$key];
                 $whyRu = $this->templateVerdict($key, 'ru', $ru, $stdRu);
-                if ($whyRu !== null) $newRu = $stdRu;
+                if ($whyRu !== null && !$this->reverted('setting', 0, $key, $this->raw[$key] ?? null)) $newRu = $stdRu;
                 $whyUk = null;
                 if ($uk === '') {
                     // пустой UA — на /ua/ работает русский шаблон; русский стандартный — пишем украинский стандарт
-                    if (Seo::norm($newRu) === Seo::norm($stdRu)) { $newUk = $stdUk; $whyUk = 'нет украинского варианта'; }
+                    if (Seo::norm($newRu) === Seo::norm($stdRu) && !$this->reverted('setting', 0, $key . '.uk', $this->raw[$key . '.uk'] ?? null)) {
+                        $newUk = $stdUk; $whyUk = 'нет украинского варианта';
+                    }
                 } else {
                     $whyUk = $this->templateVerdict($key, 'uk', $uk, $stdUk);
-                    if ($whyUk !== null) $newUk = $stdUk;
+                    if ($whyUk !== null && !$this->reverted('setting', 0, $key . '.uk', $this->raw[$key . '.uk'] ?? null)) $newUk = $stdUk;
                 }
                 foreach ([['ru', $key, $ru, $newRu, $whyRu], ['uk', $key . '.uk', $uk, $newUk, $whyUk]] as [$lang, $name, $old, $new, $why]) {
                     if ($why === null || $new === $old) continue;
@@ -383,6 +388,29 @@ final class SeoFix
         $why = 'номер страницы дважды: «— страница N» шаблона пагинации и « | Страница N» витрины';
         $this->setting($key, 'ru', $this->raw[$key], '0', 'template', $why);
         $this->report['templates'][$key] = ['old' => '1', 'new' => '0', 'why' => $why];
+    }
+
+    /**
+     * Поля, которые вернули откаты пакетов: «сущность|id|поле» => значение после отката (у поля из нескольких откаченных пакетов —
+     * «было» самого раннего: откат идёт от последнего пакета к первому). Ежедневный запуск из cron их не меняет, пока значение
+     * то же (откат владельца — окончательный); «Применить» в админке и bin/seo-autofix.php — меняют.
+     */
+    private static function restoredFields(): array
+    {
+        if (!self::hasTables()) return [];
+        $out = [];
+        foreach (App::db()->query('SELECT l.entity, l.entity_id, l.field, l.old_value FROM seo_fix_log l JOIN seo_fix_batches b ON b.id = l.batch_id
+            WHERE b.reverted_at IS NOT NULL ORDER BY l.id') as $r) {
+            $out[$r['entity'] . '|' . (int) $r['entity_id'] . '|' . $r['field']] ??= $r['old_value'];
+        }
+        return $out;
+    }
+
+    /** Значение поля вернул откат и с тех пор его не меняли (только при запуске из cron — restoredFields) */
+    private function reverted(string $entity, int $id, string $field, ?string $cur): bool
+    {
+        $k = $entity . '|' . $id . '|' . $field;
+        return $this->restored && array_key_exists($k, $this->restored) && trim((string) $this->restored[$k]) === trim((string) $cur);
     }
 
     /** Прежний стандартный шаблон или текст служебной страницы (PREVIOUS) */
@@ -461,6 +489,8 @@ final class SeoFix
             $newRu = ($ru === '' || self::previous($ru) || !Seo::inNorm($shown($ru, 'ru'), $field)) ? $stdRu : $ru;
             $newUk = $uk;
             if ($uk === '' ? Seo::norm($newRu) === Seo::norm($stdRu) : (self::previous($uk) || !Seo::inNorm($shown($uk, 'uk'), $field))) $newUk = $stdUk;
+            if ($this->reverted('setting', 0, $key, $this->raw[$key] ?? null)) $newRu = $ru;
+            if ($this->reverted('setting', 0, $key . '.uk', $this->raw[$key . '.uk'] ?? null)) $newUk = $uk;
             foreach ([['ru', $key, $ru, $newRu], ['uk', $key . '.uk', $uk, $newUk]] as [$lang, $name, $old, $new]) {
                 if ($new === $old) continue;
                 $this->setting($name, $lang, $this->raw[$name] ?? null, $new, 'text',
@@ -497,6 +527,7 @@ final class SeoFix
     /** Изменение настройки: запись (при применении) + журнал + отчёт */
     private function setting(string $name, string $lang, ?string $old, string $new, string $rule, string $why): void
     {
+        if ($this->reverted('setting', 0, $name, $old)) return;
         $ch = ['group' => 'service', 'entity' => 'setting', 'id' => 0, 'name' => $name, 'col' => $name, 'lang' => $lang,
             'field' => Seo::fieldOf($name) === 'description' ? 'desc' : 'title', 'old' => $old, 'new' => $new, 'rule' => $rule, 'why' => $why];
         if ($this->apply) {
@@ -673,7 +704,7 @@ final class SeoFix
                 $x = $o[$f];
                 foreach (['ru' => [$col, $x['change'] ?? null], 'uk' => [$col . '_uk', $x['uk']['change'] ?? null]] as $lang => [$c, $ch]) {
                     if ($o['live']) $this->count($g, $lang, $f, $x['before_' . $lang], $x['after_' . $lang]);
-                    if ($ch === null) continue;
+                    if ($ch === null || $this->reverted($entity, $id, $c, $r[$c])) continue;
                     $changes[] = ['group' => $g, 'entity' => $entity, 'id' => $id, 'name' => $name, 'col' => $c, 'lang' => $lang, 'field' => $f,
                         'old' => $r[$c], 'new' => $ch['new'], 'rule' => $ch['rule'], 'live' => $o['live'], 'shown' => $x['after_' . $lang]];
                 }
@@ -815,18 +846,15 @@ final class SeoFix
     /**
      * Значения сущности, которые записало автоисправление (пакеты без отката): [id][колонка] => [orig, new, rule].
      * Пересчитываются правки из своего текста владельца (fix, uk_fill), различение дублей (dedupe), прежние пересчёты (refix)
-     * и текст украинского шаблона title, обрезанный с обрывком (uk_tpl «…бронзовий 4»). orig — значение до первой правки
-     * в цепочке пакетов подряд (правка, начатая с «стало» прошлой); значение, которое меняли между пакетами, начинает цепочку заново.
-     * Очистки (clear, keywords) и прочие uk_tpl не пересчитываются: своё значение там — текст шаблона или пусто.
+     * и текст украинского шаблона, записанный в *_uk (uk_tpl: шаблон с тех пор мог смениться — «купити в Одесі» → «по всій
+     * Україні»). orig — значение до первой правки в цепочке пакетов подряд (правка, начатая с «стало» прошлой); значение,
+     * которое меняли между пакетами, начинает цепочку заново. Очистки (clear, keywords) не пересчитываются: там пусто.
      */
     private function ourValues(string $entity): array
     {
         if (!self::hasTables()) return [];
         $db = App::db();
-        $recalc = static function (array $l) use ($entity): bool {
-            if (in_array($l['rule'], ['fix', 'uk_fill', 'dedupe', 'refix'], true)) return true;
-            return $l['rule'] === 'uk_tpl' && $l['field'] === self::ENTITIES[$entity][1] . '_uk' && Seo::badTail((string) $l['new_value']);
-        };
+        $recalc = static fn(array $l): bool => in_array($l['rule'], ['fix', 'uk_fill', 'dedupe', 'refix', 'uk_tpl'], true);
         $skip = $this->batch ? ' AND l.batch_id <> ' . (int) $this->batch : '';
         $ids = $db->col("SELECT DISTINCT l.entity_id FROM seo_fix_log l JOIN seo_fix_batches b ON b.id = l.batch_id
             WHERE b.reverted_at IS NULL AND l.entity = ? AND l.rule IN ('fix', 'uk_fill', 'dedupe', 'refix', 'uk_tpl')$skip", [$entity]);

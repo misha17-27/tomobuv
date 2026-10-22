@@ -140,6 +140,14 @@ $rulesLine = static function (array $rules) use ($fmt): string {
 
 <div class="card" id="batches">
   <div class="card-hd"><h2>Пакеты</h2><span class="muted">командная строка: <code>php bin/seo-autofix.php --list</code></span></div>
+  <?php $cronOn = \App\Core\Settings::get('seo.autofix_cron', '1') === '1'; ?>
+  <form method="post" action="/admin/seo/autofix/cron/" class="seo-fix-act">
+    <?= BaseController::tokenField() ?>
+    <input type="hidden" name="on" value="<?= $cronOn ? '0' : '1' ?>">
+    <span><b>Ежедневно автоматически: <?= $cronOn ? 'включено' : 'выключено' ?></b> — каждое утро с 7:00, после ночных загрузок поставщиков
+      (title новых товаров, одинаковые заголовки, тексты вне нормы). Откаченный пакет автоматически не повторяется.</span>
+    <button class="btn" type="submit"><?= $cronOn ? 'Выключить' : 'Включить' ?></button>
+  </form>
   <div class="table-scroll">
     <table class="grid">
       <thead><tr><th>№</th><th>Когда</th><th>Откуда</th><th class="right">Изменений</th><th>Итог</th><th class="right"></th></tr></thead>
