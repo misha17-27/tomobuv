@@ -89,16 +89,36 @@ final class Catalog
     {
         $own = media((string) ($c['image'] ?? ''));
         if ($own !== '') return $own;
-        return Cache::remember('catalog.cover.' . (int) $c['id'], 3600, static function () use ($c): string {
-            $rows = App::db()->all('SELECT p.id, p.image_id, p.image_ext FROM catalog_index ci JOIN products p ON p.id = ci.product_id
-                WHERE ci.category_id = ? AND p.status = 1 AND p.image_id IS NOT NULL ORDER BY ci.in_stock DESC, ci.created_at DESC LIMIT 40', [(int) $c['id']]);
+        return self::productPhotos($c, 1)[0] ?? '/assets/img/no-photo.svg';
+    }
+
+    /**
+     * До $n фото свежих товаров категории (в наличии — первыми; только с оригиналом на диске; кэш 1 ч), без категории — всего
+     * каталога. Замена картинкам категорий, слайдов и баннеров, которые не перенеслись со старого сайта.
+     */
+    public static function productPhotos(?array $c, int $n): array
+    {
+        return Cache::remember('catalog.photos.' . ($c ? (int) $c['id'] : 0) . '.' . $n, 3600, static function () use ($c, $n): array {
+            $rows = $c
+                ? App::db()->all('SELECT p.id, p.image_id, p.image_ext FROM catalog_index ci JOIN products p ON p.id = ci.product_id
+                    WHERE ci.category_id = ? AND p.status = 1 AND p.image_id IS NOT NULL ORDER BY ci.in_stock DESC, ci.created_at DESC LIMIT 60', [(int) $c['id']])
+                : App::db()->all('SELECT id, image_id, image_ext FROM products WHERE status = 1 AND image_id IS NOT NULL ORDER BY id DESC LIMIT 60');
+            $out = [];
             foreach ($rows as $r) {
-                if (is_file(\App\Core\Image::originalPath((int) $r['id'], (int) $r['image_id'], (string) ($r['image_ext'] ?: 'jpg')))) {
-                    return \App\Core\Image::url((int) $r['id'], (int) $r['image_id'], (string) ($r['image_ext'] ?: 'jpg'), '400');
-                }
+                $ext = (string) ($r['image_ext'] ?: 'jpg');
+                if (!is_file(\App\Core\Image::originalPath((int) $r['id'], (int) $r['image_id'], $ext))) continue;
+                $out[] = \App\Core\Image::url((int) $r['id'], (int) $r['image_id'], $ext, '400');
+                if (count($out) >= $n) break;
             }
-            return '/assets/img/no-photo.svg';
+            return $out;
         });
+    }
+
+    /** Фото товаров для ссылки слайда или баннера: /category/{url}/ — из этой категории, иначе (или в ней нет фото) — свежие по каталогу */
+    public static function linkPhotos(string $link, int $n): array
+    {
+        $c = preg_match('#^(?:/ua)?/category/([^?\#]+?)/?(?:[?\#].*)?$#', $link, $m) ? self::categoryByUrl($m[1]) : null;
+        return ($c ? self::productPhotos($c, $n) : []) ?: self::productPhotos(null, $n);
     }
 
     public static function categoryUrl(array $c): string

@@ -21,7 +21,8 @@ $since = (int) Settings::get('since_year', 2011);
           <a class="btn btn-o" href="<?= e($s['link']) ?>"<?= $i ? ' tabindex="-1"' : '' ?>><?= e($s['button'] ?: t('Смотреть')) ?> <?= icon('arrow', 'width:18px') ?></a>
         </div>
         <?php /* на телефоне картинка слайда скрыта (.slide .pic{display:none}): пустышка вместо неё — 140 КБ не отнимают канал у первого экрана */ ?>
-        <?php if (($pic = media($s['image'])) !== ''): ?><div class="pic"><picture><source media="(max-width:680px)" srcset="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><img src="<?= e($pic) ?>" alt="" <?= $i ? 'loading="lazy"' : 'fetchpriority="high"' ?> width="762" height="350"></picture></div><?php endif; ?>
+        <?php if (($pic = media($s['image'])) !== ''): ?><div class="pic"><picture><source media="(max-width:680px)" srcset="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><img src="<?= e($pic) ?>" alt="" <?= $i ? 'loading="lazy"' : 'fetchpriority="high"' ?> width="762" height="350"></picture></div>
+        <?php elseif ($pics = Catalog::linkPhotos((string) $s['link'], 2)): /* картинка слайда не перенесена — фото товаров из его раздела */ ?><div class="pic pics"><?php foreach ($pics as $k => $p): ?><picture><source media="(max-width:680px)" srcset="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><img src="<?= e($p) ?>" alt="" <?= $i ? 'loading="lazy"' : ($k ? '' : 'fetchpriority="high"') ?> width="400" height="400"></picture><?php endforeach; ?></div><?php endif; ?>
       </div>
     <?php endforeach; ?>
     <div class="dots"><?php foreach ($slides as $i => $s): ?><button class="<?= $i ? '' : 'on' ?>" data-i="<?= $i ?>" aria-label="Слайд <?= $i + 1 ?>"></button><?php endforeach; ?></div>
@@ -34,7 +35,7 @@ $since = (int) Settings::get('since_year', 2011);
     </div>
     <div class="card c2">
       <h3><?= e(t('Опт обуви в Одессе с {year} года', ['year' => $since])) ?></h3>
-      <div class="stats"><div><b><?= date('Y') - $since ?>+</b><small><?= e(t('лет на рынке')) ?></small></div><div><b><?= count(array_filter(Catalog::brands(), static fn($b) => $b['product_count'] > 0)) ?></b><small><?= e(t('брендов')) ?></small></div><div><b><?= e(t('ящиками')) ?></b><small><?= e(t('от 6 пар')) ?></small></div></div>
+      <div class="stats"><div><b><?= date('Y') - $since ?>+</b><small><?= e(t('лет на рынке')) ?></small></div><div><b><?= $nb = count(array_filter(Catalog::brands(), static fn($b) => $b['product_count'] > 0)) ?></b><small><?= e(plural($nb, t('бренд'), t('бренда'), t('брендов'))) ?></small></div><div><b><?= e(t('ящиками')) ?></b><small><?= e(t('от 6 пар')) ?></small></div></div>
     </div>
   </div>
 </div></section>
@@ -79,7 +80,7 @@ $since = (int) Settings::get('since_year', 2011);
 
 <?php if ($wide): ?>
 <section class="sec"><div class="wrap banners">
-  <?php foreach ($wide as $b): ?><a class="bnr" href="<?= e($b['link']) ?>"><?php if (($bi = media($b['image'])) !== ''): ?><img src="<?= e($bi) ?>" alt="" loading="lazy"><?php endif; ?><div><h3><?= e($b['title']) ?></h3><span class="btn btn-w"><?= e($b['button'] ?: t('Перейти')) ?> <?= icon('arrow', 'width:18px') ?></span></div></a><?php endforeach; ?>
+  <?php foreach ($wide as $b): $bi = media($b['image']); $bp = $bi === '' ? (Catalog::linkPhotos((string) $b['link'], 1)[0] ?? '') : ''; ?><a class="bnr<?= $bi === '' ? ' nopic' : '' ?>" href="<?= e($b['link']) ?>"><?php if ($bi !== ''): ?><img src="<?= e($bi) ?>" alt="" loading="lazy"><?php elseif ($bp !== ''): /* картинка баннера не перенесена — фото товара из его раздела */ ?><img class="ph" src="<?= e($bp) ?>" alt="" loading="lazy" width="400" height="400"><?php endif; ?><div><h3><?= e($b['title']) ?></h3><span class="btn btn-w"><?= e($b['button'] ?: t('Перейти')) ?> <?= icon('arrow', 'width:18px') ?></span></div></a><?php endforeach; ?>
 </div></section>
 <?php endif; ?>
 

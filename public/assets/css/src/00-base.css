@@ -102,6 +102,9 @@ header.main .wrap{display:flex;align-items:center;gap:20px;height:78px}
 .slide .pic{height:100%;display:flex;align-items:center;justify-content:center;padding:20px}
 .slide .pic picture{display:contents}
 .slide .pic img{border-radius:16px;max-height:300px;object-fit:cover;box-shadow:0 20px 40px rgba(0,0,0,.25)}
+/* картинка слайда не перенесена — два фото товаров из раздела слайда, карточками внахлёст */
+.slide .pics img{width:54%;max-width:230px;height:auto;aspect-ratio:1;object-fit:contain;background:#fff;padding:12px;transform:rotate(-5deg) translateY(-12px)}
+.slide .pics picture+picture img{margin-left:-10%;transform:rotate(5deg) translateY(24px)}
 .btn{display:inline-flex;align-items:center;gap:8px;height:48px;padding:0 24px;border-radius:12px;font-weight:700}
 .btn-o{background:var(--orange);color:#fff}.btn-o:hover{background:var(--orange-d)}
 .btn-w{background:#fff;color:var(--blue-d)}
@@ -192,6 +195,12 @@ section.sec{padding:40px 0 10px}
 .bnr img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(.55)}
 .bnr div{position:relative}
 .bnr h3{font-size:24px;font-weight:800;margin-bottom:10px}
+/* картинка баннера не перенесена — фон в цветах сайта и фото товара из раздела баннера */
+.bnr.nopic{background:linear-gradient(120deg,#0b7fc1,#0a5d8f)}
+.bnr.nopic+.bnr.nopic{background:linear-gradient(120deg,var(--orange),var(--orange-d))}
+.bnr.nopic div{padding-right:170px}
+.bnr .ph{inset:50% 28px auto auto;width:150px;height:150px;object-fit:contain;background:#fff;padding:10px;border-radius:14px;filter:none;transform:translateY(-50%) rotate(4deg);box-shadow:0 14px 30px rgba(0,0,0,.25)}
+@media (max-width:680px){.bnr .ph{width:104px;height:104px;right:16px}.bnr.nopic div{padding-right:112px}}
 
 /* brands */
 .brands{display:grid;grid-template-columns:repeat(8,1fr);gap:12px}
