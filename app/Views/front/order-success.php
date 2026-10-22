@@ -3,6 +3,7 @@
  * «Заказ оформлен» — /order/success/?id=…&k=… (только по подписанной ссылке: после оформления и из письма).
  * Заказ старше часа ($fresh = false) — нейтральный заголовок «Заказ #…» и текущий статус вместо «Спасибо».
  * @var array $order Orders::find() @var bool $fresh @var ?array $user @var array $phones @var int $free @var View $view
+ * @var ?array $messenger Orders::messenger() — номер для кнопок «Отправить заказ в WhatsApp / Viber» (null — блока нет)
  */
 use App\Services\Orders;
 
@@ -56,6 +57,20 @@ $own = $user && (int) $user['id'] === (int) $o['customer_id'];
             <?= $own ? t('Все ваши заказы — в {link}.', ['link' => '<a class="link" href="/my/orders/">' . e(t('личном кабинете')) . '</a>']) : e(t('Чтобы узнать подробности, позвоните нам и назовите номер заказа.')) ?></p>
         </div>
       </div>
+      <?php endif; ?>
+
+      <?php if (!empty($messenger)): $msgText = Orders::messengerText($o); ?>
+      <section class="panel co-msg" data-msg aria-labelledby="os-msg">
+        <h2 id="os-msg" class="co-msg-t"><?= e($fresh ? t('Отправьте заказ нам в WhatsApp или Viber') : t('Напишите нам по заказу в WhatsApp или Viber')) ?></h2>
+        <p class="co-msg-p"><?= t('Так мы быстрее его подтвердим. Номер: {phone}.', ['phone' => '<b>' . e($messenger['label']) . '</b>']) ?></p>
+        <div class="co-msg-btns">
+          <a class="btn co-wa" href="https://wa.me/<?= e($messenger['digits']) ?>?text=<?= rawurlencode($msgText) ?>" target="_blank" rel="noopener"><?= icon('wa') ?> WhatsApp</a>
+          <a class="btn co-vb" href="viber://chat?number=%2B<?= e($messenger['digits']) ?>" data-msg-copy="<?= e(t('Текст заказа скопирован — вставьте его в чат Viber и отправьте.')) ?>"><?= icon('viber') ?> Viber</a>
+          <button type="button" class="btn btn-g co-msg-copy" data-msg-copy="<?= e(t('Текст заказа скопирован — вставьте его в чат и отправьте.')) ?>"><?= e(t('Скопировать текст заказа')) ?></button>
+        </div>
+        <p class="hint co-msg-h" data-msg-hint role="status"><?= e(t('В WhatsApp текст заказа уже вставлен — останется нажать «Отправить». В Viber текст копируется: вставьте его в чат.')) ?></p>
+        <textarea hidden data-msg-text><?= e($msgText) ?></textarea>
+      </section>
       <?php endif; ?>
 
       <section class="panel co-sec" aria-labelledby="os-h1">

@@ -43,5 +43,6 @@
 <symbol id="i-tg" viewBox="0 0 24 24"><path d="m21 4-18 7 6 2 2 6 3-4 5 4z"/></symbol>
 <symbol id="i-ig" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/></symbol>
 <symbol id="i-fb" viewBox="0 0 24 24"><path d="M14 8h3V4h-3a4 4 0 0 0-4 4v3H7v4h3v6h4v-6h3l1-4h-4V8z"/></symbol>
+<symbol id="i-wa" viewBox="0 0 24 24"><path d="M3.5 20.5 4.8 16A8.5 8.5 0 1 1 8 19.2z"/><path d="M9 8.5c-.3 2.8 3.7 6.8 6.5 6.5l.8-1.6-2-1-.9.8c-1-.4-2.2-1.6-2.6-2.6l.8-.9-1-2z"/></symbol>
 <symbol id="i-viber" viewBox="0 0 24 24"><path d="M12 3c5 0 8.5 2.5 8.5 7.5S17 18 12 18l-4 3v-3.6C5 16.3 3.5 14 3.5 10.5 3.5 5.5 7 3 12 3z"/><path d="M9.5 8.5c.5 2.5 2.5 4.5 5 5"/></symbol>
 </svg>

@@ -64,6 +64,8 @@ final class CheckoutController
             'user'   => Auth::user(),
             'phones' => Settings::json('phones', []),
             'free'   => (int) Settings::get('free_shipping_boxes', 20),
+            'messenger' => Orders::messenger(),
+            'scripts' => ['js/order-success.js'],
             'bodyClass' => 'page-checkout',
         ]);
         return Response::html($html)->header('X-Robots-Tag', 'noindex')->header('Referrer-Policy', 'no-referrer');

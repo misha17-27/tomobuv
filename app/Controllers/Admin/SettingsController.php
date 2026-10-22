@@ -48,6 +48,7 @@ final class SettingsController extends BaseController
         'since_year'          => ['Работаем с года', 'number', 'Показывается на главной и в подвале'],
         'free_shipping_boxes' => ['Бесплатная доставка от, ящиков', 'number', '0 — бесплатной доставки нет'],
         'products_per_page'   => ['Товаров на странице каталога', 'number', 'От 8 до 96, лучше кратно 4'],
+        'order_messenger'     => ['WhatsApp / Viber для заказов', 'text', 'Номер, на который покупатель отправляет заказ после оформления (кнопки WhatsApp и Viber на странице «Заказ оформлен»). Пусто — кнопок нет'],
         'social_telegram'     => ['Telegram', 'url', 'https://t.me/…'],
         'social_viber'        => ['Viber', 'url', 'viber://chat?number=%2B380… или https://…'],
         'social_instagram'    => ['Instagram', 'url', 'https://instagram.com/…'],
@@ -208,6 +209,7 @@ final class SettingsController extends BaseController
             $vals[$k] = $v;
         }
         if ($vals['store_name'] === '') $err['store_name'] = 'Укажите название магазина';
+        if ($vals['order_messenger'] !== '' && !\App\Services\WhatsApp::recipients($vals['order_messenger'])) $err['order_messenger'] = 'Номер не распознан. Пример: +38 050 761 69 01';
         $year = (int) $vals['since_year'];
         if ($year < 1950 || $year > (int) date('Y')) $err['since_year'] = 'Год от 1950 до ' . date('Y');
         $boxes = $vals['free_shipping_boxes'];

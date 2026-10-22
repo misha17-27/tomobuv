@@ -151,6 +151,40 @@ final class Orders
         return $d !== '' ? '+' . $d : '';
     }
 
+    /**
+     * Номер для кнопок «Отправить заказ в WhatsApp / Viber» после оформления (настройка order_messenger, «Настройки → Магазин»):
+     * ['digits' => '380507616901', 'label' => '+38 (050) 761-69-01'] или null — номер не задан (кнопок нет)
+     */
+    public static function messenger(): ?array
+    {
+        $d = WhatsApp::recipients((string) Settings::get('order_messenger', ''))[0] ?? null;
+        return $d === null ? null : ['digits' => $d, 'label' => self::formatPhone($d)];
+    }
+
+    /**
+     * Текст заказа от покупателя магазину — для WhatsApp (в ссылке wa.me) и Viber (копируется в буфер): номер заказа, позиции
+     * (не больше 40, остальные — «и ещё N»), итог, получатель, доставка, оплата. Язык — витрины (t()).
+     */
+    public static function messengerText(array $o): string
+    {
+        $lines = [t('Здравствуйте! Мой заказ {n} на сайте {site}', ['n' => $o['number'], 'site' => (string) parse_url(url('/'), PHP_URL_HOST)]), ''];
+        $items = array_values($o['items']);
+        foreach (array_slice($items, 0, 40) as $i => $it) {
+            $size = trim((string) ($it['size'] ?? ''));                     // у перенесённых заказов в «размерах» бывает название
+            $pairs = (int) $it['box_qty'];
+            $lines[] = ($i + 1) . ') ' . $it['name'] . ($size !== '' && $size !== trim((string) $it['name']) ? ' (' . $size . ')' : '')
+                . ' — ' . (int) $it['boxes'] . ' ' . t('ящ.') . ' × ' . $pairs . ' ' . t(plural($pairs, 'пара', 'пары', 'пар')) . ' = ' . price_format($it['sum']);
+        }
+        if (count($items) > 40) $lines[] = t('… и ещё {n}', ['n' => count($items) - 40]);
+        $lines[] = '';
+        $lines[] = t('Итого: {boxes} ящ. / {pairs} пар — {sum}', ['boxes' => (int) $o['boxes'], 'pairs' => (int) $o['pairs'], 'sum' => price_format($o['total'])]);
+        $lines[] = t('Получатель') . ': ' . trim((string) $o['name']) . ((string) $o['phone'] !== '' ? ', ' . self::formatPhone($o['phone']) : '');
+        $ship = implode(', ', array_filter([(string) ($o['shipping_title'] ?? ''), (string) ($o['city'] ?? ''), (string) ($o['address'] ?? '')], static fn($v) => trim($v) !== ''));
+        if ($ship !== '') $lines[] = t('Доставка') . ': ' . $ship;
+        if (!empty($o['payment_title'])) $lines[] = t('Оплата') . ': ' . $o['payment_title'];
+        return implode("\n", $lines);
+    }
+
     /** Приём промокодов при оформлении (раздел «Промокоды» в админке) */
     public static function couponsEnabled(): bool
     {

@@ -114,6 +114,8 @@ $lines = count($items);
         <button type="submit" form="order" class="btn btn-o btn-block co-submit" data-submit><?= e(t('Оформить заказ')) ?></button>
         <button type="button" class="btn btn-g btn-block btn-sm co-quick" data-quick-cart><?= e(t('Купить в 1 клик')) ?></button>
         <p class="co-help"><?= e(t('Менеджер свяжется с вами для подтверждения заказа и расчёта доставки.')) ?><?php if ($phone !== ''): ?> <?= e(t('Вопросы по заказу:')) ?> <a href="tel:+<?= e(preg_replace('/\D/', '', $phone)) ?>"><?= e($phone) ?></a><?php endif; ?></p>
+        <?php if ($msgr = \App\Services\Orders::messenger()): ?><p class="co-help"><?= t('После оформления заказ можно сразу отправить нам в WhatsApp или Viber: {phone}.', [
+            'phone' => '<a href="https://wa.me/' . e($msgr['digits']) . '" target="_blank" rel="noopener">' . e($msgr['label']) . '</a>']) ?></p><?php endif; ?>
       </div>
     </aside>
   </div>

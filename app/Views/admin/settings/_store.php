@@ -67,6 +67,7 @@ if (!$phones) $phones = [''];
 <div class="card">
   <h2>Соцсети и мессенджеры</h2>
   <p class="hint" style="margin:-6px 0 12px">Иконки в подвале сайта показываются только для заполненных ссылок.</p>
+  <?= $f('order_messenger') ?>
   <div class="row2"><?= $f('social_telegram') ?><?= $f('social_viber') ?></div>
   <div class="row2"><?= $f('social_instagram') ?><?= $f('social_facebook') ?></div>
 </div>

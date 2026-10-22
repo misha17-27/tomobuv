@@ -104,6 +104,18 @@ a.co-nm:hover{color:var(--blue)}
 .co-done-t{font-size:17px;font-weight:800;margin-bottom:4px}
 .co-done p+p{color:var(--muted)}
 .co-done p b{color:var(--ink)}
+/* отправить заказ в WhatsApp / Viber (order-success, js/order-success.js) */
+.co-msg{margin-bottom:16px}
+.co-msg-t{font-size:17px;font-weight:800;margin-bottom:4px}
+.co-msg-p{color:var(--muted);margin-bottom:12px}
+.co-msg-p b{color:var(--ink)}
+.co-msg-btns{display:flex;flex-wrap:wrap;gap:10px}
+.co-msg-btns .btn{gap:8px}
+.co-wa,.co-wa:hover{background:#177f3f;border-color:#177f3f;color:#fff}
+.co-vb,.co-vb:hover{background:#6050d8;border-color:#6050d8;color:#fff}
+.co-wa:hover,.co-vb:hover{filter:brightness(.92)}
+.co-msg-h{margin-top:10px}
+.co-msg-h.ok{color:var(--green);font-weight:700}
 .co-dl{display:grid;gap:0}
 .co-dl div{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
 .co-dl div:last-child{border-bottom:0}
@@ -143,6 +155,7 @@ a.co-nm:hover{color:var(--blue)}
   .co-lines{margin-left:0;flex-basis:100%}
   .co-actions .btn{flex:1 1 auto;justify-content:center}
   .co-done{flex-direction:column;gap:10px}
+  .co-msg-btns .btn{flex:1 1 100%;justify-content:center}
 }
 .co-page [hidden]{display:none!important}
 #order,#cart{scroll-margin-top:100px}
