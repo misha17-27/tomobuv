@@ -200,7 +200,9 @@ section.sec{padding:40px 0 10px}
 .bnr.nopic+.bnr.nopic{background:linear-gradient(120deg,var(--orange),var(--orange-d))}
 .bnr.nopic div{padding-right:170px}
 .bnr .ph{inset:50% 28px auto auto;width:150px;height:150px;object-fit:contain;background:#fff;padding:10px;border-radius:14px;filter:none;transform:translateY(-50%) rotate(4deg);box-shadow:0 14px 30px rgba(0,0,0,.25)}
+@media (max-width:980px){.banners{grid-template-columns:1fr}}   /* в две колонки текст баннера заходил под фото */
 @media (max-width:680px){.bnr .ph{width:104px;height:104px;right:16px}.bnr.nopic div{padding-right:112px}}
+@media (max-width:400px){.bnr .ph{width:84px;height:84px;right:12px}.bnr.nopic div{padding-right:92px}.bnr h3{font-size:20px}}
 
 /* brands */
 .brands{display:grid;grid-template-columns:repeat(8,1fr);gap:12px}

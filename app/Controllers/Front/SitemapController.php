@@ -66,9 +66,10 @@ final class SitemapController
     {
         if (Lang::isUk()) return Response::notFound();
         $shop = $this->shopFiles();
-        $names = ['blog', 'site'];
+        $site = $this->siteRows() !== [];                    // все /pages/x/ — дубли основных страниц: файла в карте нет
+        $names = $site ? ['blog', 'site'] : ['blog'];
         for ($i = 1; $i <= $shop; $i++) $names[] = 'shop-' . $i;
-        array_push($names, 'ua-blog', 'ua-site');
+        array_push($names, ...($site ? ['ua-blog', 'ua-site'] : ['ua-blog']));
         for ($i = 1; $i <= $shop; $i++) $names[] = 'ua-shop-' . $i;
         for ($i = 1, $n = $this->imageFiles(); $i <= $n; $i++) $names[] = 'shop-product_images-' . $i;
         return $this->sitemapIndex($names, date('c'));
@@ -111,15 +112,22 @@ final class SitemapController
     private function site(): Response
     {
         $x = $this->open();
+        foreach ($this->siteRows() as $r) $x .= self::entry('/' . $r['url'], $r['updated_at'], 'monthly', '0.6');
+        return $this->close($x);
+    }
+
+    /** Страницы /pages/… для карты: без дублей с canonical на другой адрес (свой или основная /x/ у /pages/x/ — PageController::seo) */
+    private function siteRows(): array
+    {
         $active = App::db()->pairs('SELECT url, id FROM pages WHERE status = 1');
+        $out = [];
         foreach (App::db()->all("SELECT url, updated_at, canonical FROM pages WHERE status = 1 AND url LIKE 'pages/%' ORDER BY sort, id") as $r) {
-            // дубль с canonical на другой адрес (свой или основная страница /x/ у /pages/x/ — PageController::seo) — не в карту
             $canon = trim((string) $r['canonical']);
             if ($canon === '') $canon = (string) PageController::mainPath((string) $r['url'], $active);
             if ($canon !== '' && rtrim((string) parse_url($canon, PHP_URL_PATH), '/') !== rtrim('/' . $r['url'], '/')) continue;
-            $x .= self::entry('/' . $r['url'], $r['updated_at'], 'monthly', '0.6');
+            $out[] = $r;
         }
-        return $this->close($x);
+        return $out;
     }
 
     /** Файл N: адреса с позиции (N-1)*10000 из последовательности [начало][товары][хвост] */

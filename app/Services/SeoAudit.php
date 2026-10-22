@@ -315,7 +315,9 @@ final class SeoAudit
             $closed = !(int) $p['status'] ? 'скрыта'
                 : ($canon !== '' && rtrim($canonPath, '/') !== rtrim($path, '/') ? 'canonical → ' . $canon : $closedBy($path));
             $rows[] = self::row('pages', (string) $p['name'], $path, $p['title'], $autoTitle, $p['meta_description'], $autoDesc,
-                '/admin/pages/' . (int) $p['id'] . '/#h-seo', ['closed' => $closed, 'hidden' => !(int) $p['status'], 'sitemap' => (bool) (int) $p['status'],
+                '/admin/pages/' . (int) $p['id'] . '/#h-seo', ['closed' => $closed, 'hidden' => !(int) $p['status'],
+                    // как SitemapController::siteRows: дубль /pages/x/ с canonical на другой адрес в карту не попадает
+                    'sitemap' => (int) $p['status'] && !(str_starts_with((string) $p['url'], 'pages/') && $canon !== '' && rtrim($canonPath, '/') !== rtrim($path, '/')),
                 'sub' => str_starts_with((string) $p['url'], 'pages/') ? 'дубль из приложения «Сайт»' : '',
                 'uk' => [self::filled($p['title_uk']), self::filled($p['meta_description_uk'])],
                 'tpl' => $pageTpl ? ['seo.page_meta_title', 'seo.page_meta_description'] : ['', '']]);
@@ -805,7 +807,7 @@ final class SeoAudit
         }
         $c['total'] = array_sum($c);
         $shop = max(1, (int) ceil(($c['total'] - $c['blog'] - $site) / 10000));
-        $c['files'] = 2 * (2 + $shop) + (int) ceil($st['total'] / 10000);
+        $c['files'] = 2 * (1 + ($site ? 1 : 0) + $shop) + (int) ceil($st['total'] / 10000);   // site — только если есть что класть
         $c['all'] = 2 * $c['total'];                        // вместе с украинской версией
         return $c;
     }

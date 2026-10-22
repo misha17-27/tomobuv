@@ -42,7 +42,8 @@ before_merge_htaccess() {
   local f=public/.htaccess
   is_skip "$f" || return 1
   git diff --quiet HEAD "$1" -- "$f" && return 1   # в обновлении файл не менялся — merge его не тронет
-  [ -s "$HANDLER_SAVE" ] || sed -n "/$HANDLER_BEGIN/,/$HANDLER_END/p" "$f" > "$HANDLER_SAVE"
+  # блок — из живого файла (версию PHP могли сменить в MultiPHP после прошлого сохранения), нет его там — прежний сохранённый
+  grep -q "$HANDLER_BEGIN" "$f" && sed -n "/$HANDLER_BEGIN/,/$HANDLER_END/p" "$f" > "$HANDLER_SAVE"
   git update-index --no-skip-worktree -- "$f"
   git checkout -- "$f"
   return 0

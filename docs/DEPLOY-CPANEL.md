@@ -23,6 +23,9 @@
 ## Обновления
 
 - Вручную: **Pull or Deploy → Update from Remote**, затем **Deploy HEAD Commit** (миграции и сброс кэша).
+  Если cPanel дописал блок версии PHP в `public/.htaccess` (файл помечен skip-worktree), а обновление меняет этот файл,
+  Update from Remote откажет — тогда один раз через Cron Jobs: `/bin/bash /home/tomobuvcom/repositories/tomobuv-site/bin/auto-update.sh`
+  (он возвращает файл из git, сливает и дописывает блок обратно).
 - Автоматически: **Cron Jobs** раз в 15 минут:
   `/bin/bash /home/tomobuvcom/repositories/tomobuv-site/bin/auto-update.sh`
   (есть новые коммиты — забирает и деплоит; если файлы репозитория меняли на сервере — пропускает с записью в журнал).

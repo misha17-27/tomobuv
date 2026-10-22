@@ -52,7 +52,7 @@ $since = (int) Settings::get('since_year', 2011);
   <div class="sh"><h2><?= e(t('Популярные категории')) ?></h2></div>
   <div class="cats">
     <?php foreach ($cats as $c): $kids = Catalog::children((int) $c['id']); ?>
-      <div class="cat"><a class="ph" href="<?= e(Catalog::categoryUrl($c)) ?>"><img src="<?= e(Catalog::coverImage($c)) ?>" alt=""<?= e($c['name']) ?>" loading="lazy" width="300" height="225"></a>
+      <div class="cat"><a class="ph" href="<?= e(Catalog::categoryUrl($c)) ?>"><img src="<?= e(Catalog::coverImage($c)) ?>" alt="<?= e(nice_case($c['name'])) ?>" loading="lazy" width="300" height="225"></a>
         <div class="b"><h3><a href="<?= e(Catalog::categoryUrl($c)) ?>"><?= e(nice_case($c['name'])) ?></a></h3>
           <div class="chips"><?php foreach (array_slice($kids, 0, 5) as $s): ?><a class="chip" href="<?= e(Catalog::categoryUrl($s)) ?>"><?= e(nice_case($s['name'])) ?></a><?php endforeach; ?><?php if (count($kids) > 5): ?><a class="chip" href="<?= e(Catalog::categoryUrl($c)) ?>"><?= e(t('ещё')) ?> <?= count($kids) - 5 ?></a><?php endif; ?></div>
         </div></div>
