@@ -474,3 +474,8 @@ header.main .search .suggest a small{color:var(--muted)}
   .topbar .cur button,.topbar .langs a{padding:3px 6px}
 }
 @media (max-width:360px){.topbar .cb svg{display:none}}
+
+/* кнопки мессенджеров: «Заказать / отправить заказ в WhatsApp, Viber» (товар, «Заказ оформлен») */
+.btn-wa,.btn-wa:hover{background:#177f3f;border-color:#177f3f;color:#fff}
+.btn-vb,.btn-vb:hover{background:#6050d8;border-color:#6050d8;color:#fff}
+.btn-wa:hover,.btn-vb:hover{filter:brightness(.92)}

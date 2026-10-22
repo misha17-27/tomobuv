@@ -90,6 +90,22 @@
     var ov = $('#ui-ov'); if (ov) ov.classList.remove('show');
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
+  /* Текст в буфер обмена: Clipboard API (https, localhost), иначе execCommand('copy') через временное поле. → Promise<bool> */
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallback(); });
+    }
+    return Promise.resolve(fallback());
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   /* UI.dialog({title, text, html, onSubmit(form) → false чтобы не закрывать}) */
   function dialog(o) {
@@ -317,7 +333,7 @@
   window.UI = { $: $, $$: $$, t: t, url: url, post: post, getJSON: getJSON, toast: toast, dialog: dialog, open: open, close: close, money: money,
     refreshPrices: refreshPrices, renderCounters: renderCounters, addToCart: addToCart, setCartQty: setCartQty, loadCart: loadCart,
     toggleList: toggleList, listCookie: listCookie, getCookie: getCookie, setCookie: setCookie, csrf: csrf, esc: esc, validPhone: validPhone,
-    qtyMax: qtyMax, syncQty: syncQty, maxText: maxText };
+    qtyMax: qtyMax, syncQty: syncQty, maxText: maxText, copyText: copyText };
 
   function init() {
     csrf(); bind(); bindSearch(); bindRequests(); bindSlider(); bindTabs(); bindMega();

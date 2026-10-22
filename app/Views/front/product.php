@@ -67,6 +67,20 @@ $hasKolVo = false;
 foreach ($features as $f) if ($f['code'] === 'kol_vo_par') $hasKolVo = true;
 $phones = array_values(array_filter(array_map('strval', $phones)));
 $ico = static fn(string $n, int $s = 18): string => icon($n, "width:{$s}px;height:{$s}px");
+// «Заказать через мессенджер» (Orders::messenger — «Настройки → Магазин»): текст заказа — шаблон, {qty} и {url} подставляет
+// product.js (выбранные ящики, адрес страницы); без JS ссылка WhatsApp — на 1 ящик
+$msgr = $inStock ? \App\Services\Orders::messenger() : null;
+$msgTpl = '';
+if ($msgr) {
+    $msgTpl = implode("\n", array_filter([
+        t('Здравствуйте! Хочу заказать на сайте {site}:', ['site' => (string) parse_url(url('/'), PHP_URL_HOST)]),
+        (string) $p['name'],
+        $p['sku'] !== '' ? t('Артикул') . ': ' . $p['sku'] : '',
+        $p['size'] !== '' ? t('Размеры') . ': ' . $p['size'] : '',
+        '{qty}',
+        '{url}',
+    ], static fn($v) => $v !== ''));
+}
 ?>
 <div class="wrap pp" data-viewed="<?= (int) $p['id'] ?>">
   <div class="pp-head">
@@ -132,6 +146,15 @@ $ico = static fn(string $n, int $s = 18): string => icon($n, "width:{$s}px;heigh
           <button class="btn btn-o pp-add" id="pp-add" data-act="cart"<?= $inStock ? '' : ' disabled' ?>><?= $ico('cart', 20) ?><?= e(t('В корзину')) ?></button>
           <button class="btn btn-g pp-one" type="button" data-pp-quick<?= $inStock ? '' : ' disabled' ?>><?= e(t('Купить в 1 клик')) ?></button>
         </div>
+        <?php if ($msgr): $msg1 = strtr($msgTpl, ['{qty}' => $boxes(1) . ' (' . $pairs($box) . ') — ' . price_format($p['box_price']), '{url}' => url(lurl('/product/' . $p['url'] . '/'))]); ?>
+        <div class="pp-msg" data-pp-msg data-tpl="<?= e($msgTpl) ?>" data-copied="<?= e(t('Текст заказа скопирован — вставьте его в чат Viber и отправьте.')) ?>">
+          <span class="pp-msg-l"><?= e(t('Заказать через мессенджер')) ?></span>
+          <div class="pp-msg-btns">
+            <a class="btn btn-wa" href="https://wa.me/<?= e($msgr['digits']) ?>?text=<?= rawurlencode($msg1) ?>" target="_blank" rel="noopener" data-pp-wa><?= $ico('wa', 18) ?>WhatsApp</a>
+            <a class="btn btn-vb" href="viber://chat?number=%2B<?= e($msgr['digits']) ?>" data-pp-vb><?= $ico('viber', 18) ?>Viber</a>
+          </div>
+        </div>
+        <?php endif; ?>
         <div class="pp-acts">
           <button type="button" class="pp-act fav" data-act="fav" aria-label="<?= e(t('Добавить в избранное')) ?>"><?= $ico('heart') ?><span><?= e(t('В избранное')) ?></span></button>
           <button type="button" class="pp-act" data-act="cmp" aria-label="<?= e(t('Добавить к сравнению')) ?>"><?= $ico('cmp') ?><span><?= e(t('Сравнить')) ?></span></button>

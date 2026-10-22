@@ -111,9 +111,6 @@ a.co-nm:hover{color:var(--blue)}
 .co-msg-p b{color:var(--ink)}
 .co-msg-btns{display:flex;flex-wrap:wrap;gap:10px}
 .co-msg-btns .btn{gap:8px}
-.co-wa,.co-wa:hover{background:#177f3f;border-color:#177f3f;color:#fff}
-.co-vb,.co-vb:hover{background:#6050d8;border-color:#6050d8;color:#fff}
-.co-wa:hover,.co-vb:hover{filter:brightness(.92)}
 .co-msg-h{margin-top:10px}
 .co-msg-h.ok{color:var(--green);font-weight:700}
 .co-dl{display:grid;gap:0}

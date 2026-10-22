@@ -74,6 +74,27 @@
       sync();
     }
 
+    // «Заказать через мессенджер»: текст — шаблон data-tpl, {qty} — выбранные ящики, пары и сумма (в гривнах — для магазина),
+    // {url} — эта страница. WhatsApp — текст в ссылке wa.me (обновляется с количеством); Viber — чат, текст копируется в буфер
+    var mg = $('[data-pp-msg]', buy);
+    if (mg) {
+      var wa = $('[data-pp-wa]', mg), vb = $('[data-pp-vb]', mg), tpl = mg.getAttribute('data-tpl') || '';
+      var uah = function (v) { return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' грн.'; };
+      var msgText = function () {
+        var n = boxes();
+        return tpl.split('{qty}').join(boxesTxt(n) + ' (' + pairsTxt(n * box) + ') — ' + uah(n * box * pair))
+          .split('{url}').join(location.origin + location.pathname);
+      };
+      var syncWa = function () { if (wa) wa.href = wa.href.split('?')[0] + '?text=' + encodeURIComponent(msgText()); };
+      buy.addEventListener('qtychange', syncWa);
+      qty.addEventListener('change', syncWa);
+      if (wa) wa.addEventListener('click', syncWa);
+      if (vb) vb.addEventListener('click', function () {
+        UI.copyText(msgText()).then(function (ok) { if (ok) UI.toast(mg.getAttribute('data-copied')); });
+      });
+      syncWa();
+    }
+
     // «Купить в 1 клик» → заказ через /quickorder/ (эндпоинт раздела оформления): имя + телефон
     var qb = $('[data-pp-quick]', buy);
     if (qb) qb.addEventListener('click', function () {

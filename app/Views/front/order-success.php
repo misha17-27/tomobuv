@@ -67,8 +67,8 @@ $own = $user && (int) $user['id'] === (int) $o['customer_id'];
         <p class="co-msg-p"><?= $fresh ? t('Так мы быстрее его подтвердим. Номер: {phone}.', ['phone' => '<b>' . e($messenger['label']) . '</b>'])
             : t('Номер: {phone}.', ['phone' => '<b>' . e($messenger['label']) . '</b>']) ?></p>
         <div class="co-msg-btns">
-          <a class="btn co-wa" href="https://wa.me/<?= e($messenger['digits']) ?>?text=<?= rawurlencode($msgText) ?>" target="_blank" rel="noopener"><?= icon('wa') ?> WhatsApp</a>
-          <a class="btn co-vb" href="viber://chat?number=%2B<?= e($messenger['digits']) ?>" data-msg-copy="<?= e(t('Текст заказа скопирован — вставьте его в чат Viber и отправьте.')) ?>"><?= icon('viber') ?> Viber</a>
+          <a class="btn btn-wa" href="https://wa.me/<?= e($messenger['digits']) ?>?text=<?= rawurlencode($msgText) ?>" target="_blank" rel="noopener"><?= icon('wa') ?> WhatsApp</a>
+          <a class="btn btn-vb" href="viber://chat?number=%2B<?= e($messenger['digits']) ?>" data-msg-copy="<?= e(t('Текст заказа скопирован — вставьте его в чат Viber и отправьте.')) ?>"><?= icon('viber') ?> Viber</a>
           <?php if ($fresh): ?><button type="button" class="btn btn-g co-msg-copy" data-msg-copy="<?= e(t('Текст заказа скопирован — вставьте его в чат и отправьте.')) ?>"><?= e(t('Скопировать текст заказа')) ?></button><?php endif; ?>
         </div>
         <?php if ($fresh): ?><p class="hint co-msg-h" data-msg-hint role="status"><?= e(t('В WhatsApp текст заказа уже вставлен — останется нажать «Отправить». В Viber текст копируется: вставьте его в чат.')) ?></p><?php endif; ?>

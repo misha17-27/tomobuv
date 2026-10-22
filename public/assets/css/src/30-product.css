@@ -113,6 +113,10 @@
 .pp-btns{display:grid;gap:8px}
 .pp-add{height:54px;font-size:17px;justify-content:center;width:100%}
 .pp-one{justify-content:center;width:100%}
+.pp-msg{margin-top:12px}
+.pp-msg-l{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.pp-msg-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pp-msg-btns .btn{justify-content:center;gap:8px}
 .pp-acts{display:flex;gap:8px;margin-top:10px}
 .pp-act{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:40px;border:1px solid var(--line);border-radius:10px;font-size:14px;font-weight:600;color:var(--muted);background:#fff}
 .pp-act:hover{color:var(--blue);border-color:var(--blue)}
