@@ -100,6 +100,7 @@
               btn.disabled = false;
               if (!r || !r.ok) { UI.toast((r && r.error) || UI.t('Не удалось отправить заказ'), true); return false; }
               try { localStorage.setItem('qo_name', nm.value.trim()); } catch (e) { }
+              if (r.redirect) { location.href = r.redirect; return false; }   // «Заказ оформлен»: состав и кнопки WhatsApp / Viber
               UI.dialog({ title: UI.t('Спасибо, заказ принят!'),
                 text: UI.esc(r.message || UI.t('Номер заказа: {n}. Менеджер свяжется с вами в ближайшее время.', { n: r.number || r.order_id || '—' })),
                 html: '<button type="button" class="btn btn-b btn-block" data-close>' + UI.t('Хорошо') + '</button>' });

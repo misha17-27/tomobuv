@@ -157,13 +157,22 @@ final class Orders
      */
     public static function messenger(): ?array
     {
-        $d = WhatsApp::recipients((string) Settings::get('order_messenger', ''))[0] ?? null;
+        $d = self::messengerDigits((string) Settings::get('order_messenger', ''));
         return $d === null ? null : ['digits' => $d, 'label' => self::formatPhone($d)];
+    }
+
+    /** Украинский номер для мессенджеров: «+38 (050) 761-6901», «050 761 69 01» → '380507616901'; ссылка, «8 050…», не хватает цифры — null */
+    public static function messengerDigits(string $raw): ?string
+    {
+        if (str_contains($raw, '%') || str_contains($raw, '://')) return null;
+        $d = (string) preg_replace('/\D+/', '', $raw);
+        if (strlen($d) === 10 && $d[0] === '0') $d = '38' . $d;
+        return preg_match('/^380\d{9}$/', $d) ? $d : null;
     }
 
     /**
      * Текст заказа от покупателя магазину — для WhatsApp (в ссылке wa.me) и Viber (копируется в буфер): номер заказа, позиции
-     * (не больше 40, остальные — «и ещё N»), итог, получатель, доставка, оплата. Язык — витрины (t()).
+     * (не больше 40, остальные — «и ещё N»), скидка, итог, получатель, доставка, оплата. Язык — витрины (t()).
      */
     public static function messengerText(array $o): string
     {
@@ -177,9 +186,16 @@ final class Orders
         }
         if (count($items) > 40) $lines[] = t('… и ещё {n}', ['n' => count($items) - 40]);
         $lines[] = '';
-        $lines[] = t('Итого: {boxes} ящ. / {pairs} пар — {sum}', ['boxes' => (int) $o['boxes'], 'pairs' => (int) $o['pairs'], 'sum' => price_format($o['total'])]);
+        if ((float) $o['discount'] > 0) {
+            $lines[] = t('Скидка') . ((string) $o['coupon_code'] !== '' ? ' (' . $o['coupon_code'] . ')' : '') . ': −' . price_format($o['discount']);
+        }
+        $pairs = (int) $o['pairs'];
+        $lines[] = t('Итого: {boxes} ящ. / {pairs} — {sum}', ['boxes' => (int) $o['boxes'],
+            'pairs' => $pairs . ' ' . t(plural($pairs, 'пара', 'пары', 'пар')), 'sum' => price_format($o['total'])]);
         $lines[] = t('Получатель') . ': ' . trim((string) $o['name']) . ((string) $o['phone'] !== '' ? ', ' . self::formatPhone($o['phone']) : '');
-        $ship = implode(', ', array_filter([(string) ($o['shipping_title'] ?? ''), (string) ($o['city'] ?? ''), (string) ($o['address'] ?? '')], static fn($v) => trim($v) !== ''));
+        $addr = trim((string) preg_replace('/^Когда заберут: /u', '', (string) ($o['address'] ?? '')));   // самовывоз: служебный префикс
+        if ($addr !== '' && !empty($o['params']['pickup'])) $addr = t('Когда заберёте') . ': ' . $addr;
+        $ship = implode(', ', array_filter([(string) ($o['shipping_title'] ?? ''), (string) ($o['city'] ?? ''), $addr], static fn($v) => trim($v) !== ''));
         if ($ship !== '') $lines[] = t('Доставка') . ': ' . $ship;
         if (!empty($o['payment_title'])) $lines[] = t('Оплата') . ': ' . $o['payment_title'];
         return implode("\n", $lines);

@@ -209,7 +209,11 @@ final class SettingsController extends BaseController
             $vals[$k] = $v;
         }
         if ($vals['store_name'] === '') $err['store_name'] = 'Укажите название магазина';
-        if ($vals['order_messenger'] !== '' && !\App\Services\WhatsApp::recipients($vals['order_messenger'])) $err['order_messenger'] = 'Номер не распознан. Пример: +38 050 761 69 01';
+        if ($vals['order_messenger'] !== '') {                    // один украинский номер, сохраняется в одном виде: +38 (050) 761-69-01
+            $md = \App\Services\Orders::messengerDigits($vals['order_messenger']);
+            if ($md === null) $err['order_messenger'] = 'Нужен один украинский номер, например +38 050 761 69 01 (не ссылка viber://)';
+            else $vals['order_messenger'] = \App\Services\Orders::formatPhone($md);
+        }
         $year = (int) $vals['since_year'];
         if ($year < 1950 || $year > (int) date('Y')) $err['since_year'] = 'Год от 1950 до ' . date('Y');
         $boxes = $vals['free_shipping_boxes'];
