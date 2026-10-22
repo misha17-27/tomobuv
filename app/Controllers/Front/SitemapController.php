@@ -111,7 +111,12 @@ final class SitemapController
     private function site(): Response
     {
         $x = $this->open();
-        foreach (App::db()->all("SELECT url, updated_at FROM pages WHERE status = 1 AND url LIKE 'pages/%' ORDER BY sort, id") as $r) {
+        $active = App::db()->pairs('SELECT url, id FROM pages WHERE status = 1');
+        foreach (App::db()->all("SELECT url, updated_at, canonical FROM pages WHERE status = 1 AND url LIKE 'pages/%' ORDER BY sort, id") as $r) {
+            // дубль с canonical на другой адрес (свой или основная страница /x/ у /pages/x/ — PageController::seo) — не в карту
+            $canon = trim((string) $r['canonical']);
+            if ($canon === '') $canon = (string) PageController::mainPath((string) $r['url'], $active);
+            if ($canon !== '' && rtrim((string) parse_url($canon, PHP_URL_PATH), '/') !== rtrim('/' . $r['url'], '/')) continue;
             $x .= self::entry('/' . $r['url'], $r['updated_at'], 'monthly', '0.6');
         }
         return $this->close($x);

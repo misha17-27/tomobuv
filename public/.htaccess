@@ -6,16 +6,16 @@ DirectoryIndex index.php
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Принудительно HTTPS и основной домен (раскомментируйте на боевом сервере после подключения SSL, docs/INSTALL.md):
+    # Принудительно HTTPS и основной домен (локально php -S этот файл не читает):
     # http://… и www., а также любой чужой Host (сайт по умолчанию на IP сервера) → https://tomobuv.com.ua/…
     # /.well-known/ (проверка домена для SSL-сертификата) — без редиректа. X-Forwarded-Proto — HTTPS на Cloudflare/прокси:
     # без этой строки при «Flexible SSL» редирект зациклится.
-    # RewriteRule ^\.well-known/ - [L]
-    # RewriteCond %{HTTPS} off
-    # RewriteCond %{HTTP:X-Forwarded-Proto} !https
-    # RewriteRule ^ https://tomobuv.com.ua%{REQUEST_URI} [L,R=301]
-    # RewriteCond %{HTTP_HOST} !^tomobuv\.com\.ua(:443)?$ [NC]
-    # RewriteRule ^ https://tomobuv.com.ua%{REQUEST_URI} [L,R=301]
+    RewriteRule ^\.well-known/ - [L]
+    RewriteCond %{HTTPS} off
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    RewriteRule ^ https://tomobuv.com.ua%{REQUEST_URI} [L,R=301]
+    RewriteCond %{HTTP_HOST} !^tomobuv\.com\.ua(:443)?$ [NC]
+    RewriteRule ^ https://tomobuv.com.ua%{REQUEST_URI} [L,R=301]
 
     # Служебные файлы не отдаём
     RewriteRule (^|/)\.(?!well-known) - [F]

@@ -440,18 +440,18 @@ final class Listing
         $rows = [];
         if ($long) {
             $against = implode(' ', array_map(static fn($t) => '+' . $t . '*', $long));
-            $sql = "SELECT p.id, $col AS k FROM products p WHERE p.status = 1 AND MATCH(p.name, p.sku) AGAINST(? IN BOOLEAN MODE)";
+            // оба языка на обеих витринах (индекс ft_search — name, name_uk, sku: search-uk.sql): «чоботи» находится и на /ru/
+            $sql = "SELECT p.id, $col AS k FROM products p WHERE p.status = 1 AND MATCH(p.name, p.name_uk, p.sku) AGAINST(? IN BOOLEAN MODE)";
             $params = [$against];
             foreach ($short as $t) {
-                $sql .= ' AND (p.name LIKE ? OR p.sku LIKE ?)';
-                $params[] = '%' . self::like($t) . '%';
-                $params[] = '%' . self::like($t) . '%';
+                $sql .= ' AND (p.name LIKE ? OR p.name_uk LIKE ? OR p.sku LIKE ?)';
+                array_push($params, '%' . self::like($t) . '%', '%' . self::like($t) . '%', '%' . self::like($t) . '%');
             }
             $rows = $db->pairs($sql, $params);
         }
         if (!$rows) {
             $like = '%' . self::like($low) . '%';
-            $rows = $db->pairs("SELECT p.id, $col AS k FROM products p WHERE p.status = 1 AND (p.name LIKE ? OR p.sku LIKE ?)", [$like, $like]);
+            $rows = $db->pairs("SELECT p.id, $col AS k FROM products p WHERE p.status = 1 AND (p.name LIKE ? OR p.name_uk LIKE ? OR p.sku LIKE ?)", [$like, $like, $like]);
         }
         // Бренды: точное совпадение названия или начало (от 3 символов)
         $brandIds = [];

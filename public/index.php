@@ -29,7 +29,7 @@ use App\Core\Router;
 $rawPath = Request::path();
 
 // Старые адреса без завершающего слэша → со слэшем (как в Webasyst), 301
-if (Request::method() === 'GET' && $rawPath !== '/' && !str_ends_with($rawPath, '/')
+if (in_array(Request::method(), ['GET', 'HEAD'], true) && $rawPath !== '/' && !str_ends_with($rawPath, '/')
     && !preg_match('#\.(xml|txt|html?|php|jpe?g|png|gif|webp|svg|ico|css|js|json|pdf|csv|woff2?)$#i', $rawPath)) {
     $qs = $_SERVER['QUERY_STRING'] ?? '';
     // адрес в том виде, в каком пришёл (как Webasyst): /brand/Mona+Lisa → /brand/Mona+Lisa/, а не /brand/Mona%2BLisa/;
