@@ -97,6 +97,7 @@ final class HitObuvi extends WebSupplier
         if ($attrErr) $err['attributes'] = implode('; ', $attrErr);
         if ($in['enabled'] === '1' && $in['roots'] === '') $err['roots'] = 'Отметьте хотя бы один раздел поставщика';
         if ($err) return $err;
+        if ($in['watermark'] === '1' && self::cfg('watermark') !== '1') HitObuviWatermark::rescan();   // снова включили — и загруженные без неё
         self::store($in);
         return [];
     }

@@ -199,48 +199,77 @@ final class HitObuviWatermark
     /**
      * Обработать фото товаров «Хит обуви», загруженные до включения замены: от последнего обработанного id до id, который был
      * последним при первом вызове (новые фото обрабатывает сам загрузчик), не дольше $maxTime с. Заменённое — новая строка
-     * product_images и новый файл (новый адрес миниатюр), старые строка и файлы удаляются; без надписи поставщика — как есть.
-     * Состояние — storage/hitobuvi-watermark.json. $dry — только посчитать (ничего не пишется).
+     * product_images и новый файл (новый адрес миниатюр); старая строка удаляется сразу, старые файлы — после сброса кэша
+     * страниц (до него страницы из кэша ссылаются на старые миниатюры). Один процесс за раз (flock; второй — сразу выход).
+     * Состояние — storage/hitobuvi-watermark.json (после каждой порции). $dry — только посчитать (ничего не пишется).
      * @return array ['checked', 'replaced', 'left', 'done']
      */
     public static function backlog(callable $say, float $maxTime = 600.0, bool $dry = false): array
     {
+        $out = ['checked' => 0, 'replaced' => 0, 'left' => 0, 'done' => false];
+        if (HitObuvi::cfg('watermark') !== '1') return $out;
+        $lock = @fopen(STORAGE . '/hitobuvi-watermark.lock', 'c');
+        if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return $out;          // идёт другой процесс (cron, --watermark)
         $db = App::db();
         $file = STORAGE . self::STATE;
-        $st = json_decode((string) @file_get_contents($file), true) ?: [];
-        $out = ['checked' => 0, 'replaced' => 0, 'left' => 0, 'done' => !empty($st['done'])];
-        if ($out['done'] || HitObuvi::cfg('watermark') !== '1') return $out;
-        $st['until'] ??= (int) $db->value('SELECT COALESCE(MAX(id), 0) FROM product_images');
-        $st['cursor'] ??= 0;
-        $quality = max(30, min(100, (int) HitObuvi::cfg('photo_quality')));
-        $t0 = microtime(true);
-        $sql = "SELECT pi.* FROM product_images pi JOIN supplier_links sl ON sl.product_id = pi.product_id AND sl.supplier = 'hitobuvi'
-            WHERE pi.id > ? AND pi.id <= ? ORDER BY pi.id LIMIT 200";
-        while (microtime(true) - $t0 < $maxTime) {
-            $rows = $db->all($sql, [(int) $st['cursor'], (int) $st['until']]);
-            if (!$rows) { $st['done'] = true; break; }
-            foreach ($rows as $r) {
-                if (microtime(true) - $t0 >= $maxTime) break 2;
-                $out['checked']++;
-                if (self::fixImage($r, $quality, $dry)) $out['replaced']++;
-                if (!$dry) $st['cursor'] = (int) $r['id'];
+        $old = [];                                                              // [pid, iid, ext] — файлы удалить после сброса кэша
+        try {
+            $st = json_decode((string) @file_get_contents($file), true) ?: [];
+            if (!empty($st['done'])) return ['done' => true] + $out;
+            $st['until'] ??= (int) $db->value('SELECT COALESCE(MAX(id), 0) FROM product_images');
+            $st['cursor'] ??= 0;
+            $st['replaced'] = (int) ($st['replaced'] ?? 0);
+            $quality = max(30, min(100, (int) HitObuvi::cfg('photo_quality')));
+            $t0 = microtime(true);
+            $sql = "SELECT pi.* FROM product_images pi JOIN supplier_links sl ON sl.product_id = pi.product_id AND sl.supplier = 'hitobuvi'
+                WHERE pi.id > ? AND pi.id <= ? ORDER BY pi.id LIMIT 200";
+            while (microtime(true) - $t0 < $maxTime) {
+                $rows = $db->all($sql, [(int) $st['cursor'], (int) $st['until']]);
+                if (!$rows) { $st['done'] = true; break; }
+                foreach ($rows as $r) {
+                    if (microtime(true) - $t0 >= $maxTime) break;
+                    $out['checked']++;
+                    if (self::fixImage($r, $quality, $dry, $old)) { $out['replaced']++; $st['replaced']++; }
+                    if (!$dry) $st['cursor'] = (int) $r['id'];
+                }
+                if ($dry) break;
+                @file_put_contents($file, json_encode($st));
             }
-            if ($dry) break;
+            if (!$dry) @file_put_contents($file, json_encode($st));
+            $out['done'] = !empty($st['done']);
+            $out['left'] = $out['done'] ? 0 : (int) $db->value("SELECT COUNT(*) FROM product_images pi JOIN supplier_links sl ON sl.product_id = pi.product_id
+                AND sl.supplier = 'hitobuvi' WHERE pi.id > ? AND pi.id <= ?", [(int) $st['cursor'], (int) $st['until']]);
+        } finally {
+            if ($old) {
+                Cache::flush();                                                 // страницы с прежними адресами фото
+                foreach ($old as [$pid, $iid, $ext]) AdminCatalog::deleteImageFiles($pid, $iid, $ext);
+            }
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
-        if (!$dry) {
-            $st['replaced'] = (int) ($st['replaced'] ?? 0) + $out['replaced'];
-            @file_put_contents($file, json_encode($st));
-            if ($out['replaced']) Cache::flush();                                   // страницы с прежними адресами фото
-        }
-        $out['done'] = !empty($st['done']);
-        $out['left'] = $out['done'] ? 0 : (int) $db->value("SELECT COUNT(*) FROM product_images pi JOIN supplier_links sl ON sl.product_id = pi.product_id
-            AND sl.supplier = 'hitobuvi' WHERE pi.id > ? AND pi.id <= ?", [(int) $st['cursor'], (int) $st['until']]);
         if ($out['checked']) $say('фото «Хит обуви»: проверено ' . $out['checked'] . ', надпись заменена на ' . $out['replaced'] . ($out['left'] ? ', осталось ' . $out['left'] : ', готово'));
         return $out;
     }
 
-    /** Одно фото: надпись найдена — новая строка и файл под новым id, главное фото товара — на него. @return bool заменено */
-    private static function fixImage(array $r, int $quality, bool $dry): bool
+    /**
+     * Замену снова включили: фото, загруженные, пока она была выключена (id больше прежней границы), — тоже в обработку
+     * (граница пересчитается при следующем вызове backlog; уже обработанные пропускаются: своя надпись с образцом не совпадает)
+     */
+    public static function rescan(): void
+    {
+        $file = STORAGE . self::STATE;
+        $st = json_decode((string) @file_get_contents($file), true);
+        if (!$st) return;
+        unset($st['until'], $st['done']);
+        @file_put_contents($file, json_encode($st));
+    }
+
+    /**
+     * Одно фото: надпись найдена — новая строка и файл под новым id, главное фото товара — на него. Старая строка удаляется
+     * первой (не удалилась — фото уже обработал другой процесс), её файлы — в $old (удалит backlog после сброса кэша).
+     * @return bool заменено
+     */
+    private static function fixImage(array $r, int $quality, bool $dry, array &$old): bool
     {
         $pid = (int) $r['product_id']; $iid = (int) $r['id']; $ext = (string) ($r['ext'] ?: 'jpg');
         $src = Image::originalPath($pid, $iid, $ext);
@@ -254,6 +283,7 @@ final class HitObuviWatermark
         if (!self::apply($im)) { imagedestroy($im); return false; }
         if ($dry) { imagedestroy($im); return true; }
         $db = App::db();
+        if ($db->query('DELETE FROM product_images WHERE id = ?', [$iid])->rowCount() !== 1) { imagedestroy($im); return false; }
         $row = $r; unset($row['id']);
         $row['ext'] = 'jpg';
         $new = $db->insert('product_images', $row);
@@ -261,10 +291,14 @@ final class HitObuviWatermark
         @mkdir(dirname($dst), 0775, true);
         $ok = imagejpeg($im, $dst . '.part', $quality) && @rename($dst . '.part', $dst);
         imagedestroy($im);
-        if (!$ok) { @unlink($dst . '.part'); $db->query('DELETE FROM product_images WHERE id = ?', [$new]); return false; }
+        if (!$ok) {                                                             // не записалось — вернуть как было
+            @unlink($dst . '.part');
+            $db->query('DELETE FROM product_images WHERE id = ?', [$new]);
+            $db->insert('product_images', $r);
+            return false;
+        }
         $db->query('UPDATE products SET image_id = ?, image_ext = ? WHERE id = ? AND image_id = ?', [$new, 'jpg', $pid, $iid]);
-        $db->query('DELETE FROM product_images WHERE id = ?', [$iid]);
-        AdminCatalog::deleteImageFiles($pid, $iid, $ext);
+        $old[] = [$pid, $iid, $ext];
         return true;
     }
 }
