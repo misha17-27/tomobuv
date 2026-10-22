@@ -75,7 +75,8 @@ if ($msgr) {
     $msgTpl = implode("\n", array_filter([
         t('Здравствуйте! Хочу заказать на сайте {site}:', ['site' => (string) parse_url(url('/'), PHP_URL_HOST)]),
         (string) $p['name'],
-        $p['sku'] !== '' ? t('Артикул') . ': ' . $p['sku'] : '',
+        // «Хит обуви» (как старый сайт) пишет в артикул размерный ряд — тогда он лишний: размеры строкой ниже
+        $p['sku'] !== '' && trim((string) $p['sku']) !== trim((string) $p['size']) ? t('Артикул') . ': ' . $p['sku'] : '',
         $p['size'] !== '' ? t('Размеры') . ': ' . $p['size'] : '',
         '{qty}',
         '{url}',
