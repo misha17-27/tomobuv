@@ -48,7 +48,7 @@ final class TommSync extends WebSync
     public const SKIP = [
         'cat_skip' => 'раздел бренда не загружается (настройка)', 'category' => 'раздел бренда не сопоставлен с категорией сайта',
         'price' => 'в наличии у бренда, но без цены', 'box' => 'не определить пар в ящике', 'size' => 'нет размерного ряда',
-        'nostock' => 'нет в наличии у бренда — новый товар не создаётся', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'noadd' => 'новые товары не добавляются (настройка)',
+        'nostock' => 'нет в наличии у бренда — новый товар не создаётся', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'excluded_recode' => 'новая модель под id удалённого вручную — не добавлена (проверьте)', 'noadd' => 'новые товары не добавляются (настройка)',
         'limit_new' => 'лимит новых товаров за запуск', 'nophoto' => 'нет фото у бренда', 'photo' => 'фото не скачалось',
         'existing' => 'есть на сайте (Forsage / вручную) — не взят под загрузчик', 'ambiguous' => 'похож на несколько товаров сайта',
         'recode' => 'у бренда сменился код товара — товар сайта не изменён (проверьте)', 'dup' => 'повтор товара в запуске',
@@ -391,7 +391,12 @@ final class TommSync extends WebSync
         }
         // нового товара на сайте нет
         if ($c['add_new'] !== '1') { $this->skip($it, 'noadd', ''); return; }
-        if ($this->excluded((string) $it['code'])) { $this->skip($it, 'excluded', ''); return; }
+        if (($exExt = $this->excludedExt((string) $it['code'])) !== null) {
+            // бренд переиспользует id: под id удалённого вручную — другая модель; не добавляется, но видно в журнале
+            if ($exExt !== '' && $exExt !== $it['acode']) { $this->skip($it, 'excluded_recode', 'у бренда id ' . $it['code'] . ' теперь ' . $it['name'] . ' (удалённый вручную был ' . $exExt
+                . ') — не добавлен; если это новая модель — «Вернуть» в «Обзоре»', 'warn'); return; }
+            $this->skip($it, 'excluded', ''); return;
+        }
         if (!$it['stock']) { $this->skip($it, 'nostock', ''); return; }
         if ($it['via'] === 'similar') { $this->skip($it, 'similar', mb_strtoupper(mb_substr($it['msg'], 0, 1)) . mb_substr($it['msg'], 1) . ' — новый не создан (был бы дубль), проверьте', 'warn'); return; }
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'раздел «' . $it['map']['key'] . '» не сопоставлен — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен'); return; }

@@ -34,7 +34,7 @@ abstract class SupplierSync
     protected bool $dry;
     protected array $stats;
     protected array $cfg = [];
-    /** Коды, товары которых владелец удалил на сайте (supplier_excluded): [код => true], загружаются при первом обращении */
+    /** Коды, товары которых владелец удалил на сайте (supplier_excluded): [код => ext_id ('' — нет)], загружаются при первом обращении */
     private ?array $excludedCodes = null;
     protected array $attr = [];
     protected array $ci = [];
@@ -497,12 +497,19 @@ abstract class SupplierSync
         if ($this->excludedCodes === null) {
             $sup = static::SUPPLIER;
             try {
-                $this->excludedCodes = array_fill_keys(array_map('strval', App::db()->col('SELECT code FROM supplier_excluded WHERE supplier = ?', [$sup::CODE])), true);
+                $this->excludedCodes = [];
+                foreach (App::db()->all('SELECT code, ext_id FROM supplier_excluded WHERE supplier = ?', [$sup::CODE]) as $r) $this->excludedCodes[(string) $r['code']] = (string) ($r['ext_id'] ?? '');
             } catch (\PDOException) {
                 $this->excludedCodes = [];                                          // таблицы ещё нет (до bin/install.php)
             }
         }
         return isset($this->excludedCodes[$code]);
+    }
+
+    /** Код модели у поставщика удалённого вручную товара с этим кодом ('' — не записан), null — не удалялся */
+    protected function excludedExt(string $code): ?string
+    {
+        return $this->excluded($code) ? $this->excludedCodes[$code] : null;
     }
 
     /** Правка готового холста перед сохранением (адаптер: «Хит обуви» — замена водяного знака поставщика) */

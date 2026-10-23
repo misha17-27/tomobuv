@@ -244,8 +244,12 @@ final class AdminCatalog
             foreach ($db->col("SELECT url FROM products WHERE id IN ($ph)", $vals) as $u) $urls[] = '/product/' . $u . '/';
             $db->transaction(static function ($db) use ($ph, $vals) {
                 // товар поставщика удалил владелец — загрузчик его больше не создаёт (supplier_excluded; вернуть — «Обзор» поставщика)
-                $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, product_id, created_at)
-                    SELECT l.supplier, l.code, p.name, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
+                try {
+                    $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, ext_id, product_id, created_at)
+                        SELECT l.supplier, l.code, p.name, l.ext_id, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
+                } catch (\PDOException $e) {
+                    \App\Core\Log::error('supplier_excluded: ' . $e->getMessage());     // нет таблицы (до bin/install.php) — удалить всё равно
+                }
                 $db->query("DELETE FROM supplier_links WHERE product_id IN ($ph)", $vals);
                 foreach (['product_texts', 'product_images', 'product_features', 'category_products', 'cart_items', 'product_set_items'] as $t) {
                     $db->query("DELETE FROM `$t` WHERE product_id IN ($ph)", $vals);

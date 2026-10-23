@@ -601,8 +601,12 @@ abstract class Supplier
         foreach (glob(static::dir() . '/upload-*') ?: [] as $f) if (is_file($f) && filemtime($f) < time() - 86400) @unlink($f);
         // связи с удалёнными товарами (удалили до supplier_excluded или не через админку) — тоже «удалён вручную»: загрузчик
         // их снова не создаёт (решение владельца: удалённое не возвращается; вернуть — «Обзор» поставщика)
-        $db->query('INSERT IGNORE INTO supplier_excluded (supplier, code, name, product_id, created_at)
-            SELECT l.supplier, l.code, NULL, l.product_id, NOW() FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [static::CODE]);
+        try {
+            $db->query('INSERT IGNORE INTO supplier_excluded (supplier, code, name, ext_id, product_id, created_at)
+                SELECT l.supplier, l.code, NULL, l.ext_id, l.product_id, NOW() FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [static::CODE]);
+        } catch (\PDOException) {
+            return;                                                             // нет таблицы (до bin/install.php) — связи не трогать
+        }
         $db->query('DELETE l FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [static::CODE]);
     }
 

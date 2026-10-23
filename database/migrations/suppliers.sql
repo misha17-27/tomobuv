@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS `supplier_excluded` (
   `supplier`   VARCHAR(32)  NOT NULL,
   `code`       VARCHAR(100) NOT NULL,                 -- код связи (supplier_links.code)
   `name`       VARCHAR(255) NULL,                     -- название удалённого товара (для списка)
+  `ext_id`     VARCHAR(64)  NULL,                     -- код модели у поставщика (supplier_links.ext_id: Tom.m переиспользует id)
   `product_id` INT UNSIGNED NULL,                     -- удалённый товар сайта
   `created_at` DATETIME     NOT NULL,
   PRIMARY KEY (`supplier`, `code`)
@@ -179,3 +180,17 @@ CREATE TABLE IF NOT EXISTS `supplier_excluded` (
 INSERT IGNORE INTO `settings` (`name`, `value`) VALUES ('hitobuvi.watermark_fix1', '1');
 SET @wm_fix = ROW_COUNT();
 UPDATE `settings` SET `value` = '1' WHERE `name` = 'hitobuvi.watermark' AND @wm_fix = 1;
+
+ALTER TABLE `supplier_excluded` ADD COLUMN IF NOT EXISTS `ext_id` VARCHAR(64) NULL AFTER `name`;
+
+-- Один раз: товары, удалённые владельцем до supplier_excluded (23.10.2026), — по журналу изменений поставщиков (supplier_changes:
+-- код каждого добавленного / взятого под загрузчик товара). Товара больше нет и по этому коду нет живой связи — «удалён вручную»
+-- (пересборка каталога удаляет и журнал своих товаров — их здесь нет). Метка — чтобы «Вернуть» в «Обзоре» не отменялось деплоем.
+INSERT IGNORE INTO `settings` (`name`, `value`) VALUES ('suppliers.excluded_backfill1', '1');
+SET @ex_fix = ROW_COUNT();
+INSERT IGNORE INTO `supplier_excluded` (`supplier`, `code`, `name`, `ext_id`, `product_id`, `created_at`)
+SELECT c.`supplier`, c.`code`, NULL, NULL, MAX(c.`product_id`), MAX(c.`created_at`)
+FROM `supplier_changes` c LEFT JOIN `products` p ON p.`id` = c.`product_id`
+WHERE @ex_fix = 1 AND p.`id` IS NULL AND c.`code` <> ''
+  AND NOT EXISTS (SELECT 1 FROM `supplier_links` l JOIN `products` p2 ON p2.`id` = l.`product_id` WHERE l.`supplier` = c.`supplier` AND l.`code` = c.`code`)
+GROUP BY c.`supplier`, c.`code`;
