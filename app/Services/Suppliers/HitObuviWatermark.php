@@ -30,6 +30,8 @@ final class HitObuviWatermark
     /** Непрозрачность своей надписи (тёмным по фону): на белом — серый ≈ 200, как у надписи поставщика */
     private const ALPHA = 0.22;
     private const STATE = '/hitobuvi-watermark.json';
+    /** Версия поиска: выросла — backlog проверяет заново все фото «Хит обуви» (2: надпись у нижнего края, сетка/ткань «штриховее» надписи) */
+    private const VERSION = 2;
 
     /** Найти и заменить надпись поставщика. @return bool заменена */
     public static function apply(\GdImage $im): bool
@@ -41,13 +43,17 @@ final class HitObuviWatermark
         return true;
     }
 
-    /** Рамка надписи поставщика [x0, y0, x1, y1] (включительно) или null */
+    /**
+     * Рамка надписи поставщика [x0, y0, x1, y1] (включительно) или null. Ищется в нижних 40 % справа (от 30 % ширины до края,
+     * до нижнего края): строки с больше всего тонких штрихов — кандидаты (ткань, сетка, шнурки бывают «штриховее» надписи,
+     * поэтому до 6 полос, в каждой — все куски подходящего размера); надпись — кусок с лучшей сверкой с образцом (≥ MIN_CORR).
+     */
     public static function find(\GdImage $im): ?array
     {
         $W = imagesx($im); $H = imagesy($im);
         if ($W < 200 || $H < 200) return null;
         if (!imageistruecolor($im)) imagepalettetotruecolor($im);
-        $rx0 = (int) (.35 * $W); $ry0 = (int) (.68 * $H); $rw = $W - $rx0; $rh = (int) (.985 * $H) - $ry0;
+        $rx0 = (int) (.3 * $W); $ry0 = (int) (.6 * $H); $rw = $W - $rx0; $rh = $H - $ry0;
         $g = [];
         for ($y = 0; $y < $rh; $y++) {
             $row = [];
@@ -67,36 +73,45 @@ final class HitObuviWatermark
                 if (max($h, $vv) - $v > 12) { $dip[$y][$x] = true; $P[$y]++; }
             }
         }
-        // строка надписи: самая «штриховая» строка и соседние с не меньше чем четвертью её штрихов
-        $mx = max($P);
-        if ($mx < 10) return null;
-        $yc = (int) array_search($mx, $P, true);
-        $t = max(6, .25 * $mx);
-        $a = $yc; while ($a > 0 && $P[$a - 1] >= $t) $a--;
-        $z = $yc; while ($z < $rh - 1 && $P[$z + 1] >= $t) $z++;
-        // по ширине: столбцы со штрихами, разрывы больше 2 % ширины делят на куски — берётся самый «штриховой»
-        $Q = array_fill(0, $rw, 0);
-        for ($y = $a; $y <= $z; $y++) foreach ($dip[$y] as $x => $_) $Q[$x]++;
+        $rows = $P;
+        arsort($rows);
         $gap = (int) (.02 * $W);
-        $best = null; $bestSum = -1; $s = null; $prev = 0; $sum = 0;
-        for ($x = 0; $x < $rw; $x++) {
-            if (!$Q[$x]) continue;
-            if ($s !== null && $x - $prev > $gap) { if ($sum > $bestSum) { $bestSum = $sum; $best = [$s, $prev]; } $s = null; }
-            if ($s === null) { $s = $x; $sum = 0; }
-            $sum += $Q[$x]; $prev = $x;
+        $best = null; $bestCorr = self::MIN_CORR; $used = []; $tried = 0;
+        foreach ($rows as $yc => $n) {
+            if ($n < 10 || $tried >= 6) break;
+            if (isset($used[$yc])) continue;
+            $tried++;
+            // полоса: строка и соседние с не меньше чем четвертью её штрихов
+            $t = max(6, .25 * $n);
+            $a = $yc; while ($a > 0 && $P[$a - 1] >= $t) $a--;
+            $z = $yc; while ($z < $rh - 1 && $P[$z + 1] >= $t) $z++;
+            for ($y = $a - 6; $y <= $z + 6; $y++) $used[$y] = true;          // соседние строки той же полосы не перебирать
+            // по ширине: столбцы со штрихами, разрывы больше 2 % ширины делят на куски — каждый подходящий кусок сверяется
+            $Q = array_fill(0, $rw, 0);
+            for ($y = $a; $y <= $z; $y++) foreach ($dip[$y] as $x => $_) $Q[$x]++;
+            $segs = []; $s = null; $prev = 0;
+            for ($x = 0; $x < $rw; $x++) {
+                if (!$Q[$x]) continue;
+                if ($s !== null && $x - $prev > $gap) { $segs[] = [$s, $prev]; $s = null; }
+                if ($s === null) $s = $x;
+                $prev = $x;
+            }
+            if ($s !== null) $segs[] = [$s, $prev];
+            foreach ($segs as [$s0, $s1]) {
+                [$x0, $y0, $x1, $y1] = [$s0 + $rx0, $a + $ry0, $s1 + $rx0, $z + $ry0];
+                $w = $x1 - $x0 + 1; $h = $y1 - $y0 + 1;
+                if ($h < .012 * $H || $h > .05 * $H || $w < .15 * $W || $w > .5 * $W || $w / $h < 9 || $w / $h > 22 || $x1 < .6 * $W) continue;
+                // место для закраски: полоса выше надписи (верх букв h, t, b) и фон слева
+                if (self::eraseTop($y0, $y1) - 2 < 0 || $x0 - 3 < 0) continue;
+                $corr = self::similarity($im, [$x0, $y0, $x1, $y1]);
+                if ($corr >= $bestCorr) { $bestCorr = $corr; $best = [$x0, $y0, $x1, $y1]; }
+            }
         }
-        if ($s !== null && $sum > $bestSum) $best = [$s, $prev];
-        if ($best === null) return null;
-        [$x0, $y0, $x1, $y1] = [$best[0] + $rx0, $a + $ry0, $best[1] + $rx0, $z + $ry0];
-        $w = $x1 - $x0 + 1; $h = $y1 - $y0 + 1;
-        if ($h < .012 * $H || $h > .05 * $H || $w < .18 * $W || $w > .5 * $W || $w / $h < 9 || $w / $h > 22 || $x1 < .85 * $W) return null;
-        // место для закраски (полоса выше надписи — верх букв h, t, b) и для фона над и под ней
-        if (self::eraseTop($y0, $y1) - 2 < 0 || $y1 + 6 >= $H || $x0 - 3 < 0) return null;
-        return self::similarity($im, [$x0, $y0, $x1, $y1]) >= self::MIN_CORR ? [$x0, $y0, $x1, $y1] : null;
+        return $best;
     }
 
-    /** Корреляция затемнения в рамке (фон по столбцам минус пиксель) с образцом надписи поставщика */
-    private static function similarity(\GdImage $im, array $box): float
+    /** Корреляция затемнения в рамке (фон по столбцам минус пиксель; $light — светлая надпись: пиксель минус фон) с образцом надписи поставщика */
+    private static function similarity(\GdImage $im, array $box, bool $light = false): float
     {
         [$x0, $y0, $x1, $y1] = $box;
         $w = $x1 - $x0 + 1; $h = $y1 - $y0 + 1;
@@ -104,13 +119,15 @@ final class HitObuviWatermark
         if (!$tpl) return 0.0;
         $tw = imagesx($tpl); $th = imagesy($tpl);
         $a = $y0 - 3; $b = $y1 + 3;
+        $hasBot = $b + 2 <= imagesy($im) - 1;                              // надпись у нижнего края — фон только сверху
         $D = []; $max = 0.0;
         for ($x = $x0; $x <= $x1; $x++) {
             $top = (self::gray($im, $x, $a - 2) + self::gray($im, $x, $a - 1) + self::gray($im, $x, $a)) / 3;
-            $bot = (self::gray($im, $x, $b) + self::gray($im, $x, $b + 1) + self::gray($im, $x, $b + 2)) / 3;
+            $bot = $hasBot ? (self::gray($im, $x, $b) + self::gray($im, $x, $b + 1) + self::gray($im, $x, $b + 2)) / 3 : $top;
             for ($y = $y0; $y <= $y1; $y++) {
                 $k = ($y - $a) / ($b - $a);
-                $v = max(0.0, $top * (1 - $k) + $bot * $k - self::gray($im, $x, $y));
+                $bg = $top * (1 - $k) + $bot * $k;
+                $v = max(0.0, $light ? self::gray($im, $x, $y) - $bg : $bg - self::gray($im, $x, $y));
                 $D[$y - $y0][$x - $x0] = $v;
                 if ($v > $max) $max = $v;
             }
@@ -140,10 +157,11 @@ final class HitObuviWatermark
     private static function erase(\GdImage $im, array $box): void
     {
         [$x0, $y0, $x1, $y1] = $box;
-        $a = self::eraseTop($y0, $y1); $b = $y1 + 4;
+        $a = self::eraseTop($y0, $y1); $b = min($y1 + 4, imagesy($im) - 1);
+        $hasBot = $b + 2 <= imagesy($im) - 1;                              // надпись у нижнего края — закраска цветом фона сверху
         $xe = min(imagesx($im) - 1, $x1 + 3);
         for ($x = $x0 - 3; $x <= $xe; $x++) {
-            $top = self::avg($im, $x, $a - 2, $a); $bot = self::avg($im, $x, $b, $b + 2);
+            $top = self::avg($im, $x, $a - 2, $a); $bot = $hasBot ? self::avg($im, $x, $b, $b + 2) : $top;
             for ($y = $a; $y <= $b; $y++) {
                 $k = ($y - $a) / ($b - $a);
                 imagesetpixel($im, $x, $y, self::rgb($top[0] * (1 - $k) + $bot[0] * $k, $top[1] * (1 - $k) + $bot[1] * $k, $top[2] * (1 - $k) + $bot[2] * $k));
@@ -215,6 +233,7 @@ final class HitObuviWatermark
         $old = [];                                                              // [pid, iid, ext] — файлы удалить после сброса кэша
         try {
             $st = json_decode((string) @file_get_contents($file), true) ?: [];
+            if ((int) ($st['ver'] ?? 1) < self::VERSION) $st = ['ver' => self::VERSION, 'replaced' => (int) ($st['replaced'] ?? 0)];   // все заново
             if (!empty($st['done'])) return ['done' => true] + $out;
             $st['until'] ??= (int) $db->value('SELECT COALESCE(MAX(id), 0) FROM product_images');
             $st['cursor'] ??= 0;

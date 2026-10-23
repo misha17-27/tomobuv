@@ -162,3 +162,20 @@ SELECT 'jonggolf', UPPER(SUBSTRING_INDEX(TRIM(p.`name`), ' ', -1)), p.`id`, p.`s
 FROM `products` p
 WHERE p.`supplier` = 'jonggolf' AND NOT EXISTS (SELECT 1 FROM `supplier_links` l WHERE l.`supplier` = 'jonggolf')
 ORDER BY p.`id`;
+
+-- Товары поставщиков, которые владелец удалил на сайте (AdminCatalog::deleteProducts; связь без товара — Supplier::cleanup):
+-- загрузчик по этому коду новый товар больше не создаёт. Список и «Вернуть» — вкладка «Обзор» поставщика.
+CREATE TABLE IF NOT EXISTS `supplier_excluded` (
+  `supplier`   VARCHAR(32)  NOT NULL,
+  `code`       VARCHAR(100) NOT NULL,                 -- код связи (supplier_links.code)
+  `name`       VARCHAR(255) NULL,                     -- название удалённого товара (для списка)
+  `product_id` INT UNSIGNED NULL,                     -- удалённый товар сайта
+  `created_at` DATETIME     NOT NULL,
+  PRIMARY KEY (`supplier`, `code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- «Хит обуви»: замена надписи hit-obuvi.com.ua на фото — один раз снова включить (23.10.2026). Форма настроек, открытая до
+-- появления галочки, сохраняла её выключенной; дальше это не повторяется (watermark_form). Только при первом выполнении: метка.
+INSERT IGNORE INTO `settings` (`name`, `value`) VALUES ('hitobuvi.watermark_fix1', '1');
+SET @wm_fix = ROW_COUNT();
+UPDATE `settings` SET `value` = '1' WHERE `name` = 'hitobuvi.watermark' AND @wm_fix = 1;

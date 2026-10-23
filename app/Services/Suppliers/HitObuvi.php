@@ -86,6 +86,8 @@ final class HitObuvi extends WebSupplier
             if ($k === 'roots') continue;
             $in[$k] = in_array($k, self::BOOLS, true) ? (!empty($post[$k]) ? '1' : '0') : trim(str_replace("\r\n", "\n", (string) ($post[$k] ?? $def)));
         }
+        // форма, открытая до появления галочки «Заменять надпись» (нет watermark_form), её не выключает
+        if (!array_key_exists('watermark_form', $post)) $in['watermark'] = self::cfg('watermark');
         $roots = array_keys(HitObuviMap::roots());
         $in['roots'] = implode("\n", array_values(array_intersect($roots, array_map('strval', (array) ($post['roots'] ?? [])))));
         self::checkCommon($in, $err, ['window_from' => [0, 23], 'window_to' => [0, 23], 'period' => [1, 168], 'full_hours' => [1, 720], 'full_from' => [0, 23], 'full_to' => [0, 23], 'max_requests' => [10, 5000],
