@@ -46,7 +46,7 @@ final class JongGolfSync extends SupplierSync
     public const SKIP = [
         'status' => 'товар неактивен у поставщика (status ≠ 1)', 'offdel' => 'снят поставщиком (action_type off/del)',
         'brand' => 'бренд в списке пропускаемых', 'category_skip' => 'категория в списке пропускаемых', 'nocolors' => 'нет цветов (images)',
-        'absent' => 'цвет закончился, товара на сайте нет', 'noadd' => 'новые товары не добавляются (настройка)',
+        'absent' => 'цвет закончился, товара на сайте нет', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'noadd' => 'новые товары не добавляются (настройка)',
         'category' => 'категория не сопоставлена (новый товар)', 'size' => 'нет размерного ряда', 'price' => 'цена 0',
         'nophoto' => 'новый товар без фото', 'photo' => 'фото не скачалось', 'manual' => 'есть товар, заведённый вручную',
         'dup' => 'повтор кода цвета', 'ambiguous' => 'код совпал с несколькими товарами',
@@ -337,6 +337,7 @@ final class JongGolfSync extends SupplierSync
         // нового товара нет на сайте
         if ($it['cstatus'] !== 1) { $this->skip($it, 'absent', ''); return; }
         if ($c['add_new'] !== '1') { $this->skip($it, 'noadd', ''); return; }
+        if ($this->excluded((string) $it['code'])) { $this->skip($it, 'excluded', ''); return; }
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'Ошибка: категория «' . $it['mkey'] . '» не обработана (нет в таблице соответствия) — ' . $it['aid'] . ' не добавлен', 'error'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'Ошибка: для ' . $it['aid'] . ' id-поставщика=' . $it['ext'] . ' не задана размерная сетка', 'error'); return; }
         if ($it['price'] <= 0) { $this->skip($it, 'price', 'Ошибка: цена 0 — ' . $it['aid'] . ' id-поставщика=' . $it['ext'] . ' не добавлен', 'error'); return; }
@@ -592,7 +593,7 @@ final class JongGolfSync extends SupplierSync
             if ($a === 'skip') {
                 $this->stats['skipped']++;
                 $why = $it['why'] ?? 'other';
-                if (in_array($why, ['absent', 'noadd'], true)) { $this->skipCount($why, 'Пропущен ' . $it['aid'] . ': ' . self::SKIP[$why]); continue; }
+                if (in_array($why, ['absent', 'noadd', 'excluded'], true)) { $this->skipCount($why, 'Пропущен ' . $it['aid'] . ': ' . self::SKIP[$why]); continue; }
                 $this->stats['skip'][$why] = ($this->stats['skip'][$why] ?? 0) + 1;
                 $level = $it['level'] ?? 'skip';
                 if ($level === 'error') $this->stats['errors']++;

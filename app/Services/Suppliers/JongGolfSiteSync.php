@@ -37,7 +37,7 @@ final class JongGolfSiteSync extends WebSync
         stock, in_stock, status, image_id, image_ext, meta_title, meta_description, meta_keywords, meta_title_uk, meta_description_uk, meta_keywords_uk';
     protected const UPDATABLE = ['name', 'name_uk', 'sku', 'supplier', 'supplier_code', 'category_id', 'brand_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty',
         'size', 'stock', 'in_stock', 'status', 'meta_title', 'meta_description', 'meta_keywords', 'meta_title_uk', 'meta_description_uk', 'meta_keywords_uk', 'updated_at'];
-    protected const MASS_SKIP = ['dup', 'noadd', 'limit_new', 'brand', 'category_skip', 'cat_skip'];
+    protected const MASS_SKIP = ['dup', 'noadd', 'excluded', 'limit_new', 'brand', 'category_skip', 'cat_skip'];
     protected const CHANGE_NAMES = ['price' => 'цена', 'compare_price' => 'старая цена', 'purchase_price' => 'закупочная', 'status' => 'на сайте', 'in_stock' => 'наличие',
         'stock' => 'остаток', 'sku' => 'артикул (ряд)', 'size' => 'размер', 'box_qty' => 'пар в ящике', 'min_qty' => 'мин. заказ', 'supplier' => 'поставщик',
         'supplier_code' => 'код поставщика', 'category_id' => 'категория', 'name' => 'название', 'name_uk' => 'название (укр.)', 'brand_id' => 'бренд',
@@ -46,7 +46,7 @@ final class JongGolfSiteSync extends WebSync
     public const SKIP = [
         'brand' => 'бренд в списке пропускаемых', 'category_skip' => 'категория в списке пропускаемых', 'cat_skip' => 'раздел бренда не загружается (настройка)',
         'category' => 'категория не сопоставлена (новый товар)', 'size' => 'нет размерного ряда', 'price' => 'цена 0', 'box' => 'не определить пар в ящике',
-        'nophoto' => 'новый товар без фото', 'photo' => 'фото не скачалось', 'noadd' => 'новые товары не добавляются (настройка)',
+        'nophoto' => 'новый товар без фото', 'photo' => 'фото не скачалось', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'noadd' => 'новые товары не добавляются (настройка)',
         'robots_photo' => 'фото бренда закрыты robots.txt — новый товар без фото не создаётся',
         'limit_new' => 'лимит новых товаров за запуск', 'nostock' => 'по карточке модели уже нет в наличии', 'dup' => 'повтор кода цвета',
         'ambiguous' => 'код совпал с несколькими товарами',
@@ -254,6 +254,7 @@ final class JongGolfSiteSync extends WebSync
         }
         // нового товара на сайте нет (бренд показывает только цвета в наличии — «нет в наличии» новыми не бывают)
         if ($c['add_new'] !== '1') { $this->skip($it, 'noadd', ''); return; }
+        if ($this->excluded((string) $it['code'])) { $this->skip($it, 'excluded', ''); return; }
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'категория «' . $it['mkey'] . '» не сопоставлена — ' . $it['aid'] . ' не добавлен (вкладка «Категории»)', 'warn'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'нет размерного ряда — ' . $it['aid'] . ' не добавлен', 'warn'); return; }
         if ($it['pair'] <= 0) { $this->skip($it, 'price', 'цена 0 — ' . $it['aid'] . ' не добавлен', 'error'); return; }

@@ -227,7 +227,8 @@ final class AdminCatalog
     }
 
     /**
-     * Удалить товары полностью (строки во всех таблицах + файлы фото). Возвращает количество.
+     * Удалить товары полностью (строки во всех таблицах + файлы фото). Возвращает количество. Товары поставщиков (связи
+     * supplier_links) запоминаются в supplier_excluded — загрузчики их снова не добавляют (решение владельца 23.10.2026).
      * Индекс — точечно, как после сохранения: снимок (фильтры, бренды) до удаления, CatalogIndexer::products после.
      * Строки catalog_index удалённых товаров убирает он же — по ним видно, в каких категориях уменьшить фильтры и счётчики.
      */
@@ -242,6 +243,10 @@ final class AdminCatalog
             [$ph, $vals] = $db->in($part);
             foreach ($db->col("SELECT url FROM products WHERE id IN ($ph)", $vals) as $u) $urls[] = '/product/' . $u . '/';
             $db->transaction(static function ($db) use ($ph, $vals) {
+                // товар поставщика удалил владелец — загрузчик его больше не создаёт (supplier_excluded; вернуть — «Обзор» поставщика)
+                $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, product_id, created_at)
+                    SELECT l.supplier, l.code, p.name, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
+                $db->query("DELETE FROM supplier_links WHERE product_id IN ($ph)", $vals);
                 foreach (['product_texts', 'product_images', 'product_features', 'category_products', 'cart_items', 'product_set_items'] as $t) {
                     $db->query("DELETE FROM `$t` WHERE product_id IN ($ph)", $vals);
                 }

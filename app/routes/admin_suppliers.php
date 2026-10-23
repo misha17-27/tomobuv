@@ -28,6 +28,7 @@ $router->post('/admin/suppliers/jonggolf/map/add/', [SuppliersController::class,
 $router->post('/admin/suppliers/jonggolf/map/{id}/delete/', [SuppliersController::class, 'mapDelete']);
 $router->get('/admin/suppliers/jonggolf/map.csv', [SuppliersController::class, 'mapCsv']);
 $router->post('/admin/suppliers/jonggolf/prices/', [SuppliersController::class, 'savePrices']);
+$router->post('/admin/suppliers/jonggolf/excluded/restore/', [SuppliersController::class, 'excludedRestore']);
 
 $router->get('/admin/suppliers/hitobuvi/', [HitObuviController::class, 'index']);
 $router->get('/admin/suppliers/hitobuvi/progress/', [HitObuviController::class, 'progress']);
@@ -37,6 +38,7 @@ $router->post('/admin/suppliers/hitobuvi/start/', [HitObuviController::class, 's
 $router->get('/admin/suppliers/hitobuvi/runs/{id}/', [HitObuviController::class, 'showRun']);
 $router->post('/admin/suppliers/hitobuvi/runs/{id}/step/', [HitObuviController::class, 'step']);
 $router->post('/admin/suppliers/hitobuvi/runs/{id}/stop/', [HitObuviController::class, 'stop']);
+$router->post('/admin/suppliers/hitobuvi/excluded/restore/', [HitObuviController::class, 'excludedRestore']);
 $router->post('/admin/suppliers/hitobuvi/map/save/', [HitObuviController::class, 'mapSave']);
 $router->post('/admin/suppliers/hitobuvi/map/type/', [HitObuviController::class, 'mapAddType']);
 $router->post('/admin/suppliers/hitobuvi/map/{id}/delete/', [HitObuviController::class, 'mapDelete']);
@@ -49,4 +51,5 @@ $router->post('/admin/suppliers/tomm/start/', [TommController::class, 'start']);
 $router->get('/admin/suppliers/tomm/runs/{id}/', [TommController::class, 'showRun']);
 $router->post('/admin/suppliers/tomm/runs/{id}/step/', [TommController::class, 'step']);
 $router->post('/admin/suppliers/tomm/runs/{id}/stop/', [TommController::class, 'stop']);
+$router->post('/admin/suppliers/tomm/excluded/restore/', [TommController::class, 'excludedRestore']);
 $router->post('/admin/suppliers/tomm/map/save/', [TommController::class, 'mapSave']);

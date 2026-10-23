@@ -31,6 +31,18 @@ final class SupplierOverview
      * изменения цен и наличия за 7 / 30 дней, последняя проверка (несопоставленные и пропущенные — из последнего
      * завершённого прогона). @param class-string<Supplier> $cls
      */
+    /** Удалённые владельцем товары поставщика (supplier_excluded): ['n' => всего, 'rows' => последние $limit] */
+    public static function excluded(string $cls, int $limit = 50): array
+    {
+        $db = App::db();
+        try {
+            return ['n' => (int) $db->value('SELECT COUNT(*) FROM supplier_excluded WHERE supplier = ?', [$cls::CODE]),
+                'rows' => $db->all('SELECT code, name, product_id, created_at FROM supplier_excluded WHERE supplier = ? ORDER BY created_at DESC, code LIMIT ' . max(1, $limit), [$cls::CODE])];
+        } catch (\PDOException) {
+            return ['n' => 0, 'rows' => []];
+        }
+    }
+
     public static function summary(string $cls): array
     {
         $cls::ensureSchema();

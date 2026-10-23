@@ -47,6 +47,7 @@ trait SupplierPages
             if ($cls::TRACKS_STOCK) $prev['out'] = SupplierOverview::list($cls, 'out', [], 1, 8);
             if ($cls::ownBrandIds()) $prev['unlinked'] = SupplierOverview::list($cls, 'unlinked', [], 1, 8);
             $data['prev'] = $prev;
+            $data['excluded'] = SupplierOverview::excluded($cls);
         }
         return $data;
     }
@@ -171,6 +172,21 @@ trait SupplierPages
         if (Request::isAjax()) return Response::json(['ok' => true, 'stopped' => $stopped]);
         $this->flash($stopped ? 'Запуск остановлен.' : 'Запуск уже не идёт — останавливать нечего.');
         return Response::redirect(static::supBase() . 'runs/' . (int) $id . '/');
+    }
+
+    /** POST …/excluded/restore/ — удалённый вручную товар (code) или все (all=1) снова загружаются: следующий запуск добавит их */
+    public function excludedRestore(): Response
+    {
+        $cls = static::sup();
+        $db = App::db();
+        if (Request::post('all') === '1') {
+            $n = $db->query('DELETE FROM supplier_excluded WHERE supplier = ?', [$cls::CODE])->rowCount();
+        } else {
+            $n = $db->query('DELETE FROM supplier_excluded WHERE supplier = ? AND code = ?', [$cls::CODE, Request::post('code')])->rowCount();
+        }
+        if ($n) $this->log($cls::CODE . '_excluded_restore', 'settings', null, ['n' => $n, 'code' => Request::post('code')]);
+        $this->flash($n ? 'Вернули к загрузке: ' . $n . ' — следующий запуск добавит, если товар есть у поставщика.' : 'Нечего возвращать.');
+        return Response::redirect(static::supBase() . '#excluded');
     }
 
     /** Фильтр отчёта запуска по причине пропуска (?why=category, ?why=existing — есть на сайте): [условие, параметр, причина] */

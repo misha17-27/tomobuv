@@ -34,6 +34,8 @@ abstract class SupplierSync
     protected bool $dry;
     protected array $stats;
     protected array $cfg = [];
+    /** Коды, товары которых владелец удалил на сайте (supplier_excluded): [код => true], загружаются при первом обращении */
+    private ?array $excludedCodes = null;
     protected array $attr = [];
     protected array $ci = [];
     protected array $brandByNk = [];
@@ -487,6 +489,20 @@ abstract class SupplierSync
         imagedestroy($canvas);
         if (!$ok || !@rename($tmp, $dst)) { @unlink($tmp); return ['error' => 'не удалось сохранить JPEG']; }
         return ['file' => $dst, 'w' => $cw, 'h' => $ch];
+    }
+
+    /** Товар с этим кодом владелец удалил на сайте — новый не создавать (supplier_excluded; вернуть — «Обзор» поставщика) */
+    protected function excluded(string $code): bool
+    {
+        if ($this->excludedCodes === null) {
+            $sup = static::SUPPLIER;
+            try {
+                $this->excludedCodes = array_fill_keys(array_map('strval', App::db()->col('SELECT code FROM supplier_excluded WHERE supplier = ?', [$sup::CODE])), true);
+            } catch (\PDOException) {
+                $this->excludedCodes = [];                                          // таблицы ещё нет (до bin/install.php)
+            }
+        }
+        return isset($this->excludedCodes[$code]);
     }
 
     /** Правка готового холста перед сохранением (адаптер: «Хит обуви» — замена водяного знака поставщика) */

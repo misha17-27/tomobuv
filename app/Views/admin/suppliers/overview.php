@@ -169,6 +169,24 @@ $s = $p['stats'] ?? [];
 </section>
 <?php endif; ?>
 
+<?php if (!empty($excluded['n'])): ?>
+<section class="card" id="excluded" aria-labelledby="ov-excl">
+  <div class="card-hd"><h2 id="ov-excl">Удалены вручную — снова не загружаются (<?= $fmt($excluded['n']) ?>)</h2>
+    <form method="post" action="<?= e($base . 'excluded/restore/') ?>" data-confirm="Вернуть к загрузке все <?= $fmt($excluded['n']) ?>? Следующий запуск добавит те, что есть у поставщика.">
+      <?= \App\Controllers\Admin\BaseController::tokenField() ?><input type="hidden" name="all" value="1"><button class="btn btn-sm" type="submit">Вернуть все</button></form></div>
+  <p class="hint pad">Товары поставщика, которые вы удалили на сайте: загрузчик их больше не добавляет. «Вернуть» — следующий запуск добавит товар снова (если он есть у поставщика).</p>
+  <div class="table-scroll"><table class="grid"><thead><tr><th>Товар</th><th>Код у поставщика</th><th>Удалён</th><th></th></tr></thead><tbody>
+  <?php foreach ($excluded['rows'] as $r): ?><tr>
+    <td><?= $r['name'] !== null && $r['name'] !== '' ? e((string) $r['name']) : '<span class="muted">товар №' . (int) $r['product_id'] . '</span>' ?></td>
+    <td><?= e($sup::codeLabel((string) $r['code'], null)) ?></td>
+    <td class="nowrap"><?= e($dt($r['created_at'])) ?></td>
+    <td class="right"><form method="post" action="<?= e($base . 'excluded/restore/') ?>" class="inline"><?= \App\Controllers\Admin\BaseController::tokenField() ?><input type="hidden" name="code" value="<?= e((string) $r['code']) ?>"><button class="btn btn-sm" type="submit">Вернуть</button></form></td>
+  </tr><?php endforeach; ?>
+  </tbody></table></div>
+  <?php if ($excluded['n'] > count($excluded['rows'])): ?><p class="hint pad">Показаны последние <?= count($excluded['rows']) ?> из <?= $fmt($excluded['n']) ?>.</p><?php endif; ?>
+</section>
+<?php endif; ?>
+
 <?php else: ?>
 <?php /* ---------------------------------------------------------------- полный список */ ?>
 <p class="back"><a href="<?= e($base) ?>">← Обзор</a></p>

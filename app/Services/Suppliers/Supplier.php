@@ -599,7 +599,10 @@ abstract class Supplier
         // журнал изменений («Обзор»: цены, скрытые, вернувшиеся, добавленные) — «{код}.history_days» дней (по умолчанию 365)
         $db->query('DELETE FROM supplier_changes WHERE supplier = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)', [static::CODE, static::historyDays()]);
         foreach (glob(static::dir() . '/upload-*') ?: [] as $f) if (is_file($f) && filemtime($f) < time() - 86400) @unlink($f);
-        // связи с удалёнными товарами (товар удалили в админке — следующий запуск создаст его заново и свяжет)
+        // связи с удалёнными товарами (удалили до supplier_excluded или не через админку) — тоже «удалён вручную»: загрузчик
+        // их снова не создаёт (решение владельца: удалённое не возвращается; вернуть — «Обзор» поставщика)
+        $db->query('INSERT IGNORE INTO supplier_excluded (supplier, code, name, product_id, created_at)
+            SELECT l.supplier, l.code, NULL, l.product_id, NOW() FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [static::CODE]);
         $db->query('DELETE l FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [static::CODE]);
     }
 

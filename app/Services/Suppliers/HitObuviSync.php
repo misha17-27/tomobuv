@@ -36,12 +36,12 @@ final class HitObuviSync extends WebSync
         stock, in_stock, status, image_id, image_ext';
     protected const UPDATABLE = ['sku', 'supplier', 'supplier_code', 'category_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty', 'size',
         'stock', 'in_stock', 'status', 'updated_at'];
-    protected const MASS_SKIP = ['cat_skip', 'old', 'noadd', 'limit_new', 'brand', 'dup', 'taken', 'foreign'];
+    protected const MASS_SKIP = ['cat_skip', 'old', 'noadd', 'excluded', 'limit_new', 'brand', 'dup', 'taken', 'foreign'];
 
     public const SKIP = [
         'cat_skip' => 'категория поставщика не загружается (настройка)', 'category' => 'категория не сопоставлена', 'brand' => 'бренд в списке пропускаемых',
         'price' => 'нет цены', 'box' => 'не определить пар в ящике', 'size' => 'нет размерного ряда', 'old' => 'старый товар поставщика (id ниже порога) — не создаётся',
-        'noadd' => 'новые товары не добавляются (настройка)', 'limit_new' => 'лимит новых товаров за запуск', 'nophoto' => 'нет фото у поставщика',
+        'excluded' => 'удалён на сайте вручную — снова не добавляется', 'noadd' => 'новые товары не добавляются (настройка)', 'limit_new' => 'лимит новых товаров за запуск', 'nophoto' => 'нет фото у поставщика',
         'photo' => 'фото не скачалось', 'existing' => 'есть на сайте (Forsage / вручную) — не взят под загрузчик', 'ambiguous' => 'похож на несколько товаров сайта',
         'dup' => 'повтор товара в запуске', 'taken' => 'найденный товар сайта уже связан с другим товаром поставщика',
         'foreign' => 'найденный товар сайта ведёт другой поставщик (свой загрузчик бренда) или его бренд в пропускаемых',
@@ -379,6 +379,7 @@ final class HitObuviSync extends WebSync
         }
         // нового товара на сайте нет
         if ($c['add_new'] !== '1') { $this->skip($it, 'noadd', ''); return; }
+        if ($this->excluded((string) $it['code'])) { $this->skip($it, 'excluded', ''); return; }
         if ($this->minId > 0 && $it['sid'] < $this->minId) { $this->skip($it, 'old', ''); return; }
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'категория «' . $it['map']['key'] . '»' . ($it['map']['type'] ? ' (тип «' . $it['map']['type'] . '»)' : '') . ' не сопоставлена — «' . $it['name'] . '» не добавлен'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'нет размерного ряда — «' . $it['name'] . '» (' . $it['code'] . ') не добавлен', 'warn'); return; }

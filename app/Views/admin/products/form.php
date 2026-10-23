@@ -182,6 +182,6 @@ $paths = AdminCatalog::paths($cats);
 </div>
 </form>
 <?php if ($id): ?>
-<form id="del-form" method="post" action="/admin/products/<?= $id ?>/delete/" data-confirm="Удалить товар «<?= e($p['name']) ?>» безвозвратно? Фото тоже будут удалены."><?= BaseController::tokenField() ?></form>
+<form id="del-form" method="post" action="/admin/products/<?= $id ?>/delete/" data-confirm="Удалить товар «<?= e($p['name']) ?>» безвозвратно? Фото тоже будут удалены. Товар поставщика загрузчик больше не добавит (вернуть — «Поставщики → Обзор»)."><?= BaseController::tokenField() ?></form>
 <?php endif; ?>
 <?= $view->partial('admin/partials/editor') ?>
