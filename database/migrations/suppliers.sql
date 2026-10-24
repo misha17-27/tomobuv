@@ -194,3 +194,9 @@ FROM `supplier_changes` c LEFT JOIN `products` p ON p.`id` = c.`product_id`
 WHERE @ex_fix = 1 AND p.`id` IS NULL AND c.`code` <> ''
   AND NOT EXISTS (SELECT 1 FROM `supplier_links` l JOIN `products` p2 ON p2.`id` = l.`product_id` WHERE l.`supplier` = c.`supplier` AND l.`code` = c.`code`)
 GROUP BY c.`supplier`, c.`code`;
+
+-- «Хит обуви»: порог id новых товаров — с января 2025 (решение владельца 24.10.2026; был 1 550 000 ≈ 09.10.2025). Один раз (метка):
+-- изменённый потом в настройках порог деплой не трогает. Массовая загрузка (bin/load-hitobuvi.sh) по новому порогу пройдёт сама.
+INSERT IGNORE INTO `settings` (`name`, `value`) VALUES ('hitobuvi.min_id_2025', '1');
+SET @mid_fix = ROW_COUNT();
+UPDATE `settings` SET `value` = '1442000' WHERE `name` = 'hitobuvi.min_id' AND `value` = '1550000' AND @mid_fix = 1;

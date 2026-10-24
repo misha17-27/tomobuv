@@ -45,7 +45,8 @@ final class HitObuvi extends WebSupplier
         'roots' => "/zhenskaya-obuv\n/muzhskaya-obuv\n/detskaya-obuv\n/podrostkovaya-obuv",
         // наценка: не задана — включить загрузку нельзя (цена поставщика — закупочная)
         'markup_k' => '', 'markup_plus' => '0', 'round_step' => '1', 'round_mode' => 'math',
-        'add_new' => '1', 'max_new' => '300', 'min_id' => '1550000',
+        // порог id новых: с января 2025 (решение владельца 24.10.2026; 1 442 074 — первый товар 06.01.2025 по дате фото, 1 441 442 — 26.12.2024)
+        'add_new' => '1', 'max_new' => '300', 'min_id' => '1442000',
         'update_existing' => '1', 'update_category' => '1', 'keep_manual_hidden' => '1',
         'hide_missing' => '1', 'missing_runs' => '2', 'adopt' => '0',
         // бренды со своим загрузчиком с официальных сайтов (Jong•Golf, Tom.m) — по бренду из названия и по производителю;
@@ -153,6 +154,7 @@ final class HitObuvi extends WebSupplier
             'fails' => 0, 'retry_at' => 0, 'requests' => 0, 'debug' => App::isDebug(),
             'max_new' => isset($o['max_new']) ? max(0, (int) $o['max_new']) : null,
             'max_requests' => isset($o['max_requests']) ? max(10, (int) $o['max_requests']) : null,
+            'min_id' => (int) self::cfg('min_id'),
         ];
         $id = self::createRun($kind, $src, $origin, !empty($o['user_id']) ? (int) $o['user_id'] : null, $state);
         $m = self::markup();

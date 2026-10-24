@@ -117,7 +117,7 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
         <label class="check"><input type="checkbox" name="add_new" value="1"<?= $on('add_new') ? ' checked' : '' ?>> Добавлять новые товары (только с фото — без фото товар не создаётся)</label>
         <div class="pair">
           <label class="fld"><span>Только товары поставщика с id не ниже</span><input name="min_id" value="<?= e($cfg['min_id']) ?>" inputmode="numeric" placeholder="пусто — все">
-            <span class="hint">Поставщик не снимает архив с 2016 г.: без порога загрузчик завёл бы ≈70 тыс. старых моделей. 1 550 000 — примерно с апреля 2026 (≈45 тыс.).</span></label>
+            <span class="hint">Поставщик не снимает архив с 2016 г.: без порога загрузчик завёл бы ≈110 тыс. старых моделей. 1 442 000 — с января 2025 (≈86 тыс. в 4 обувных разделах), 1 550 000 — с 9 октября 2025 (≈57 тыс.). Порог снизили — массовая загрузка (bin/load-hitobuvi.sh) пройдёт ещё раз и добавит только недостающие.</span></label>
           <label class="fld"><span>Не больше новых за запуск</span><input name="max_new" type="number" min="0" max="20000" value="<?= e($cfg['max_new']) ?>">
             <span class="hint">Каждое новое фото — отдельный запрос с паузой: 300 новых ≈ 15 мин. 0 — без ограничения.</span></label>
         </div>

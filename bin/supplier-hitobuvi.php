@@ -11,9 +11,12 @@
  *                                                   запускает по кругу, на хостинге — bin/load-hitobuvi.sh из cron): продолжить прерванный
  *                                                   боевой запуск (окно закрыли — любой давности), иначе начать полный проход с лимитами
  *                                                   только этого запуска (0 — без ограничения; настройки не меняются); не дольше
- *                                                   --minutes мин за вызов (по умолчанию 6 ч).
+ *                                                   --minutes мин за вызов (по умолчанию 6 ч). Всё загружено — отметка
+ *                                                   storage/hitobuvi-load.done с порогом id («min_id=N»); с тем же порогом —
+ *                                                   сразу выход с кодом 4, порог снизили — новый проход (добавит недостающие).
  *                                                   Код выхода: 0 — есть что продолжать, 2 — всё загружено (полный проход без
- *                                                   отложенных по лимиту), 3 — запуск остановлен в админке, 1 — ошибка
+ *                                                   отложенных по лимиту), 3 — запуск остановлен в админке, 4 — уже было всё
+ *                                                   загружено (с этим порогом), 1 — ошибка
  *   php bin/supplier-hitobuvi.php --test          — проверка связи: robots.txt и первая страница раздела (2 запроса)
  *   php bin/supplier-hitobuvi.php --dry-run [--source=web|last|<папка>] [--mode=quick|full] [--limit=N] [--ids=1,2] [--cache=<папка>]
  *                                                 — пробный прогон: в каталог не пишет; web — страницы с сайта поставщика (бережно:
@@ -74,8 +77,16 @@ try {
             'max_requests' => isset($opts['max-requests']) ? max(100, (int) $opts['max-requests']) : 60000];
         // «всё загружено» — полный проход завершён без отложенных по лимиту новых; неполный (раздел поставщика 404 или пустая
         // страница списка) — если ничего не добавил: повторять его бесполезно (лишних проходов — не больше одного)
+        // проход с более высоким порогом id (до 24.10.2026 в state порога нет — был 1 550 000) не считается: порог снизили —
+        // нужен новый проход, он добавит только недостающие (загруженные узнаются по связи и только сверяются)
+        $minId = (int) HitObuvi::cfg('min_id');
         $isAll = static fn(array $r): bool => $r['status'] === 'done' && ($r['state']['mode'] ?? '') === 'full'
-            && empty($r['stats']['skip']['limit_new']) && (!empty($r['state']['complete']) || (int) $r['stats']['created'] === 0);
+            && empty($r['stats']['skip']['limit_new']) && (!empty($r['state']['complete']) || (int) $r['stats']['created'] === 0)
+            && (int) ($r['state']['min_id'] ?? 1550000) <= $minId;
+        // всё уже загружено с этим порогом (отметка storage/hitobuvi-load.done) — выход без запросов (код 4: bin/load-hitobuvi.sh молчит)
+        $doneFile = STORAGE . '/hitobuvi-load.done';
+        $doneMark = 'min_id=' . $minId;
+        if (is_file($doneFile) && trim((string) file_get_contents($doneFile)) === $doneMark) exit(4);
         $cur = App::db()->row("SELECT id FROM supplier_runs WHERE supplier = ? AND status = 'running' AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [HitObuvi::CODE]);
         $last = $cur ? null : App::db()->row("SELECT id, status, error FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [HitObuvi::CODE]);
         if ($cur) {
@@ -91,6 +102,7 @@ try {
         } elseif ($last && $last['status'] === 'done' && ($lr = HitObuvi::run((int) $last['id'])) && $isAll($lr)) {
             // проход довёл до конца не этот процесс (bin/cron.php, вкладка админки) — новый не нужен
             $say('Всё загружено: последний полный проход №' . $last['id'] . ' закончен');
+            @file_put_contents($doneFile, $doneMark);
             exit(2);
         } else {
             $id = HitObuvi::start('run', $o);
@@ -105,8 +117,11 @@ try {
         if ($run['status'] === 'running') exit(0);                            // время вышло / шаги у другого процесса — продолжить
         if ($run['status'] === 'stopped') { $say('Запуск остановлен («Остановить» в админке) — загрузка не продолжается'); exit(3); }
         $all = $isAll($run);
-        if ($all) $say('Всё загружено: полный проход без отложенных по лимиту новых товаров'
-            . (empty($run['state']['complete']) ? ' (неполный: раздел поставщика не прочитан — см. отчёт запуска)' : ''));
+        if ($all) {
+            $say('Всё загружено: полный проход без отложенных по лимиту новых товаров'
+                . (empty($run['state']['complete']) ? ' (неполный: раздел поставщика не прочитан — см. отчёт запуска)' : ''));
+            @file_put_contents($doneFile, $doneMark);
+        }
         exit($all ? 2 : 0);
     }
     if (isset($opts['watermark'])) {
