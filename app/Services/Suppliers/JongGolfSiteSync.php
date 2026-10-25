@@ -33,7 +33,7 @@ final class JongGolfSiteSync extends WebSync
     use JongGolfShared;
 
     protected const SUPPLIER = JongGolf::class;
-    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, purchase_price, box_qty, min_qty, size,
+    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, nophoto_hidden, purchase_price, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext, meta_title, meta_description, meta_keywords, meta_title_uk, meta_description_uk, meta_keywords_uk';
     protected const UPDATABLE = ['name', 'name_uk', 'sku', 'supplier', 'supplier_code', 'category_id', 'brand_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty',
         'size', 'stock', 'in_stock', 'status', 'meta_title', 'meta_description', 'meta_keywords', 'meta_title_uk', 'meta_description_uk', 'meta_keywords_uk', 'updated_at'];

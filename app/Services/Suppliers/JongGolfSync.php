@@ -36,7 +36,7 @@ final class JongGolfSync extends SupplierSync
 
     protected const SUPPLIER = JongGolf::class;
     private const PORTION = 20;                 // товаров поставщика (≈80 цветов) за транзакцию
-    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, box_qty, min_qty, size,
+    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, nophoto_hidden, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext, meta_title, meta_description, meta_keywords, meta_title_uk, meta_description_uk, meta_keywords_uk';
     private const CHANGE_NAMES = ['price' => 'цена', 'compare_price' => 'старая цена', 'status' => 'на сайте', 'in_stock' => 'наличие', 'stock' => 'остаток',
         'sku' => 'артикул (размерный ряд)', 'supplier' => 'поставщик', 'supplier_code' => 'код поставщика', 'category_id' => 'категория', 'name' => 'название',
@@ -313,6 +313,8 @@ final class JongGolfSync extends SupplierSync
             }
             // только отличающиеся поля; цена закреплена владельцем (price_manual) — цену и старую цену не менять
             if (!empty($ex['price_manual'])) unset($upd['price'], $upd['compare_price']);
+            // скрыт, потому что нет фото (NoPhoto) — показывает его NoPhoto, когда фото появится, а не сверка
+            if (!empty($ex['nophoto_hidden']) && (int) ($upd['status'] ?? 0) === 1) unset($upd['status']);
             foreach ($upd as $col => $val) {
                 $old = $ex[$col] ?? null;
                 $same = match ($col) {

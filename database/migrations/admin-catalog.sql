@@ -62,3 +62,5 @@ DEALLOCATE PREPARE st;
 -- Цена, изменённая вручную (быстрое редактирование в списке, карточка, массовое «цена ±%»), закреплена: ночная сверка
 -- поставщика её не меняет (решение владельца 25.10.2026); снять — «Цена поставщика» в списке или галочка в карточке
 ALTER TABLE `products` ADD COLUMN IF NOT EXISTS `price_manual` TINYINT(1) NOT NULL DEFAULT 0;
+-- товар скрыт, потому что у него нет фото (App\Services\NoPhoto, bin/cron.php): появится фото — покажется снова
+ALTER TABLE `products` ADD COLUMN IF NOT EXISTS `nophoto_hidden` TINYINT(1) NOT NULL DEFAULT 0;

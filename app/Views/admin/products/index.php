@@ -32,7 +32,7 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
         <?php foreach ($brands as $b): ?><option value="<?= (int) $b['id'] ?>"<?= $f['brand'] === (int) $b['id'] ? ' selected' : '' ?>><?= e($b['name']) ?></option><?php endforeach; ?></select></label>
   </div>
   <div class="ac-frow">
-    <label class="fld"><span>Статус</span><select name="status"><option value="">Любой</option><option value="1"<?= $f['status'] === '1' ? ' selected' : '' ?>>На сайте</option><option value="0"<?= $f['status'] === '0' ? ' selected' : '' ?>>Скрытые</option></select></label>
+    <label class="fld"><span>Статус</span><select name="status"><option value="">Любой</option><option value="1"<?= $f['status'] === '1' ? ' selected' : '' ?>>На сайте</option><option value="0"<?= $f['status'] === '0' ? ' selected' : '' ?>>Скрытые</option><option value="np"<?= $f['status'] === 'np' ? ' selected' : '' ?>>Скрытые: нет фото</option></select></label>
     <label class="fld"><span>Наличие</span><select name="stock"><option value="">Любое</option><option value="1"<?= $f['stock'] === '1' ? ' selected' : '' ?>>В наличии</option><option value="0"<?= $f['stock'] === '0' ? ' selected' : '' ?>>Нет в наличии</option></select></label>
     <label class="fld" title="Свои title и description товара — как точки в колонках Title и Description"><span>SEO</span><select name="seo">
       <?php foreach (SeoAudit::LIST_FILTERS as $k => $label): ?><option value="<?= e($k) ?>"<?= $f['seo'] === $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
@@ -49,6 +49,13 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
   </div>
 </form>
 
+<?php if ($nophotoHeld): ?>
+<div class="flash warn" role="alert">
+  <form method="post" action="/admin/products/nophoto/" data-confirm="Скрыть с сайта все товары без фото (<?= number_format($nophotoHeld, 0, '', ' ') ?>)? Появится фото — товар снова будет на сайте.">
+    <?= BaseController::tokenField() ?>Без фото <?= number_format($nophotoHeld, 0, '', ' ') ?> <?= plural($nophotoHeld, 'товар', 'товара', 'товаров') ?> на сайте — больше половины, поэтому автоматически они не скрыты: так бывает, если пропала папка с фото (public/wa-data). Если фото на месте и этих товаров действительно без фото столько —
+    <button class="btn btn-sm" type="submit">Скрыть их</button></form>
+</div>
+<?php endif; ?>
 <form method="post" action="/admin/products/bulk/" id="bulk-form" class="card flush" data-total="<?= $total ?>">
   <?= BaseController::tokenField() ?>
   <input type="hidden" name="filter" value="<?= e($query) ?>">
@@ -102,7 +109,7 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
             <?php if ($r['stock'] !== null): ?><small>остаток: <?= (int) $r['stock'] ?></small><?php endif; ?></td>
           <td class="ac-loaded"><?php $at = strtotime((string) $r['created_at']); $src = ProductHistory::source($r['source'], $r['supplier']); $src = $src === ProductHistory::SOURCES['webasyst'] ? 'Webasyst' : $src; // в списке — коротко ?><?= e(date('d.m.Y', $at)) ?><small><?= e(date('H:i', $at)) ?> · <?= e($src !== '' ? $src : 'неизвестно') ?></small></td>
           <?= $view->partial('admin/partials/seo-cells', ['seoCell' => $seoCells[$id] ?? null, 'seoEdit' => '/admin/products/' . $id . '/#h-seo']) ?>
-          <td><?= (int) $r['status'] ? '<span class="pill ok">на сайте</span>' : '<span class="pill">скрыт</span>' ?></td>
+          <td><?= (int) $r['status'] ? '<span class="pill ok">на сайте</span>' : ((int) $r['nophoto_hidden'] ? '<span class="pill" title="Нет фото — скрыт автоматически; появится фото — снова будет на сайте">скрыт: нет фото</span>' : '<span class="pill">скрыт</span>') ?></td>
         </tr>
       <?php endforeach; ?>
       </tbody>

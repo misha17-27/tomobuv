@@ -32,7 +32,7 @@ use App\Services\UkWords;
 final class HitObuviSync extends WebSync
 {
     protected const SUPPLIER = HitObuvi::class;
-    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, purchase_price, box_qty, min_qty, size,
+    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, nophoto_hidden, purchase_price, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext';
     protected const UPDATABLE = ['sku', 'supplier', 'supplier_code', 'category_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty', 'size',
         'stock', 'in_stock', 'status', 'updated_at'];
@@ -369,7 +369,7 @@ final class HitObuviSync extends WebSync
                 $it['relink'] = true;
             }
             if ($it['cat_id'] === null) $it['warn'][] = 'категория «' . $it['map']['key'] . '» не сопоставлена — привязка не изменена';
-            if ($ex['image_id'] === null && $it['photo_url'] !== '') $it['photo'] = true;
+            if (!self::photoOnDisk($ex) && $it['photo_url'] !== '') $it['photo'] = true;   // нет фото или его файла — скачать
             $this->diff($it, $ex, $upd);
             if (!empty($it['relink']) && !isset($it['upd']['category_id'])) $it['changes'][] = 'привязка к категории → ' . ($this->ci['path'][$it['cat_id']] ?? $it['cat_id']);
             if (!empty($it['photo'])) $it['changes'][] = 'фото';
@@ -510,6 +510,7 @@ final class HitObuviSync extends WebSync
         // 6. фото
         foreach ($items as $i => &$it) {
             if (!$it['id'] || empty($it['photo']) || !isset($photos[$i]['file']) || !in_array($it['action'], ['create', 'update'], true)) continue;
+            if ($it['action'] === 'update') self::dropMissingImages((int) $it['id']);   // записи о фото без файлов — убрать
             $this->storePhoto($it, $photos[$i], [], $moved, $now);
         }
         unset($it);

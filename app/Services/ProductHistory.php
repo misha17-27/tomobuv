@@ -16,7 +16,7 @@ use App\Services\Suppliers\Suppliers;
  *
  * История — одна лента из журналов, которые уже есть (по индексам, несколько запросов на товар):
  *   admin_log      — правки в админке («было → стало» в details.ch), фото, массовые действия, импорт, автоназвание
- *                    (по записи на товар: product_bulk, product_import, product_autoname — QUIET);
+ *                    (по записи на товар: product_bulk, product_import, product_autoname, product_nophoto — QUIET);
  *   supplier_changes — загрузчики поставщиков: добавлен, цена поставщика и наша «было → стало», скрыт, нет в наличии, вернулся,
  *                    прочие изменения (edit: ряд, ящик, категория, фото… — «было → стало»);
  *   seo_fix_log    — автоисправление SEO (пакетами; updated_at оно не сдвигает — это не правка данных товара).
@@ -32,7 +32,7 @@ final class ProductHistory
      * Записи admin_log об одном товаре, у которых есть общая запись в журнале сотрудников (массовое действие, запуск импорта)
      * или которые сделала система (автоназвание): в «Безопасность → Действия сотрудников» не показываются, их место — история товара
      */
-    public const QUIET = ['product_bulk', 'product_import', 'product_autoname'];
+    public const QUIET = ['product_bulk', 'product_import', 'product_autoname', 'product_nophoto'];
 
     /** Поля с «было → стало» в истории */
     public const FIELDS = [
@@ -55,9 +55,11 @@ final class ProductHistory
         'price' => 'цена ±%', 'addcat' => 'добавить в категорию', 'delcat' => 'убрать из категории'];
 
     private const MONEY = ['price', 'compare_price', 'purchase_price'];
-    private const INTS = ['box_qty', 'min_qty', 'in_stock', 'status', 'category_id', 'brand_id', 'stock'];
+    private const INTS = ['box_qty', 'min_qty', 'in_stock', 'status', 'category_id', 'brand_id', 'stock', 'nophoto_hidden'];
     /** Служебные колонки — не изменения товара */
     private const SKIP = ['updated_at', 'created_at', 'source'];
+    /** Пишутся, но в журнал не попадают: отметка «скрыт: нет фото» снимается вместе со сменой статуса, видна по нему */
+    private const UNLOGGED = ['nophoto_hidden'];
 
     /** Длина значения в «было → стало» */
     private const CUT = 80;
@@ -160,7 +162,7 @@ final class ProductHistory
     {
         $out = [];
         foreach ($set as $col => $new) {
-            if (in_array($col, self::SKIP, true)) continue;
+            if (in_array($col, self::SKIP, true) || in_array($col, self::UNLOGGED, true)) continue;
             $out[] = isset(self::FIELDS[$col]) ? [$col, self::show($col, $old[$col] ?? null), self::show($col, $new)] : [$col];
         }
         return $out;
@@ -347,6 +349,12 @@ final class ProductHistory
                     $e['who'] = $who($d['by'] ?? ($j['user_id'] ?? null)) ?: 'по расписанию';
                     if (!empty($d['new'])) { array_unshift($e['lines'], 'создан из файла'); $e['kind'] = 'create'; $created = true; }
                     if (!empty($d['hide'])) array_unshift($e['lines'], 'скрыт: нет в файле поставщика');
+                    break;
+                case 'product_nophoto':
+                    // NoPhoto (bin/cron.php): товар без фото на сайте не показывается
+                    $e['title'] = ($d['op'] ?? '') === 'show' ? 'Показан: фото появилось' : 'Скрыт: нет фото';
+                    $e['kind'] = 'auto';
+                    $e['who'] = $who($d['by'] ?? null) ?: 'по расписанию';
                     break;
                 case 'product_autoname':
                     $e['title'] = 'Автоназвание';

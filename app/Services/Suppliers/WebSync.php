@@ -187,6 +187,8 @@ abstract class WebSync extends SupplierSync
     {
         // цена закреплена владельцем (products.price_manual) — цену и старую цену сверка не меняет; закупочная — как у поставщика
         if (!empty($ex['price_manual'])) unset($upd['price'], $upd['compare_price']);
+        // скрыт, потому что нет фото (NoPhoto) — показывает его NoPhoto, когда фото появится, а не сверка
+        if (!empty($ex['nophoto_hidden']) && (int) ($upd['status'] ?? 0) === 1) unset($upd['status']);
         foreach ($upd as $col => $val) {
             $old = $ex[$col] ?? null;
             $same = match ($col) {

@@ -9,11 +9,13 @@ use App\Core\Cache;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Settings;
 use App\Core\Str;
 use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\CatalogIndexer;
 use App\Services\HtmlSanitizer;
+use App\Services\NoPhoto;
 use App\Services\ProductHistory;
 use App\Services\ProductName;
 use App\Services\SeoAudit;
@@ -75,7 +77,7 @@ final class ProductsController extends BaseController
         $rows = [];
         if ($ids) {
             [$ph, $vals] = $db->in($ids);
-            $byId = $db->keyed("SELECT id, name, name_uk, sku, url, price, compare_price, price_manual, box_qty, size, stock, in_stock, status, image_id, image_ext,
+            $byId = $db->keyed("SELECT id, name, name_uk, sku, url, price, compare_price, price_manual, box_qty, size, stock, in_stock, status, nophoto_hidden, image_id, image_ext,
                 brand_id, category_id, badge, created_at, updated_at, source, supplier, seo_name, meta_title, meta_title_uk, meta_description, meta_description_uk
                 FROM products WHERE id IN ($ph)", $vals);
             foreach ($ids as $id) if (isset($byId[$id])) $rows[] = $byId[$id];
@@ -100,6 +102,7 @@ final class ProductsController extends BaseController
             'query'   => http_build_query(array_filter(array_diff_key($f, ['sort' => 1]), static fn($v) => $v !== '' && $v !== 0 && $v !== false)),
             'capped'  => self::$capped ? self::SEARCH_LIMIT : 0,
             'seoCells' => SeoAudit::listCells('product', $rows),    // точки Title/Description — как в SEO-обзоре и на витрине
+            'nophotoHeld' => (int) Settings::get('nophoto.held', '0'),   // без фото больше половины — cron не скрыл (NoPhoto)
         ]);
     }
 
@@ -114,7 +117,7 @@ final class ProductsController extends BaseController
             'category' => ($cat === 'none' || ctype_digit($cat)) ? $cat : '',
             'direct'   => $s('direct') === '1' ? '1' : '',
             'brand'    => (int) $s('brand'),
-            'status'   => in_array($s('status'), ['0', '1'], true) ? $s('status') : '',
+            'status'   => in_array($s('status'), ['0', '1', 'np'], true) ? $s('status') : '',   // np — скрыты: нет фото (NoPhoto)
             'stock'    => in_array($s('stock'), ['0', '1'], true) ? $s('stock') : '',
             'sale'     => $s('sale') === '1' ? '1' : '',
             'nophoto'  => $s('nophoto') === '1' ? '1' : '',
@@ -175,6 +178,7 @@ final class ProductsController extends BaseController
         // проверка по списку в памяти, сортировка идёт по индексу без чтения строк. Обратных много (от 1000) — обычное условие.
         foreach (['status' => 'status', 'stock' => 'in_stock'] as $k => $col) {
             if ($f[$k] === '') continue;
+            if ($f[$k] === 'np') { $w[] = 'p.nophoto_hidden = 1'; continue; }
             $rest = $f[$k] === '1' ? self::notOne($col) : null;
             if ($rest === null) { $w[] = "p.$col = ?"; $p[] = (int) $f[$k]; continue; }
             if (!$rest) continue;                                // обратных нет — подходят все
@@ -373,7 +377,8 @@ final class ProductsController extends BaseController
             switch ($action) {
                 case 'show':
                 case 'hide':
-                    $db->query("UPDATE products SET status = ?, updated_at = ? WHERE id IN ($ph)", array_merge([$action === 'show' ? 1 : 0, $now], $vals));
+                    // видимость решил сотрудник — отметка «скрыт: нет фото» снимается (показанный без фото NoPhoto скроет снова)
+                    $db->query("UPDATE products SET status = ?, nophoto_hidden = 0, updated_at = ? WHERE id IN ($ph)", array_merge([$action === 'show' ? 1 : 0, $now], $vals));
                     break;
                 case 'instock':
                 case 'outstock':
@@ -643,6 +648,8 @@ final class ProductsController extends BaseController
         $d['min_qty'] = Request::post('min_qty') === '' ? $d['box_qty'] : max(1, min(65535, Request::postInt('min_qty', 1)));
         // цена закреплена: галочка «Цена закреплена» или цену изменили — ночная сверка поставщика её не меняет
         $d['price_manual'] = Request::post('price_manual') === '1' || ($id && abs((float) ($old['price'] ?? 0) - $d['price']) >= 0.005) ? 1 : 0;
+        // статус изменили вручную — отметка «скрыт: нет фото» снимается: скрытый так не покажется сам, показанный без фото NoPhoto скроет снова
+        if ($id && !empty($old['nophoto_hidden']) && (int) $old['status'] !== $d['status']) $d['nophoto_hidden'] = 0;
         if ($d['stock'] === 0) $d['in_stock'] = 0;                  // остаток 0 — нет в наличии
         $badge = Request::post('badge');
         $d['badge'] = $badge === 'custom' ? (mb_substr(Request::post('badge_custom'), 0, 64) ?: null) : (isset(AdminCatalog::BADGES[$badge]) && $badge !== '' ? $badge : null);
@@ -874,6 +881,17 @@ final class ProductsController extends BaseController
         if ((int) $p['price_manual'] !== 1) $ch[] = 'цена закреплена — ночная сверка поставщика её не меняет';
         if ($ch) $this->log('product_update', 'product', $id, ['name' => $p['name'], 'ch' => $ch, 'quick' => 1]);
         return Response::json($out($price, true));
+    }
+
+    /**
+     * POST /admin/products/nophoto/ — скрыть товары без фото, хотя их больше половины товаров на сайте: cron столько сразу
+     * не скрывает (скорее пропала папка фото, чем сами фото — NoPhoto::MASS_SHARE), список показывает предупреждение с этой кнопкой.
+     */
+    public function nophoto(): Response
+    {
+        $r = NoPhoto::sync(true, Auth::id() ?: null);
+        $this->log('products_nophoto', null, null, ['hidden' => $r['hidden'], 'fixed' => $r['fixed']]);
+        return $this->bulkBack('Скрыто товаров без фото: ' . number_format($r['hidden'], 0, '', ' ') . ($r['fixed'] ? '; у ' . $r['fixed'] . ' главным стало другое фото' : '') . '.');
     }
 
     public function delete(string $id): Response

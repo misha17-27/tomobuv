@@ -98,6 +98,7 @@ $paths = AdminCatalog::paths($cats);
     <section class="card" aria-labelledby="h-pub">
       <h2 id="h-pub">Публикация</h2>
       <label class="fld"><span>Статус</span><select name="status"><option value="1"<?= (int) $p['status'] ? ' selected' : '' ?>>Опубликован на сайте</option><option value="0"<?= !(int) $p['status'] ? ' selected' : '' ?>>Скрыт</option></select></label>
+      <?php if (!empty($p['nophoto_hidden']) && !(int) $p['status']): ?><p class="hint ac-mb">Скрыт автоматически: нет фото. Добавьте фото — товар снова появится на сайте (в течение часа).</p><?php endif; ?>
       <label class="chk ac-mb"><input type="checkbox" name="in_stock" value="1"<?= (int) $p['in_stock'] ? ' checked' : '' ?>> В наличии</label>
       <label class="fld"><span>Бейдж</span>
         <select name="badge" id="p-badge"><?php foreach ($badges as $k => $label): ?><option value="<?= e($k) ?>"<?= !$badgeCustom && $badge === $k ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?>
