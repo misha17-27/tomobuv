@@ -137,6 +137,12 @@ final class LegacyProducts
         return md5('o|' . $c . '|' . self::sz($size !== '' ? $size : (self::isRow($sku) ? $sku : '')));
     }
 
+    /** Бренды Tom.m и Jong•Golf на сайте: [id …] (их модели берут и свои загрузчики, и «Хит обуви» — SupplierSync::ownModels) */
+    public static function ownBrandIds(): array
+    {
+        return array_keys(self::ownBrands());
+    }
+
     /** Бренды Tom.m и Jong•Golf на сайте (для правила own) */
     private static function ownBrands(): array
     {

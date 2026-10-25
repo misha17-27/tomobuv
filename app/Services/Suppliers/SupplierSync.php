@@ -42,6 +42,8 @@ abstract class SupplierSync
     protected array $values = [];               // [fid => [нормализованное значение => id]]
     protected array $brandByNorm = [];          // [ключ раскодированного названия => [id, …]] — «J&amp;amp;G» на сайте = «J&G»
     protected int $brandFeature = 0;
+    /** ownModels: [поставщики => [ключ модели => [id …]]] */
+    private array $ownModels = [];
     protected bool $deferred = false;           // порция отложена: блокировка индекса занята (идёт полная перестройка)
 
     /** Запись порции в открытой транзакции (под блокировкой индекса). $moved — перенесённые файлы фото (удаляются при откате) */
@@ -282,6 +284,30 @@ abstract class SupplierSync
      * «Один товар — один поставщик»: из $pids — товары, связанные (supplier_links) с другим поставщиком, чем этот.
      * Такие товары загрузчик не находит, не берёт под себя и не меняет. @return [id товара => код другого поставщика]
      */
+    /**
+     * Та же модель у товаров на сайте, которые ведут поставщики $suppliers (бренды Tom.m и Jong•Golf: их берут и свои
+     * загрузчики, и «Хит обуви»): [ключ «код модели + ряд» (LegacyProducts::ownKey) => [id …]]. Только товары на сайте
+     * (status 1 — с фото: без фото NoPhoto скрывает). Один раз за порцию.
+     */
+    protected function ownModels(array $suppliers): array
+    {
+        $k = implode(',', $suppliers);
+        if (isset($this->ownModels[$k])) return $this->ownModels[$k];
+        $out = [];
+        $bids = \App\Services\LegacyProducts::ownBrandIds();
+        if ($bids && $suppliers) {
+            $db = App::db();
+            [$bph, $bv] = $db->in($bids);
+            [$sph, $sv] = $db->in($suppliers);
+            foreach ($db->all("SELECT p.id, p.name, p.sku, p.size FROM products p JOIN supplier_links l ON l.product_id = p.id
+                WHERE p.status = 1 AND p.brand_id IN ($bph) AND l.supplier IN ($sph)", array_merge($bv, $sv)) as $r) {
+                $key = \App\Services\LegacyProducts::ownKey((string) $r['name'], (string) $r['sku'], (string) $r['size']);
+                if ($key !== null) $out[$key][] = (int) $r['id'];
+            }
+        }
+        return $this->ownModels[$k] = $out;
+    }
+
     protected function foreignLinked(array $pids): array
     {
         $pids = array_values(array_unique(array_filter(array_map('intval', $pids))));

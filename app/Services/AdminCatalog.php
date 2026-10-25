@@ -228,11 +228,12 @@ final class AdminCatalog
 
     /**
      * Удалить товары полностью (строки во всех таблицах + файлы фото). Возвращает количество. Товары поставщиков (связи
-     * supplier_links) запоминаются в supplier_excluded — загрузчики их снова не добавляют (решение владельца 23.10.2026).
+     * supplier_links) запоминаются в supplier_excluded — загрузчики их снова не добавляют (решение владельца 23.10.2026);
+     * $exclude = false — не запоминаются (удаление товаров без фото, NoPhoto::purge: модель с фото загрузчик добавит снова).
      * Индекс — точечно, как после сохранения: снимок (фильтры, бренды) до удаления, CatalogIndexer::products после.
      * Строки catalog_index удалённых товаров убирает он же — по ним видно, в каких категориях уменьшить фильтры и счётчики.
      */
-    public static function deleteProducts(array $ids): int
+    public static function deleteProducts(array $ids, bool $exclude = true): int
     {
         $ids = self::ids($ids);
         if (!$ids) return 0;
@@ -242,9 +243,9 @@ final class AdminCatalog
         foreach (array_chunk($ids, 1000) as $part) {
             [$ph, $vals] = $db->in($part);
             foreach ($db->col("SELECT url FROM products WHERE id IN ($ph)", $vals) as $u) $urls[] = '/product/' . $u . '/';
-            $db->transaction(static function ($db) use ($ph, $vals) {
+            $db->transaction(static function ($db) use ($ph, $vals, $exclude) {
                 // товар поставщика удалил владелец — загрузчик его больше не создаёт (supplier_excluded; вернуть — «Обзор» поставщика)
-                try {
+                if ($exclude) try {
                     $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, ext_id, product_id, created_at)
                         SELECT l.supplier, l.code, p.name, l.ext_id, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
                 } catch (\PDOException $e) {
@@ -331,8 +332,17 @@ final class AdminCatalog
     /** Общая часть загрузки: строка product_images + оригинал (до 1200 px) по схеме Webasyst; миниатюры создаст ImageController */
     private static function storeProductImage(int $pid, string $src, string $ext): array|string
     {
+        // не одновременно с удалением товаров без фото (NoPhoto::purge): фото не сохранится в товар, который тут же удалят
+        $out = 'идёт удаление товаров без фото — попробуйте ещё раз через минуту';
+        NoPhoto::guard(static function () use (&$out, $pid, $src, $ext): void { $out = self::storeProductImageNow($pid, $src, $ext); }, 30);
+        return $out;
+    }
+
+    private static function storeProductImageNow(int $pid, string $src, string $ext): array|string
+    {
         @ini_set('memory_limit', '512M');
         $db = App::db();
+        if (!$db->value('SELECT 1 FROM products WHERE id = ?', [$pid])) return 'товар удалён';
         $sort = (int) $db->value('SELECT COALESCE(MAX(sort), -1) + 1 FROM product_images WHERE product_id = ?', [$pid]);
         $iid = $db->insert('product_images', ['product_id' => $pid, 'sort' => $sort, 'ext' => $ext, 'width' => 0, 'height' => 0,
             'filename' => '', 'created_at' => date('Y-m-d H:i:s')]);
@@ -344,7 +354,9 @@ final class AdminCatalog
         }
         $db->update('product_images', ['width' => (int) $info[0], 'height' => (int) $info[1]], 'id = ?', [$iid]);
         self::protectOriginals();
-        if (!$db->value('SELECT image_id FROM products WHERE id = ?', [$pid])) self::syncMainImage($pid);
+        // главного нет или его файла нет (не перенесён со старого сайта) — главным становится фото с файлом (это)
+        $main = $db->row('SELECT image_id, image_ext FROM products WHERE id = ?', [$pid]);
+        if (!$main || !$main['image_id'] || !NoPhoto::has($pid, (int) $main['image_id'], (string) $main['image_ext'])) self::syncMainImage($pid);
         return ['id' => $iid, 'ext' => $ext, 'width' => (int) $info[0], 'height' => (int) $info[1], 'sort' => $sort];
     }
 
@@ -357,11 +369,13 @@ final class AdminCatalog
         @file_put_contents($f, "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n");
     }
 
-    /** Главное фото = первое по порядку */
+    /** Главное фото = первое по порядку из тех, у которых есть файл (NoPhoto::has); файлов нет ни у одного — первое */
     public static function syncMainImage(int $pid): void
     {
         $db = App::db();
-        $img = $db->row('SELECT id, ext FROM product_images WHERE product_id = ? ORDER BY sort, id LIMIT 1', [$pid]);
+        $rows = $db->all('SELECT id, ext FROM product_images WHERE product_id = ? ORDER BY sort, id', [$pid]);
+        $img = $rows[0] ?? null;
+        foreach ($rows as $r) if (NoPhoto::has($pid, (int) $r['id'], (string) $r['ext'])) { $img = $r; break; }
         $db->update('products', ['image_id' => $img ? (int) $img['id'] : null, 'image_ext' => $img['ext'] ?? null], 'id = ?', [$pid]);
     }
 

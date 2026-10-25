@@ -35,6 +35,9 @@ final class DB
             PDO::ATTR_STRINGIFY_FETCHES  => false,
         ]);
         $this->pdo->exec("SET time_zone = '" . date('P') . "'");
+        // соединение без запросов дольше wait_timeout сервер закрывает («MySQL server has gone away», 2006): на хостинге он
+        // короткий, а загрузчик поставщика молчит, пока качает фото (ответ до 45 с), удаление товаров — пока стирает файлы
+        try { $this->pdo->exec('SET SESSION wait_timeout = 28800'); } catch (\PDOException) {}
     }
 
     public function pdo(): PDO

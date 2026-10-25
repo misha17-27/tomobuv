@@ -49,7 +49,7 @@ final class JongGolfSiteSync extends WebSync
         'nophoto' => 'новый товар без фото', 'photo' => 'фото не скачалось', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'noadd' => 'новые товары не добавляются (настройка)',
         'robots_photo' => 'фото бренда закрыты robots.txt — новый товар без фото не создаётся',
         'limit_new' => 'лимит новых товаров за запуск', 'nostock' => 'по карточке модели уже нет в наличии', 'dup' => 'повтор кода цвета',
-        'ambiguous' => 'код совпал с несколькими товарами',
+        'ambiguous' => 'код совпал с несколькими товарами', 'foreign' => 'эта модель уже на сайте от «Хит обуви» — не дублируется',
     ];
     public const VIA = ['link' => 'по связи', 'name' => 'по названию старого загрузчика', 'code' => 'по коду цвета в артикуле (заведён вручную)'];
     /** Поля настройки характеристик, которые есть у каждого цвета в списке (без карточки): «обновлять характеристики» найденных — только они */
@@ -259,6 +259,10 @@ final class JongGolfSiteSync extends WebSync
         if ($it['size'] === '') { $this->skip($it, 'size', 'нет размерного ряда — ' . $it['aid'] . ' не добавлен', 'warn'); return; }
         if ($it['pair'] <= 0) { $this->skip($it, 'price', 'цена 0 — ' . $it['aid'] . ' не добавлен', 'error'); return; }
         if (!$it['box']) { $this->skip($it, 'box', 'не определить пар в ящике — ' . $it['aid'] . ' не добавлен', 'warn'); return; }
+        // та же модель (код + ряд) уже на сайте от «Хит обуви» (берёт Jong•Golf с фото с 25.10.2026) — не дублируется
+        if (($k = \App\Services\LegacyProducts::ownKey('x ' . $it['aid'], (string) $it['aid'], (string) $it['size'])) !== null && isset($this->ownModels([HitObuvi::CODE])[$k])) {
+            $this->skip($it, 'foreign', ''); return;
+        }
         if (!$it['photo_urls'] && $c['add_without_photo'] !== '1') { $this->skip($it, 'nophoto', 'нет фото — ' . $it['aid'] . ' не добавлен', 'warn'); return; }
         if ($it['photo_urls'] && !$this->client->obtainable($it['photo_urls'][0])) {
             // фото бренда закрыты robots.txt (public.jonggolf.com: «Disallow: …/product…» закрывает /files/products/) — не запрашиваем

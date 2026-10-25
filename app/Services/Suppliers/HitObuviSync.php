@@ -46,6 +46,8 @@ final class HitObuviSync extends WebSync
         'dup' => 'повтор товара в запуске', 'taken' => 'найденный товар сайта уже связан с другим товаром поставщика',
         'foreign' => 'найденный товар сайта ведёт другой поставщик (свой загрузчик бренда) или его бренд в пропускаемых',
     ];
+    /** Бренды со своим загрузчиком (bkey): Jong•Golf, J&G, Tom.m */
+    private const OWN_BRANDS = ['JONGGOLF', 'JG', 'TOMM', 'TOMMM'];
     public const VIA = ['link' => 'по связи', 'forsage' => 'по forsage-коду', 'name' => 'по названию и ряду', 'article' => 'по типу, бренду, артикулу и ряду'];
 
     private int $minId;
@@ -263,6 +265,14 @@ final class HitObuviSync extends WebSync
                 $c[(int) $r['id']] = 1;
             }
             if ($c) $found[$i] = ['article', array_keys($c)];
+        }
+        // R5: бренд со своим загрузчиком (Jong•Golf, Tom.m), которого владелец разрешил брать у «Хит обуви» (убрал из пропускаемых:
+        // у бренда нет фото, 25.10.2026), — та же модель (код + ряд) уже на сайте от загрузчика бренда: не дублируется (foreign)
+        foreach ($items as $i => $it) {
+            if (isset($found[$i]) || !array_intersect([self::bkey($it['brand']), self::bkey($it['maker'])], self::OWN_BRANDS)) continue;
+            $key = \App\Services\LegacyProducts::ownKey($it['name'], '', $it['size']);
+            $own = $key !== null ? ($this->ownModels([JongGolf::CODE, Tomm::CODE])[$key] ?? []) : [];
+            if ($own) $found[$i] = ['own', $own];
         }
         // строки найденных товаров + связи с другими товарами поставщика
         $ids = [];

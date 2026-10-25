@@ -31,7 +31,7 @@ if ($seo->canonical && str_starts_with($seo->canonical, ($siteBase = rtrim((stri
 <html lang="<?= Lang::isUk() ? 'uk' : 'ru' ?>">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1">
 <title><?= e($seo->title) ?></title>
 <?php if ($seo->description !== ''): ?><meta name="description" content="<?= e($seo->description) ?>">
 <?php endif; ?>

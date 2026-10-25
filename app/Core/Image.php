@@ -62,9 +62,32 @@ final class Image
      */
     public static function resize(string $src, string $dst, string $size, int $quality = 85): bool
     {
-        if (!is_file($src) || !function_exists('imagecreatetruecolor')) return false;
+        $out = self::scaled($src, $size);
+        if (!$out) return false;
+        @mkdir(dirname($dst), 0775, true);
+        $ok = self::encode($out, strtolower(pathinfo($dst, PATHINFO_EXTENSION)), $quality, $dst);
+        imagedestroy($out);
+        return $ok;
+    }
+
+    /** Уменьшенная картинка в памяти, без файла на диске (миниатюры — ImageController): байты или null */
+    public static function render(string $src, string $size, string $ext, int $quality = 85): ?string
+    {
+        $out = self::scaled($src, $size);
+        if (!$out) return null;
+        ob_start();
+        $ok = self::encode($out, strtolower($ext), $quality, null);
+        $data = (string) ob_get_clean();
+        imagedestroy($out);
+        return $ok && $data !== '' ? $data : null;
+    }
+
+    /** Картинка $src, уменьшенная до $size (правила — resize) */
+    private static function scaled(string $src, string $size): ?\GdImage
+    {
+        if (!is_file($src) || !function_exists('imagecreatetruecolor')) return null;
         $info = @getimagesize($src);
-        if (!$info) return false;
+        if (!$info) return null;
         [$w, $h] = $info;
         $mime = $info['mime'];
         $img = match ($mime) {
@@ -74,7 +97,7 @@ final class Image
             'image/webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($src) : false,
             default      => false,
         };
-        if (!$img) return false;
+        if (!$img) return null;
 
         $cx = 0; $cy = 0; $cw = $w; $ch = $h;
         if (preg_match('/^(\d+)x(\d+)$/', $size, $m) && $m[1] !== '0' && $m[2] !== '0') {
@@ -91,7 +114,7 @@ final class Image
             $max = (int) $size; $scale = min(1, $max / max($w, $h));
             $tw = (int) round($w * $scale); $th = (int) round($h * $scale);
         } else {
-            return false;
+            return null;
         }
 
         $out = imagecreatetruecolor(max(1, $tw), max(1, $th));
@@ -100,16 +123,18 @@ final class Image
             imagesavealpha($out, true);
         }
         imagecopyresampled($out, $img, 0, 0, $cx, $cy, $tw, $th, $cw, $ch);
-        @mkdir(dirname($dst), 0775, true);
-        $ext = strtolower(pathinfo($dst, PATHINFO_EXTENSION));
-        $ok = match ($ext) {
-            'png'  => imagepng($out, $dst, 6),
-            'gif'  => imagegif($out, $dst),
-            'webp' => function_exists('imagewebp') ? imagewebp($out, $dst, $quality) : false,
-            default => imagejpeg($out, $dst, $quality),
-        };
         imagedestroy($img);
-        imagedestroy($out);
-        return (bool) $ok;
+        return $out;
+    }
+
+    /** Сохранить в файл $to (null — в вывод) в формате по расширению */
+    private static function encode(\GdImage $out, string $ext, int $quality, ?string $to): bool
+    {
+        return (bool) match ($ext) {
+            'png'  => imagepng($out, $to, 6),
+            'gif'  => imagegif($out, $to),
+            'webp' => function_exists('imagewebp') ? imagewebp($out, $to, $quality) : false,
+            default => imagejpeg($out, $to, $quality),
+        };
     }
 }

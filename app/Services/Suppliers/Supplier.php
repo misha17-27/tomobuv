@@ -596,14 +596,29 @@ abstract class Supplier
             $db->query("DELETE FROM supplier_runs WHERE id IN ($ph)", $v);
         }
         foreach ($old as $id) self::rmRunDir($id);
+        // папки запусков (страницы списков, скачанные фото — тысячи файлов за полный проход; хостинг ограничивает число файлов):
+        // нужны идущим (и папкам, из которых идущий читает страницы: state dir / files) и последнему законченному запуску или
+        // пробному прогону каждого источника (повтор по сохранённым страницам: --source=last, «по последним данным»), остальные — удалить
+        $live = [];
+        foreach ($db->all("SELECT id, state FROM supplier_runs WHERE supplier = ? AND status = 'running'", [static::CODE]) as $r) {
+            $live[] = (int) $r['id'];
+            if (preg_match_all('~/runs/(\d+)(?:/|"|$)~', str_replace(['\\/', '\\\\', '\\'], '/', (string) $r['state']), $m)) foreach ($m[1] as $x) $live[] = (int) $x;
+        }
+        foreach ($db->col("SELECT MAX(id) FROM supplier_runs WHERE supplier = ? AND kind IN ('run', 'dry') AND status <> 'running' GROUP BY src", [static::CODE]) as $x) $live[] = (int) $x;
+        foreach (glob(static::dir() . '/runs/*', GLOB_ONLYDIR) ?: [] as $d) {
+            if (ctype_digit(basename($d)) && !in_array((int) basename($d), $live, true)) self::rmRunDir((int) basename($d));
+        }
         // журнал изменений («Обзор»: цены, скрытые, вернувшиеся, добавленные) — «{код}.history_days» дней (по умолчанию 365)
         $db->query('DELETE FROM supplier_changes WHERE supplier = ? AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)', [static::CODE, static::historyDays()]);
         foreach (glob(static::dir() . '/upload-*') ?: [] as $f) if (is_file($f) && filemtime($f) < time() - 86400) @unlink($f);
         // связи с удалёнными товарами (удалили до supplier_excluded или не через админку) — тоже «удалён вручную»: загрузчик
         // их снова не создаёт (решение владельца: удалённое не возвращается; вернуть — «Обзор» поставщика)
         try {
+            // товар удалила система (пересборка каталога, удаление товаров без фото — он есть в карте старых адресов legacy_products):
+            // связь просто убирается, модель загрузчик добавит снова (шаг загрузчика мог записать её уже после удаления)
             $db->query('INSERT IGNORE INTO supplier_excluded (supplier, code, name, ext_id, product_id, created_at)
-                SELECT l.supplier, l.code, NULL, l.ext_id, l.product_id, NOW() FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id WHERE l.supplier = ? AND p.id IS NULL', [static::CODE]);
+                SELECT l.supplier, l.code, NULL, l.ext_id, l.product_id, NOW() FROM supplier_links l LEFT JOIN products p ON p.id = l.product_id
+                WHERE l.supplier = ? AND p.id IS NULL AND NOT EXISTS (SELECT 1 FROM legacy_products lp WHERE lp.old_id = l.product_id)', [static::CODE]);
         } catch (\PDOException) {
             return;                                                             // нет таблицы (до bin/install.php) — связи не трогать
         }

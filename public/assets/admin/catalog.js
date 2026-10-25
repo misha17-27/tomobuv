@@ -94,7 +94,7 @@
       var a = action.value, n = nEl.textContent;
       if (!a) { e.preventDefault(); action.focus(); return; }
       if ((a === 'addcat' || a === 'delcat') && !$('#bulk-cat').value) { e.preventDefault(); alert('Выберите категорию'); return; }
-      if (a === 'price' && !$('#bulk-pct').value.trim()) { e.preventDefault(); alert('Укажите процент'); return; }
+      if (a === 'price' && !$('#bulk-pct').value.trim()) { e.preventDefault(); alert($('#bulk-unit').value === 'pct' ? 'Укажите процент' : 'Укажите, на сколько гривен изменить цену пары'); return; }
       if (a === 'delete' && !confirm('Удалить товаров: ' + n + '? Это необратимо — удалятся и фото. Товары поставщиков загрузчики больше не добавят (вернуть — «Поставщики → Обзор»).')) { e.preventDefault(); return; }
       if (all && all.checked && a !== 'delete' && !confirm('Применить действие ко всем найденным товарам (' + n + ')?')) e.preventDefault();
     });

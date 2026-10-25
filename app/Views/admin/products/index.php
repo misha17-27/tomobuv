@@ -8,6 +8,7 @@
  */
 use App\Controllers\Admin\BaseController;
 use App\Services\AdminCatalog;
+use App\Services\NoPhoto;
 use App\Services\ProductHistory;
 use App\Services\SeoAudit;
 
@@ -55,6 +56,14 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
     <?= BaseController::tokenField() ?>Без фото <?= number_format($nophotoHeld, 0, '', ' ') ?> <?= plural($nophotoHeld, 'товар', 'товара', 'товаров') ?> на сайте — больше половины, поэтому автоматически они не скрыты: так бывает, если пропала папка с фото (public/wa-data). Если фото на месте и этих товаров действительно без фото столько —
     <button class="btn btn-sm" type="submit">Скрыть их</button></form>
 </div>
+<?php elseif ($nophotoHidden): ?>
+<div class="flash warn" role="status">
+  <?php $np = (int) $nophotoPurge['n']; ?>
+  <form method="post" action="/admin/products/nophoto/delete/" data-confirm="Удалить товары без фото (<?= number_format(min($np, NoPhoto::PURGE_MAX), 0, '', ' ') ?>)? Отменить нельзя. Старые адреса этих товаров будут вести на ту же модель, когда она появится с фото, или на категорию.">
+    <?= BaseController::tokenField() ?><input type="hidden" name="at" value="<?= e((string) $nophotoPurge['at']) ?>"><input type="hidden" name="n" value="<?= $np ?>">Товары без фото, скрытые с сайта: <a href="/admin/products/?status=np"><?= number_format($nophotoHidden, 0, '', ' ') ?></a>. Если у товара появится фото, он вернётся на сайт сам.
+    <?php if ($np): ?><button class="btn btn-sm" type="submit">Удалить <?= $np > NoPhoto::PURGE_MAX ? number_format(NoPhoto::PURGE_MAX, 0, '', ' ') . ' из ' . number_format($np, 0, '', ' ') : 'их (' . number_format($np, 0, '', ' ') . ')' ?></button>
+    <?php else: ?><span class="muted">Удалить их можно будет через час после скрытия (созданные меньше суток назад не удаляются).</span><?php endif; ?></form>
+</div>
 <?php endif; ?>
 <form method="post" action="/admin/products/bulk/" id="bulk-form" class="card flush" data-total="<?= $total ?>">
   <?= BaseController::tokenField() ?>
@@ -70,7 +79,8 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
     <label class="sr-only" for="bulk-action">Действие</label>
     <select name="action" id="bulk-action"><option value="">Действие…</option><?php foreach ($bulk as $k => $label): ?><option value="<?= e($k) ?>"><?= e($label) ?></option><?php endforeach; ?></select>
     <span class="ac-bulk-extra" data-for="addcat delcat" hidden><label class="sr-only" for="bulk-cat">Категория</label><select name="category_id" id="bulk-cat"><option value="">Категория…</option><?= $catOptions($cats, '') ?></select></span>
-    <span class="ac-bulk-extra" data-for="price" hidden><label class="sr-only" for="bulk-pct">Процент</label><input type="text" inputmode="decimal" name="percent" id="bulk-pct" placeholder="+10 или -5" class="ac-pct"> %
+    <span class="ac-bulk-extra" data-for="price" hidden><label class="sr-only" for="bulk-pct">На сколько изменить цену</label><input type="text" inputmode="decimal" name="delta" id="bulk-pct" placeholder="+20 или -15" class="ac-pct">
+      <label class="sr-only" for="bulk-unit">Единица</label><select name="unit" id="bulk-unit"><option value="uah" selected>грн за пару</option><option value="pct">%</option></select>
       <label class="chk"><input type="checkbox" name="round" value="1" checked> до целых грн</label></span>
     <button class="btn btn-p btn-sm" type="submit">Применить</button>
   </div>

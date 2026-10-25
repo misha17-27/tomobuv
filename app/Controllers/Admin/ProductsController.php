@@ -57,7 +57,7 @@ final class ProductsController extends BaseController
         'outstock' => 'Отметить «нет в наличии»',
         'addcat'   => 'Добавить в категорию…',
         'delcat'   => 'Убрать из категории…',
-        'price'    => 'Изменить цену на ±%…',
+        'price'    => 'Изменить цену на ±…',
         'delete'   => 'Удалить',
     ];
 
@@ -103,6 +103,8 @@ final class ProductsController extends BaseController
             'capped'  => self::$capped ? self::SEARCH_LIMIT : 0,
             'seoCells' => SeoAudit::listCells('product', $rows),    // точки Title/Description — как в SEO-обзоре и на витрине
             'nophotoHeld' => (int) Settings::get('nophoto.held', '0'),   // без фото больше половины — cron не скрыл (NoPhoto)
+            'nophotoHidden' => NoPhoto::hiddenCount(),                    // скрыты из-за отсутствия фото
+            'nophotoPurge' => NoPhoto::purgeable(),                       // из них удалит «Удалить их»: n и at (в подтверждении и в форме)
         ]);
     }
 
@@ -318,17 +320,24 @@ final class ProductsController extends BaseController
             if (!$cat) return $this->bulkBack('Выберите категорию.', true);
             if ($action === 'addcat' && (int) $cat['type'] === 1) return $this->bulkBack('В динамическую категорию товары попадают по условию — добавить вручную нельзя.', true);
         }
-        $pct = 0.0;
+        // цена: на сколько гривен за пару (решение владельца 25.10.2026 — по умолчанию) или на сколько процентов
+        $delta = 0.0;
+        $unit = Request::post('unit') === 'pct' ? 'pct' : 'uah';
         if ($action === 'price') {
-            $pct = (float) str_replace(',', '.', Request::post('percent'));
-            if ($pct === 0.0 || $pct < -90 || $pct > 500) return $this->bulkBack('Укажите процент от −90 до 500 (например, 10 или −5).', true);
+            $raw = str_replace([' ', "\u{a0}", ',', '−', '–'], ['', '', '.', '-', '-'], Request::post('delta'));
+            $delta = is_numeric($raw) ? round((float) $raw, 2) : 0.0;
+            if ($unit === 'pct' && ($delta === 0.0 || $delta < -90 || $delta > 500)) return $this->bulkBack('Укажите процент от −90 до 500 (например, 10 или −5).', true);
+            if ($unit === 'uah' && ($delta === 0.0 || abs($delta) > 100000)) return $this->bulkBack('Укажите, на сколько гривен изменить цену пары (например, 20 или −15).', true);
         }
 
         // Только товары, которые действительно изменятся: уже скрытый не «скрывается» снова, цена, не изменившаяся после
         // округления, не пишется. У них одних сдвигается updated_at, они переиндексируются и попадают в историю товара
         // (по записи на товар — «было → стало»; общая запись действия — в журнале сотрудников, как раньше).
         $round = Request::post('round') === '1' ? 0 : 2;
-        $k = 1 + $pct / 100;
+        // новая цена пары: + гривны или × (1 + процент); не больше нуля — товар не меняется (lowPrice — сколько таких)
+        $priceExpr = $unit === 'pct' ? "ROUND(price * CAST(? AS DECIMAL(12,6)), $round)" : "ROUND(price + CAST(? AS DECIMAL(12,2)), $round)";   // DECIMAL: 0,5 — вверх
+        $priceArg = $unit === 'pct' ? 1 + $delta / 100 : $delta;
+        $lowPrice = 0;
         $catName = $cat ? (string) $cat['name'] : '';
         $ch = [];                                                         // [id => [изменения]]
         foreach (array_chunk($ids, 1000) as $part) {
@@ -345,7 +354,8 @@ final class ProductsController extends BaseController
                     }
                     break;
                 case 'price':
-                    foreach ($db->all("SELECT id, price, GREATEST(0, ROUND(price * ?, $round)) np FROM products WHERE id IN ($ph)", array_merge([$k], $vals)) as $r) {
+                    foreach ($db->all("SELECT id, price, $priceExpr np FROM products WHERE id IN ($ph)", array_merge([$priceArg], $vals)) as $r) {
+                        if ((float) $r['np'] <= 0) { $lowPrice++; continue; }
                         if (abs((float) $r['np'] - (float) $r['price']) >= 0.005) $ch[(int) $r['id']] = [['price', ProductHistory::show('price', $r['price']), ProductHistory::show('price', $r['np'])]];
                     }
                     break;
@@ -367,6 +377,8 @@ final class ProductsController extends BaseController
                     break;
             }
         }
+        if (!$ch && $lowPrice) return $this->bulkBack('Цена не изменена: у ' . $lowPrice . ' ' . plural($lowPrice, 'товара', 'товаров', 'товаров') . ' она стала бы 0 или меньше'
+            . ($n > $lowPrice ? ', у остальных — без изменений' : '') . '.', true);
         if (!$ch) return $this->bulkBack('Ничего не изменилось: ' . ($n === 1 ? 'товар уже' : 'все ' . $n . ' ' . plural($n, 'товар', 'товара', 'товаров') . ' уже') . ' в нужном состоянии.');
 
         $changed = array_keys($ch);
@@ -386,7 +398,7 @@ final class ProductsController extends BaseController
                     break;
                 case 'price':
                     // изменённая вручную цена закрепляется: ночная сверка поставщика её не меняет
-                    $db->query("UPDATE products SET price = GREATEST(0, ROUND(price * ?, $round)), price_manual = 1, updated_at = ? WHERE id IN ($ph)", array_merge([$k, $now], $vals));
+                    $db->query("UPDATE products SET price = $priceExpr, price_manual = 1, updated_at = ? WHERE id IN ($ph)", array_merge([$priceArg, $now], $vals));
                     break;
                 case 'addcat':
                     $db->query("INSERT IGNORE INTO category_products (category_id, product_id, sort) SELECT ?, id, 0 FROM products WHERE id IN ($ph)", array_merge([$catId], $vals));
@@ -411,16 +423,19 @@ final class ProductsController extends BaseController
         if ($action === 'addcat' || $action === 'delcat') Cache::forget('admin.category_direct_counts');
         CatalogIndexer::products($changed, $snap);
         $m = count($changed);
-        $this->log('products_bulk_' . $action, 'product', null, ['count' => $n, 'changed' => $m, 'category' => $catId ?: null, 'percent' => $pct ?: null, 'ids' => array_slice($changed, 0, 200)]);
+        $this->log('products_bulk_' . $action, 'product', null, ['count' => $n, 'changed' => $m, 'category' => $catId ?: null,
+            'percent' => $unit === 'pct' && $delta ? $delta : null, 'uah' => $unit === 'uah' && $delta ? $delta : null, 'ids' => array_slice($changed, 0, 200)]);
         $uid = Auth::id() ?: null;
         $rows = [];
         foreach ($ch as $pid => $items) $rows[] = [$pid, 'product_bulk', ['op' => $action, 'by' => $uid, 'ch' => array_values($items)]];
         ProductHistory::log($rows, $now);
         $msg = self::BULK[$action];
         if ($cat) $msg = ($action === 'addcat' ? 'Добавлено в категорию «' : 'Убрано из категории «') . $cat['name'] . '»';
-        if ($action === 'price') $msg = 'Цена изменена на ' . ($pct > 0 ? '+' : '') . rtrim(rtrim(number_format($pct, 2, '.', ''), '0'), '.') . '%';
+        if ($action === 'price') $msg = 'Цена изменена на ' . ($delta > 0 ? '+' : '') . rtrim(rtrim(number_format($delta, 2, '.', ''), '0'), '.') . ($unit === 'pct' ? '%' : ' грн за пару');
+        $same = $n - $m - $lowPrice;
         return $this->bulkBack(rtrim($msg, '…') . ': ' . $m . ' ' . plural($m, 'товар', 'товара', 'товаров')
-            . ($n > $m ? ' (ещё ' . ($n - $m) . ' ' . plural($n - $m, 'товар', 'товара', 'товаров') . ' — без изменений: уже в нужном состоянии)' : '') . '.');
+            . ($same > 0 ? ' (ещё ' . $same . ' ' . plural($same, 'товар', 'товара', 'товаров') . ' — без изменений: уже в нужном состоянии)' : '')
+            . ($lowPrice ? '; ' . $lowPrice . ' ' . plural($lowPrice, 'товар не изменён', 'товара не изменены', 'товаров не изменено') . ' — цена стала бы 0 или меньше' : '') . '.');
     }
 
     private function bulkBack(string $msg, bool $error = false): Response
@@ -890,8 +905,27 @@ final class ProductsController extends BaseController
     public function nophoto(): Response
     {
         $r = NoPhoto::sync(true, Auth::id() ?: null);
+        if ($r['busy']) return $this->bulkBack('Сейчас идёт проверка товаров без фото — попробуйте через минуту.', true);
         $this->log('products_nophoto', null, null, ['hidden' => $r['hidden'], 'fixed' => $r['fixed']]);
         return $this->bulkBack('Скрыто товаров без фото: ' . number_format($r['hidden'], 0, '', ' ') . ($r['fixed'] ? '; у ' . $r['fixed'] . ' главным стало другое фото' : '') . '.');
+    }
+
+    /**
+     * POST /admin/products/nophoto/delete/ — удалить товары, скрытые из-за отсутствия фото (NoPhoto::purge, решение владельца
+     * 25.10.2026): старые адреса — 301 (карта LegacyProducts), поставщик модель с фото добавит снова. До NoPhoto::PURGE_MAX за раз.
+     */
+    public function nophotoDelete(): Response
+    {
+        @set_time_limit(300);                                              // до 2000 товаров с файлами и картой адресов
+        ignore_user_abort(true);                                           // закрыли вкладку — удаление всё равно доходит до конца
+        $r = NoPhoto::purge(Request::post('at'), max(0, Request::postInt('n')));
+        if ($r['busy']) return $this->bulkBack('Сейчас идёт проверка или удаление товаров без фото — попробуйте через минуту.', true);
+        if ($r['stale']) return $this->bulkBack('Список товаров без фото изменился — обновите страницу и проверьте число.', true);
+        if (!$r['deleted']) return $this->bulkBack('Товаров без фото для удаления нет: у скрытых появилось фото или они скрыты меньше часа назад.');
+        $this->log('products_nophoto_delete', 'product', null, ['count' => $r['deleted'], 'ids' => array_slice($r['ids'], 0, 200), 'left' => $r['left']]);
+        $n = $r['deleted'];
+        return $this->bulkBack('Удалено товаров без фото: ' . number_format($n, 0, '', ' ') . '.'
+            . ($r['left'] ? ' Осталось ' . number_format($r['left'], 0, '', ' ') . ' — нажмите «Удалить их» ещё раз.' : ''));
     }
 
     public function delete(string $id): Response

@@ -64,3 +64,6 @@ DEALLOCATE PREPARE st;
 ALTER TABLE `products` ADD COLUMN IF NOT EXISTS `price_manual` TINYINT(1) NOT NULL DEFAULT 0;
 -- товар скрыт, потому что у него нет фото (App\Services\NoPhoto, bin/cron.php): появится фото — покажется снова
 ALTER TABLE `products` ADD COLUMN IF NOT EXISTS `nophoto_hidden` TINYINT(1) NOT NULL DEFAULT 0;
+-- когда скрыт проверкой (удалить кнопкой «Удалить их» — не раньше чем через час); скрытые до появления колонки — по updated_at
+ALTER TABLE `products` ADD COLUMN IF NOT EXISTS `nophoto_at` DATETIME NULL;
+UPDATE `products` SET `nophoto_at` = `updated_at` WHERE `nophoto_hidden` = 1 AND `nophoto_at` IS NULL;

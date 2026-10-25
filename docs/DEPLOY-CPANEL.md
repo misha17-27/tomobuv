@@ -69,3 +69,8 @@ cd ~/repositories/tomobuv-site && PHP bin/create-admin.php you@mail.com 'Пар�
 ```
 
 Постоянный cron сайта (раз в час): `cd ~/repositories/tomobuv-site && PHP bin/cron.php > /dev/null 2>&1`.
+
+Лимит хостинга — **число файлов** (cPanel → «File Usage», 300 000), а не место на диске. На товар нужно ~3 файла и папки
+(оригинал фото); миниатюры на диск не пишутся (их делает сайт, кэширует Cloudflare), старые удаляет bin/cron.php. Выше 90 % —
+проверить, что растёт (папки запусков поставщиков в storage/import, кэш storage/cache, сессии), до 100 % не доводить:
+перестанут сохраняться входы, кэш и новые фото.

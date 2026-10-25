@@ -52,7 +52,7 @@ final class ProductHistory
 
     /** Массовые действия списка товаров (ProductsController::BULK) — в заголовке события */
     private const BULK_OPS = ['show' => 'показать на сайте', 'hide' => 'скрыть с сайта', 'instock' => '«в наличии»', 'outstock' => '«нет в наличии»',
-        'price' => 'цена ±%', 'addcat' => 'добавить в категорию', 'delcat' => 'убрать из категории'];
+        'price' => 'изменение цены', 'addcat' => 'добавить в категорию', 'delcat' => 'убрать из категории'];
 
     private const MONEY = ['price', 'compare_price', 'purchase_price'];
     private const INTS = ['box_qty', 'min_qty', 'in_stock', 'status', 'category_id', 'brand_id', 'stock', 'nophoto_hidden'];

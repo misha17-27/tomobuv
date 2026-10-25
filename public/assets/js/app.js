@@ -81,7 +81,7 @@
     lastFocus = document.activeElement;
     el.classList.add('show'); el.setAttribute('aria-hidden', 'false'); el.removeAttribute('inert');
     var ov = $('#ui-ov'); if (ov) ov.classList.add('show');
-    var f = el.querySelector('input:not([type=hidden]):not(.hidden),button:not([data-close]),a'); if (f) setTimeout(function () { f.focus(); }, 60);
+    var f = el.querySelector('input:not([type=hidden]):not(.hidden),button:not([data-close]),a'); if (f) setTimeout(function () { f.focus({ preventScroll: true }); }, 60);
     if (id === 'ui-cart') loadCart();
   }
   function close() {

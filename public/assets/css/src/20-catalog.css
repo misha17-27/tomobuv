@@ -118,7 +118,7 @@
 .br-find .input{padding-left:42px}
 .br-h{font-size:22px;font-weight:800;margin:0 0 12px}
 .br-top{margin-bottom:28px}
-.br-tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.br-tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
 .br-tile{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;transition:.2s}
 .br-tile:hover{border-color:var(--blue);box-shadow:var(--shadow)}
 .br-tile b{font-size:15px;line-height:1.25;overflow-wrap:anywhere}
@@ -139,7 +139,7 @@
 .bh-logo{width:120px;height:72px;flex:none;background:#fff;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px}
 .bh-logo img{max-width:106px;max-height:58px;width:auto;height:auto;object-fit:contain}
 
-@media (max-width:1180px){.br-tiles{grid-template-columns:repeat(4,1fr)}.br-list{columns:3}}
+@media (max-width:1180px){.br-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}.br-list{columns:3}}
 @media (max-width:980px){
   .fbtn{display:inline-flex}
   .filters-wrap.show{box-shadow:0 0 40px rgba(10,20,28,.25)}   /* у закрытой панели тень заходила серой полосой на левый край экрана */
@@ -161,7 +161,7 @@
   .srch-form .btn{padding:0 16px}
   .br-letters{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px 4px;flex:1 1 100%}
   .br-letters a{flex:none}
-  .br-tiles{grid-template-columns:repeat(2,1fr);gap:10px}
+  .br-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .br-list{columns:1}
   .br-find{flex:1 1 100%}
   .bh{gap:12px}

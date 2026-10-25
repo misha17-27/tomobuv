@@ -7,6 +7,7 @@ use App\Services\Content;
 $phones = Settings::json('phones', []);
 ?>
 <div class="ov" id="ui-ov"></div>
+<div class="drawers">
 <aside class="drawer" id="ui-cart" aria-label="<?= e(t('Корзина')) ?>" aria-hidden="true" inert>
   <div class="hd"><h3><?= e(t('Корзина')) ?></h3><button data-close aria-label="<?= e(t('Закрыть')) ?>"><?= icon('x') ?></button></div>
   <div class="bd"><div class="empty"><?= e(t('Загрузка…')) ?></div></div>
@@ -36,6 +37,7 @@ $phones = Settings::json('phones', []);
     <?php foreach ($phones as $p): ?><a href="tel:+<?= e(preg_replace('/\D/', '', $p)) ?>"><?= e($p) ?></a><?php endforeach; ?>
   </div>
 </aside>
+</div>
 <div class="modal" id="callback" role="dialog" aria-modal="true" aria-labelledby="cb-t" aria-hidden="true" inert>
   <button class="x" data-close aria-label="<?= e(t('Закрыть')) ?>"><?= icon('x') ?></button>
   <h3 id="cb-t"><?= e(t('Обратный звонок')) ?></h3>

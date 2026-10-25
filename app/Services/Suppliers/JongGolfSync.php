@@ -49,7 +49,7 @@ final class JongGolfSync extends SupplierSync
         'absent' => 'цвет закончился, товара на сайте нет', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'noadd' => 'новые товары не добавляются (настройка)',
         'category' => 'категория не сопоставлена (новый товар)', 'size' => 'нет размерного ряда', 'price' => 'цена 0',
         'nophoto' => 'новый товар без фото', 'photo' => 'фото не скачалось', 'manual' => 'есть товар, заведённый вручную',
-        'dup' => 'повтор кода цвета', 'ambiguous' => 'код совпал с несколькими товарами',
+        'dup' => 'повтор кода цвета', 'ambiguous' => 'код совпал с несколькими товарами', 'foreign' => 'эта модель уже на сайте от «Хит обуви» — не дублируется',
     ];
 
     private array $dict;
@@ -344,6 +344,10 @@ final class JongGolfSync extends SupplierSync
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'Ошибка: категория «' . $it['mkey'] . '» не обработана (нет в таблице соответствия) — ' . $it['aid'] . ' не добавлен', 'error'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'Ошибка: для ' . $it['aid'] . ' id-поставщика=' . $it['ext'] . ' не задана размерная сетка', 'error'); return; }
         if ($it['price'] <= 0) { $this->skip($it, 'price', 'Ошибка: цена 0 — ' . $it['aid'] . ' id-поставщика=' . $it['ext'] . ' не добавлен', 'error'); return; }
+        // та же модель (код + ряд) уже на сайте от «Хит обуви» (берёт Jong•Golf с фото с 25.10.2026) — не дублируется
+        if (($k = \App\Services\LegacyProducts::ownKey('x ' . $it['aid'], (string) $it['aid'], (string) $it['size'])) !== null && isset($this->ownModels([HitObuvi::CODE])[$k])) {
+            $this->skip($it, 'foreign', ''); return;
+        }
         if ($it['url'] === '' && $c['add_without_photo'] !== '1') { $this->skip($it, 'nophoto', 'Предупреждение: НЕ добавлен ' . $it['aid'] . ' id-поставщика=' . $it['ext'] . ' — нет фото', 'warn'); return; }
         $it['brand_ref'] = $this->brandRef($it['brand'], $it['brand_raw']);
         [$name, $nameUk] = $this->names($it, $it['cat_id']);
