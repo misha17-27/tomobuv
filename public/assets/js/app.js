@@ -198,7 +198,7 @@
     inp.addEventListener('input', function () {
       clearTimeout(timer);
       var q = inp.value.trim();
-      if (q.length < 2) { sg.classList.remove('show'); return; }
+      if (q.length < 3) { sg.classList.remove('show'); return; }
       timer = setTimeout(function () {
         lastQ = q;
         getJSON(url('/search/suggest/?q=' + encodeURIComponent(q))).then(function (r) {

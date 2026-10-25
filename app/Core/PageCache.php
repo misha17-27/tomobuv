@@ -70,8 +70,11 @@ final class PageCache
     public static function key(): ?string
     {
         $q = $_GET;
+        $isAjax = (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') ? ':ajax' : '';
         foreach (array_keys($q) as $k) {
             $k = (string) $k;
+            // «Показать ещё» (catalog.js): «_=more» — только чтобы браузер не путал JSON с HTML того же адреса; ответ тот же
+            if ($k === '_') { if ($isAjax !== '' && $q[$k] === 'more') { unset($q[$k]); continue; } return null; }
             if (isset(self::QUERY_FORMAT[$k]) && (!is_string($q[$k]) || !preg_match(self::QUERY_FORMAT[$k], $q[$k]))) return null;
             if (in_array($k, self::ALLOWED_QUERY, true) || preg_match('/^f\d+$/', $k)) continue;
             // рекламные метки на содержимое не влияют — одна и та же страница в кэше
@@ -81,7 +84,6 @@ final class PageCache
         ksort($q);
         $qs = $q ? '?' . http_build_query($q) : '';
         if (strlen($qs) > 500) return null;   // слишком сложные фильтры не кэшируем
-        $isAjax = (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') ? ':ajax' : '';
         // Host в ключ не входит: кэш работает только для своего домена (enabled → hostAllowed), а страница от Host
         // не зависит (абсолютные ссылки — из base_url). Иначе www/без www, регистр и порт в Host дали бы копии файлов.
         return Lang::prefix() . Request::path() . $qs . $isAjax;

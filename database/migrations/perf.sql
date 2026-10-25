@@ -56,3 +56,10 @@ SET @s = IF((SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHE
 PREPARE st FROM @s;
 EXECUTE st;
 DEALLOCATE PREPARE st;
+
+-- products: «WHERE status = … ORDER BY id» (sitemap, SEO-обзор, фильтр «Скрытые: нет фото» в админке) — без сортировки всех строк
+SET @s = IF((SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'products' AND INDEX_NAME = 'status_id') = 0,
+    'ALTER TABLE `products` ADD KEY `status_id` (`status`, `id`)', 'DO 0');
+PREPARE st FROM @s;
+EXECUTE st;
+DEALLOCATE PREPARE st;

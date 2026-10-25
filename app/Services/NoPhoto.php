@@ -81,11 +81,12 @@ final class NoPhoto
                     $ids = array_slice($ids, 0, self::PURGE_MAX - count($out['ids']));
                     if (!$ids) return;
                     LegacyProducts::capture($ids);                      // старые адреса → 301 (та же модель с фото или категория)
-                    AdminCatalog::deleteProducts($ids, false);
+                    AdminCatalog::deleteProducts($ids, false, false);
                     $out['ids'] = array_merge($out['ids'], $ids);
                 }, 60);
             }
             $out['deleted'] = count($out['ids']);
+            if ($out['ids']) Cache::flush();                               // один раз за нажатие, а не на каждую порцию
             $out['left'] = count($cand) - $done;
         });
         return $out;
@@ -202,7 +203,7 @@ final class NoPhoto
             foreach ($part as $pid) if ($show[$pid] === 0) $log[] = [$pid, 'product_nophoto', ['op' => 'show', 'ch' => [['status', ProductHistory::show('status', 0), ProductHistory::show('status', 1)]]]];
         }
         $out['shown'] = count(array_filter($show, static fn($st) => $st === 0));
-        CatalogIndexer::products($changed, $snap);
+        CatalogIndexer::products($changed, $snap, false);
         ProductHistory::log($log, $now);
         Cache::flush();
         return $out;

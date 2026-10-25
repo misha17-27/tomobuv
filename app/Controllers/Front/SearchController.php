@@ -93,7 +93,7 @@ final class SearchController
     public function suggest(): Response
     {
         $q = Listing::normalizeQuery(is_scalar($_GET['q'] ?? null) ? (string) $_GET['q'] : '');
-        if (mb_strlen($q) < 2) return Response::json(['items' => [], 'total' => 0]);
+        if (mb_strlen($q) < 3) return Response::json(['items' => [], 'total' => 0]);   // с 2 букв — поиск подстроки по всей таблице на каждую паузу ввода
         $data = Cache::remember('search.suggest.' . md5(mb_strtolower($q)), 600, static function () use ($q) {
             $ids = Listing::searchIds($q);
             $items = [];

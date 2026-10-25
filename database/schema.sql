@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `url` (`url`),
   KEY `status_created` (`status`, `created_at`),
+  KEY `status_id` (`status`, `id`),
   KEY `promo` (`status`, `compare_price`),
   KEY `brand` (`brand_id`, `status`, `created_at`),
   KEY `category` (`category_id`),

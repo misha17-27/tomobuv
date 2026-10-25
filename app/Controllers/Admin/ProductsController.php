@@ -180,7 +180,7 @@ final class ProductsController extends BaseController
         // проверка по списку в памяти, сортировка идёт по индексу без чтения строк. Обратных много (от 1000) — обычное условие.
         foreach (['status' => 'status', 'stock' => 'in_stock'] as $k => $col) {
             if ($f[$k] === '') continue;
-            if ($f[$k] === 'np') { $w[] = 'p.nophoto_hidden = 1'; continue; }
+            if ($f[$k] === 'np') { $w[] = 'p.status = 0 AND p.nophoto_hidden = 1'; continue; }   // скрытые — по индексу status
             $rest = $f[$k] === '1' ? self::notOne($col) : null;
             if ($rest === null) { $w[] = "p.$col = ?"; $p[] = (int) $f[$k]; continue; }
             if (!$rest) continue;                                // обратных нет — подходят все

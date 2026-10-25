@@ -233,7 +233,7 @@ final class AdminCatalog
      * Индекс — точечно, как после сохранения: снимок (фильтры, бренды) до удаления, CatalogIndexer::products после.
      * Строки catalog_index удалённых товаров убирает он же — по ним видно, в каких категориях уменьшить фильтры и счётчики.
      */
-    public static function deleteProducts(array $ids, bool $exclude = true): int
+    public static function deleteProducts(array $ids, bool $exclude = true, bool $flush = true): int
     {
         $ids = self::ids($ids);
         if (!$ids) return 0;
@@ -259,7 +259,7 @@ final class AdminCatalog
                 $db->query("DELETE FROM products WHERE id IN ($ph)", $vals);
             });
         }
-        CatalogIndexer::products($ids, $snap);
+        CatalogIndexer::products($ids, $snap, $flush);                     // $flush = false — кэш сбросит вызывающий (NoPhoto::purge — раз за нажатие)
         foreach ($ids as $id) self::deleteProductFiles($id);
         self::dropRedirectsTo($urls);
         return count($ids);

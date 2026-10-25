@@ -114,18 +114,40 @@ final class Cache
         @unlink(self::file($vk));
     }
 
-    /** Удалить файлы старых версий кэша (запускается из bin/cron.php) */
+    /**
+     * Уборка кэша (bin/cron.php): страницы прежних версий — папками целиком (после flush их никто не читает; раньше удалялись
+     * только файлы, и каждый flush оставлял до 257 пустых папок — хостинг ограничивает число файлов), истёкшие страницы текущей
+     * версии — старше 2 ч (TTL страниц — до часа), данные — старше суток (TTL данных — до суток). @return int удалено файлов
+     */
     public static function gc(): int
     {
         $n = 0;
-        $limit = time() - 86400;
-        foreach ([STORAGE . '/cache/data', STORAGE . '/cache/pages'] as $root) {
+        $pages = STORAGE . '/cache/pages';
+        $cur = self::readVersion();                                          // заново из файла: версия только растёт
+        foreach (is_dir($pages) ? (scandir($pages) ?: []) : [] as $v) {
+            if (ctype_digit($v) && (int) $v < $cur) $n += self::rmTree($pages . '/' . $v);
+        }
+        foreach ([[STORAGE . '/cache/data', 86400], [$pages, 7200]] as [$root, $age]) {
             if (!is_dir($root)) continue;
+            $limit = time() - $age;
             $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
             foreach ($it as $f) {
-                if ($f->isFile() && $f->getMTime() < $limit) { @unlink($f->getPathname()); $n++; }
+                if ($f->isFile() && $f->getMTime() < $limit && @unlink($f->getPathname())) $n++;
             }
         }
+        return $n;
+    }
+
+    /** Удалить папку со всем содержимым; @return int удалено файлов */
+    private static function rmTree(string $dir): int
+    {
+        $n = 0;
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($it as $f) {
+            if ($f->isDir()) @rmdir($f->getPathname());
+            elseif (@unlink($f->getPathname())) $n++;
+        }
+        @rmdir($dir);
         return $n;
     }
 }
