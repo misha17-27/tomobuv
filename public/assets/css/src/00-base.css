@@ -242,8 +242,9 @@ footer .bottom{border-top:1px solid #2b3a46;margin-top:36px;padding-top:20px;dis
 /* drawer & modal */
 .ov{position:fixed;inset:0;background:rgba(10,20,28,.5);z-index:90;opacity:0;pointer-events:none;transition:.25s}
 .ov.show{opacity:1;pointer-events:auto}
-.drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:100%;background:#fff;z-index:100;transform:translateX(100%);transition:.3s;display:flex;flex-direction:column}
-.drawer.show{transform:none}
+/* закрытая панель — за краем экрана и невидима: iPhone (Safari) иначе даёт сдвинуть страницу к ней после увеличения, фокус в неё не попадает */
+.drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:100%;background:#fff;z-index:100;transform:translateX(100%);visibility:hidden;transition:transform .3s,visibility .3s;display:flex;flex-direction:column}
+.drawer.show{transform:none;visibility:visible}
 .drawer.left{left:0;right:auto;transform:translateX(-100%)}
 .drawer.left.show{transform:none}
 .drawer .hd{display:flex;justify-content:space-between;align-items:center;padding:20px;border-bottom:1px solid var(--line)}
@@ -479,3 +480,8 @@ header.main .search .suggest a small{color:var(--muted)}
 .btn-wa,.btn-wa:hover{background:#177f3f;border-color:#177f3f;color:#fff}
 .btn-vb,.btn-vb:hover{background:#6050d8;border-color:#6050d8;color:#fff}
 .btn-wa:hover,.btn-vb:hover{filter:brightness(.92)}
+
+/* телефоны и планшеты: шрифт полей ввода не меньше 16 px — иначе iPhone (Safari) увеличивает страницу при нажатии на поле
+   (поиск, количество, формы) и сам не уменьшает; страница не сдвигается вбок (overflow-x: clip — без своей прокрутки, sticky работает) */
+@media (max-width:980px),(pointer:coarse){input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important}}
+html{overflow-x:clip}
