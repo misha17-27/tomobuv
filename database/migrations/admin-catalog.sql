@@ -58,3 +58,7 @@ SET @s = IF((SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHE
 PREPARE st FROM @s;
 EXECUTE st;
 DEALLOCATE PREPARE st;
+
+-- Цена, изменённая вручную (быстрое редактирование в списке, карточка, массовое «цена ±%»), закреплена: ночная сверка
+-- поставщика её не меняет (решение владельца 25.10.2026); снять — «Цена поставщика» в списке или галочка в карточке
+ALTER TABLE `products` ADD COLUMN IF NOT EXISTS `price_manual` TINYINT(1) NOT NULL DEFAULT 0;

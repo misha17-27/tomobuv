@@ -185,6 +185,8 @@ abstract class WebSync extends SupplierSync
     /** Изменения $upd относительно строки товара $ex: только отличающиеся поля → $it['upd'], подписи → $it['changes'] */
     protected function diff(array &$it, array $ex, array $upd): void
     {
+        // цена закреплена владельцем (products.price_manual) — цену и старую цену сверка не меняет; закупочная — как у поставщика
+        if (!empty($ex['price_manual'])) unset($upd['price'], $upd['compare_price']);
         foreach ($upd as $col => $val) {
             $old = $ex[$col] ?? null;
             $same = match ($col) {

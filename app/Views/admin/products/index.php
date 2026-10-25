@@ -93,8 +93,9 @@ $hasFilter = $f['q'] !== '' || $f['category'] !== '' || $f['brand'] || $f['statu
             <small>№<?= $id ?><?= $r['sku'] !== '' ? ' · арт. ' . e($r['sku']) : '' ?><?php if ($r['badge']): ?> · <?= e(AdminCatalog::BADGES[$r['badge']] ?? $r['badge']) ?><?php endif; ?><?php if ((string) $r['name_uk'] !== ''): ?> · <span class="ac-ltag uk" title="<?= e($r['name_uk']) ?>">UA</span><?php endif; ?></small>
           </td>
           <td class="ac-small"><?= $cat ? '<span title="' . e($paths[(int) $cat['id']] ?? $cat['name']) . '">' . e($cat['name']) . '</span>' : '<span class="muted">без категории</span>' ?><?php if ($brand): ?><small><?= e($brand['name']) ?></small><?php endif; ?></td>
-          <td class="num"><?= e(price_format($r['price'])) ?><?php if ((float) $r['compare_price'] > (float) $r['price']): ?><small><s><?= e(price_format($r['compare_price'])) ?></s></small><?php endif; ?></td>
-          <td class="num"><?= e(price_format($box)) ?></td>
+          <td class="num ac-price" data-qp="<?= $id ?>" data-price="<?= e(rtrim(rtrim(number_format((float) $r['price'], 2, '.', ''), '0'), '.')) ?>" data-locked="<?= (int) $r['price_manual'] ?>" data-sup="<?= (string) $r['supplier'] !== '' ? 1 : 0 ?>">
+            <button type="button" class="ac-qp" title="Изменить цену"><span data-qp-text><?= e(price_format($r['price'])) ?></span><?php if ((int) $r['price_manual']): ?><span class="ac-lock" title="Цена закреплена вручную — ночная сверка поставщика её не меняет">🔒</span><?php endif; ?></button><?php if ((float) $r['compare_price'] > (float) $r['price']): ?><small><s><?= e(price_format($r['compare_price'])) ?></s></small><?php endif; ?></td>
+          <td class="num" data-qp-box="<?= $id ?>"><?= e(price_format($box)) ?></td>
           <td class="num"><?= (int) $r['box_qty'] ?></td>
           <td class="nowrap"><?= e($r['size']) ?></td>
           <td class="nowrap"><?= (int) $r['in_stock'] ? '<span class="in-stock">в наличии</span>' : '<span class="out-stock">нет</span>' ?>

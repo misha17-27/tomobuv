@@ -39,6 +39,7 @@ $paths = AdminCatalog::paths($cats);
         <label class="fld"><span>Цена за пару, грн</span><input type="number" name="price" id="p-price" value="<?= e($num($p['price'])) ?>" min="0" step="0.01" inputmode="decimal"></label>
         <label class="fld"><span>Старая цена за пару</span><input type="number" name="compare_price" value="<?= e($num($p['compare_price'])) ?>" min="0" step="0.01" inputmode="decimal"></label>
         <label class="fld"><span>Закупочная, грн</span><input type="number" name="purchase_price" value="<?= e($num($p['purchase_price'])) ?>" min="0" step="0.01" inputmode="decimal"></label>
+        <label class="check"><input type="checkbox" name="price_manual" value="1"<?= !empty($p['price_manual']) ? ' checked' : '' ?>> Цена закреплена — ночная сверка поставщика её не меняет (ставится сама, если изменить цену)</label>
       </div>
       <div class="row3">
         <label class="fld"><span>Пар в ящике</span><input type="number" name="box_qty" id="p-box" value="<?= e((string) $p['box_qty']) ?>" min="1" step="1"></label>

@@ -20,6 +20,7 @@ $router->any('/admin/products/new/', [ProductsController::class, 'create']);
 $router->any('/admin/products/{id}/', [ProductsController::class, 'edit']);
 $router->get('/admin/products/{id}/history/', [ProductsController::class, 'history']);
 $router->post('/admin/products/{id}/delete/', [ProductsController::class, 'delete']);
+$router->post('/admin/products/{id}/price/', [ProductsController::class, 'quickPrice']);
 $router->post('/admin/products/{id}/images/', [ProductsController::class, 'upload']);
 $router->post('/admin/products/{id}/images/sort/', [ProductsController::class, 'sortImages']);
 $router->post('/admin/products/{id}/images/{iid}/delete/', [ProductsController::class, 'deleteImage']);

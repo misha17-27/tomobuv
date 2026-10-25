@@ -161,3 +161,15 @@ button.btn.btn-d:hover{background:#fef1f1;border-color:var(--bad)}
 .ac-events li.ev-supplier,.ac-events li.ev-import{border-left-color:#c7d7fe}
 .ac-allhist{margin:12px 0 0}
 .ac-loaded{white-space:nowrap}.ac-loaded small{white-space:normal;max-width:92px;line-height:1.25}
+
+/* быстрое редактирование цены в списке товаров (catalog.js) */
+.ac-qp{font:inherit;color:inherit;background:none;border:0;padding:2px 4px;margin:-2px -4px;border-radius:6px;cursor:pointer;border-bottom:1px dashed #9aa6b2;white-space:nowrap}
+.ac-qp:hover,.ac-qp:focus-visible{background:#eef4fb;outline:none}
+.ac-lock{font-size:11px;margin-left:4px}
+.ac-qp-form{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;align-items:center;min-width:150px}
+.ac-qp-form input{width:84px;height:32px;padding:0 8px;border:2px solid var(--line,#e3e8ec);border-radius:8px;font:inherit;text-align:right}
+.ac-qp-form .btn{height:32px;min-width:32px;padding:0 8px}
+.ac-qp-form.busy{opacity:.6;pointer-events:none}
+.ac-qp-unlock{flex-basis:100%;font-size:12px}
+.ac-qp-err{flex-basis:100%;color:#c0392b;font-size:12px;text-align:right}
+.ac-qp-ok{background:#eafaf1;transition:background .6s}

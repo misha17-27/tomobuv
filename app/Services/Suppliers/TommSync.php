@@ -36,7 +36,7 @@ use App\Services\ProductName;
 final class TommSync extends WebSync
 {
     protected const SUPPLIER = Tomm::class;
-    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, purchase_price, box_qty, min_qty, size,
+    private const EX_COLS = 'id, url, name, name_uk, sku, supplier, supplier_code, category_id, brand_id, price, compare_price, price_manual, purchase_price, box_qty, min_qty, size,
         stock, in_stock, status, image_id, image_ext';
     protected const UPDATABLE = ['sku', 'supplier', 'supplier_code', 'category_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty', 'size',
         'stock', 'in_stock', 'status', 'updated_at'];

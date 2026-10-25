@@ -47,6 +47,7 @@ final class ProductHistory
         'summary' => 'краткое описание изменено', 'description' => 'описание изменено', 'seo_name' => 'SEO-название изменено',
         'h1' => 'H1 изменён', 'meta_title' => 'title изменён', 'meta_description' => 'description изменён', 'meta_keywords' => 'keywords изменены',
         'supplier' => 'поставщик изменён', 'supplier_code' => 'код поставщика изменён',
+        'price_manual' => 'закрепление цены изменено (ночная сверка поставщика)',
     ];
 
     /** Массовые действия списка товаров (ProductsController::BULK) — в заголовке события */

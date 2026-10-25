@@ -11,6 +11,58 @@
   var debounce = function (fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; };
   var money = function (n) { return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' грн.'; };
 
+  // ------------------------------------------------------------------ список товаров: быстрое редактирование цены
+  // Нажатие на цену — поле и «✓ сохранить» / «✕ отмена» (Enter / Esc); у товаров поставщика с закреплённой ценой — «Цена
+  // поставщика» (снять закрепление). POST /admin/products/{id}/price/ — цена закрепляется: ночная сверка её не меняет.
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.ac-qp');
+    if (!btn) return;
+    var td = btn.closest('[data-qp]');
+    if (!td || td.querySelector('.ac-qp-form')) return;
+    var id = td.getAttribute('data-qp'), locked = td.getAttribute('data-locked') === '1', sup = td.getAttribute('data-sup') === '1';
+    var form = document.createElement('form');
+    form.className = 'ac-qp-form';
+    form.innerHTML = '<input type="text" inputmode="decimal" aria-label="Цена за пару, грн" value="' + esc(td.getAttribute('data-price')) + '">'
+      + '<button type="submit" class="btn btn-sm btn-p" title="Сохранить (Enter)" aria-label="Сохранить цену">✓</button>'
+      + '<button type="button" class="btn btn-sm" data-qp-cancel title="Отмена (Esc)" aria-label="Отмена">✕</button>'
+      + (locked && sup ? '<button type="button" class="btn btn-sm ac-qp-unlock" data-qp-unlock title="Снять закрепление: ночная сверка поставит цену поставщика">Цена поставщика</button>' : '')
+      + '<small class="ac-qp-err" hidden></small>';
+    btn.hidden = true;
+    td.insertBefore(form, btn.nextSibling);
+    var input = form.querySelector('input'), err = form.querySelector('.ac-qp-err');
+    input.focus(); input.select();
+    var close = function () { form.remove(); btn.hidden = false; btn.focus(); };
+    var done = function (d) {
+      if (!d || !d.ok) { err.textContent = (d && d.error) || 'Не сохранилось — попробуйте ещё раз'; err.hidden = false; form.classList.remove('busy'); return; }
+      td.setAttribute('data-price', String(d.price));
+      td.setAttribute('data-locked', d.locked ? '1' : '0');
+      btn.querySelector('[data-qp-text]').textContent = d.price_text;
+      var lock = btn.querySelector('.ac-lock');
+      if (d.locked && !lock) btn.insertAdjacentHTML('beforeend', '<span class="ac-lock" title="Цена закреплена вручную — ночная сверка поставщика её не меняет">🔒</span>');
+      if (!d.locked && lock) lock.remove();
+      var boxTd = document.querySelector('[data-qp-box="' + id + '"]');
+      if (boxTd) boxTd.textContent = d.box_text;
+      close();
+      td.classList.add('ac-qp-ok');
+      setTimeout(function () { td.classList.remove('ac-qp-ok'); }, 1200);
+    };
+    var send = function (data) {
+      form.classList.add('busy'); err.hidden = true;
+      Adm.post('/admin/products/' + id + '/price/', data).then(done, function () { done(null); });
+    };
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var v = input.value.replace(/\s/g, '').replace(',', '.');
+      if (!/^\d+(\.\d{1,2})?$/.test(v) || +v <= 0) { err.textContent = 'Цена — число больше 0'; err.hidden = false; input.focus(); return; }
+      send({ price: v });
+    });
+    form.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { ev.preventDefault(); close(); } });
+    form.addEventListener('click', function (ev) {
+      if (ev.target.closest('[data-qp-cancel]')) close();
+      if (ev.target.closest('[data-qp-unlock]')) send({ unlock: '1' });
+    });
+  });
+
   // ------------------------------------------------------------------ список товаров: массовые действия
   var bulk = $('#bulk-form');
   if (bulk) {

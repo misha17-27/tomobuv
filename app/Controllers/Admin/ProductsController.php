@@ -75,7 +75,7 @@ final class ProductsController extends BaseController
         $rows = [];
         if ($ids) {
             [$ph, $vals] = $db->in($ids);
-            $byId = $db->keyed("SELECT id, name, name_uk, sku, url, price, compare_price, box_qty, size, stock, in_stock, status, image_id, image_ext,
+            $byId = $db->keyed("SELECT id, name, name_uk, sku, url, price, compare_price, price_manual, box_qty, size, stock, in_stock, status, image_id, image_ext,
                 brand_id, category_id, badge, created_at, updated_at, source, supplier, seo_name, meta_title, meta_title_uk, meta_description, meta_description_uk
                 FROM products WHERE id IN ($ph)", $vals);
             foreach ($ids as $id) if (isset($byId[$id])) $rows[] = $byId[$id];
@@ -380,7 +380,8 @@ final class ProductsController extends BaseController
                     $db->query("UPDATE products SET in_stock = ?, updated_at = ? WHERE id IN ($ph)", array_merge([$action === 'instock' ? 1 : 0, $now], $vals));
                     break;
                 case 'price':
-                    $db->query("UPDATE products SET price = GREATEST(0, ROUND(price * ?, $round)), updated_at = ? WHERE id IN ($ph)", array_merge([$k, $now], $vals));
+                    // изменённая вручную цена закрепляется: ночная сверка поставщика её не меняет
+                    $db->query("UPDATE products SET price = GREATEST(0, ROUND(price * ?, $round)), price_manual = 1, updated_at = ? WHERE id IN ($ph)", array_merge([$k, $now], $vals));
                     break;
                 case 'addcat':
                     $db->query("INSERT IGNORE INTO category_products (category_id, product_id, sort) SELECT ?, id, 0 FROM products WHERE id IN ($ph)", array_merge([$catId], $vals));
@@ -640,6 +641,8 @@ final class ProductsController extends BaseController
             'description_uk' => AdminCatalog::staffHtml(AdminCatalog::postHtml('description_uk'), $old['description_uk'] ?? null),
         ];
         $d['min_qty'] = Request::post('min_qty') === '' ? $d['box_qty'] : max(1, min(65535, Request::postInt('min_qty', 1)));
+        // цена закреплена: галочка «Цена закреплена» или цену изменили — ночная сверка поставщика её не меняет
+        $d['price_manual'] = Request::post('price_manual') === '1' || ($id && abs((float) ($old['price'] ?? 0) - $d['price']) >= 0.005) ? 1 : 0;
         if ($d['stock'] === 0) $d['in_stock'] = 0;                  // остаток 0 — нет в наличии
         $badge = Request::post('badge');
         $d['badge'] = $badge === 'custom' ? (mb_substr(Request::post('badge_custom'), 0, 64) ?: null) : (isset(AdminCatalog::BADGES[$badge]) && $badge !== '' ? $badge : null);
@@ -836,6 +839,41 @@ final class ProductsController extends BaseController
                 'error' => $f['error'][$i] ?? UPLOAD_ERR_NO_FILE, 'size' => $f['size'][$i] ?? 0];
         }
         return $out;
+    }
+
+    /**
+     * POST /admin/products/{id}/price/ (AJAX, быстрое редактирование в списке): price — цена за пару; цена закрепляется
+     * (price_manual = 1 — ночная сверка поставщика её не меняет, решение владельца 25.10.2026). unlock=1 — снять закрепление:
+     * следующая сверка поставит цену поставщика. Ответ: {ok, price, price_text, box_text, locked} | {ok: false, error}.
+     */
+    public function quickPrice(string $id): Response
+    {
+        $id = ctype_digit($id) ? (int) $id : 0;
+        $db = App::db();
+        $p = $id ? $db->row('SELECT id, name, price, box_qty, price_manual FROM products WHERE id = ?', [$id]) : null;
+        if (!$p) return Response::json(['ok' => false, 'error' => 'Товар не найден'], 404);
+        $out = static fn(float $price, bool $locked): array => ['ok' => true, 'price' => $price, 'locked' => $locked,
+            'price_text' => price_format($price), 'box_text' => price_format($price * max(1, (int) $p['box_qty']))];
+        $now = date('Y-m-d H:i:s');
+        if (Request::post('unlock') === '1') {
+            if ((int) $p['price_manual'] === 1) {
+                $db->query('UPDATE products SET price_manual = 0, updated_at = ? WHERE id = ?', [$now, $id]);
+                $this->log('product_update', 'product', $id, ['name' => $p['name'], 'ch' => ['цена снова от поставщика (закрепление снято — поставит ночная сверка)']]);
+            }
+            return Response::json($out((float) $p['price'], false));
+        }
+        $raw = str_replace([' ', "\u{a0}", ','], ['', '', '.'], Request::post('price'));
+        if (!is_numeric($raw) || (float) $raw <= 0 || (float) $raw > 1000000) return Response::json(['ok' => false, 'error' => 'Цена — число больше 0'], 422);
+        $price = round((float) $raw, 2);
+        $old = (float) $p['price'];
+        $snap = CatalogIndexer::snapshot([$id]);
+        $db->query('UPDATE products SET price = ?, price_manual = 1, updated_at = ? WHERE id = ?', [$price, $now, $id]);
+        CatalogIndexer::products([$id], $snap);                             // сортировка и фильтр по цене на витрине
+        Cache::flush();
+        $ch = abs($price - $old) >= 0.005 ? [['price', ProductHistory::show('price', $old), ProductHistory::show('price', $price)]] : [];
+        if ((int) $p['price_manual'] !== 1) $ch[] = 'цена закреплена — ночная сверка поставщика её не меняет';
+        if ($ch) $this->log('product_update', 'product', $id, ['name' => $p['name'], 'ch' => $ch, 'quick' => 1]);
+        return Response::json($out($price, true));
     }
 
     public function delete(string $id): Response
