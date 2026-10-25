@@ -8,6 +8,10 @@
 .table-scroll{position:relative}
 form.inline{display:inline}
 .warn-txt{color:#b45309}
+.ok-txt{color:var(--ok,#15803d)}
+/* настройки → Cloudflare: шаги и выражение правила */
+.steps{padding-left:22px;display:grid;gap:12px;margin:6px 0 12px}
+.steps pre.code{background:#f6f7f9;border:1px solid #e5e7eb;padding:10px 12px;border-radius:8px;font-size:13px;margin:8px 0}
 .show-sm,.grid td .show-sm,.grid td small.show-sm{display:none}
 .sp{flex:1}
 .noimg{display:grid;place-items:center;width:46px;height:46px;border:1px dashed var(--line);border-radius:6px;color:#b3bfc8}

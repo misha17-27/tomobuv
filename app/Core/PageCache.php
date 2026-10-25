@@ -110,7 +110,7 @@ final class PageCache
         Response::securityHeaders();
         header('X-Cache: HIT');
         header('ETag: ' . $etag);
-        header('Cache-Control: public, max-age=0, must-revalidate');
+        self::edgeHeaders(false);                                      // готовая страница — без подключения к базе
         if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
             http_response_code(304);
             fclose($fh);
@@ -119,6 +119,27 @@ final class PageCache
         fpassthru($fh);
         fclose($fh);
         return true;
+    }
+
+    /**
+     * Cache-Control готовой страницы (из кэша или только что собранной, которую кэш хранит): с хранением в Cloudflare
+     * (App\Services\Cloudflare — «Настройки → Cloudflare») — s-maxage и метка Cache-Tag; JSON для скриптов — только
+     * «Показать ещё» (адрес с «_=more»: Cloudflare не различает ответы по X-Requested-With, иначе JSON достался бы посетителям
+     * вместо страницы), остальное — private, no-store. Без хранения в Cloudflare — как раньше: браузер каждый раз сверяет ETag.
+     */
+    public static function edgeHeaders(bool $allowDb = true): void
+    {
+        $ajax = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+        $ttl = \App\Services\Cloudflare::edgeTtl($allowDb);
+        $ok = self::enabled() && self::key() !== null && ($ajax ? (($_GET['_'] ?? null) === 'more') : !isset($_GET['_']));
+        if ($ttl > 0 && $ok) {
+            header('Cache-Control: public, max-age=0, s-maxage=' . $ttl . ', must-revalidate');
+            header('Cache-Tag: ' . \App\Services\Cloudflare::TAG);
+        } elseif ($ttl > 0 && $ajax) {
+            header('Cache-Control: private, no-store');
+        } else {
+            header('Cache-Control: ' . ($ok ? 'public, max-age=0, must-revalidate' : 'private, no-store'));
+        }
     }
 
     /** Сохранить страницу; false — кэш для этого запроса выключен (nocache, чужой Host, мусорные параметры…) */

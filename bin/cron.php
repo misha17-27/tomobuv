@@ -24,6 +24,13 @@ if ($db->value("SELECT 1 FROM blog_posts WHERE status = 'published' AND publishe
 @file_put_contents(STORAGE . '/cron-last', (string) time());   // для «Состояния системы» в админке
 echo "cron: кэш-файлов удалено $removed, старых корзин $carts\n";
 
+// Cloudflare: отложенная очистка страниц после сброса кэша (не удалась — повтор; до загрузчиков: они идут до часа)
+try {
+    \App\Services\Cloudflare::processPending(true);
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron cloudflare: ' . $e->getMessage());
+}
+
 // Автозагрузка поставщиков («Каталог → Поставщики»: Jong•Golf, Хит обуви, Tom.m — App\Services\Suppliers\Suppliers): у каждого — своё
 // расписание (окно часов и период), прерванный запуск продолжается; блокировка не даёт идти двум запускам одного поставщика.
 // Выключенный — только уборка старых отчётов. Поставщики идут по очереди: долгий проход одного не мешает расписанию другого

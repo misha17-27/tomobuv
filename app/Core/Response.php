@@ -103,6 +103,7 @@ final class Response
         if ($this->status === 200 && $this->cacheTtl > 0) {
             $stored = PageCache::store($this->body, $this->cacheTtl, $this->headers['Content-Type'] ?? 'text/html; charset=utf-8');
             header('X-Cache: ' . ($stored ? 'MISS' : 'BYPASS'));
+            if (!isset($this->headers['Cache-Control'])) PageCache::edgeHeaders();   // тот же Cache-Control, что у страницы из кэша
         } elseif (!isset($this->headers['Cache-Control'])) {
             header('Cache-Control: no-store, private');
         }

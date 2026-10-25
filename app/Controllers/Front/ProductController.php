@@ -168,7 +168,7 @@ final class ProductController
         // Кэш страниц здесь не нужен: у каждого посетителя свой набор ids (меняется с каждым просмотром),
         // PageCache плодил бы файл на каждую комбинацию. Ответ лёгкий (1 запрос), его кэширует браузер.
         return Response::html($html)
-            ->header('Cache-Control', 'public, max-age=600')
+            ->header('Cache-Control', 'private, max-age=600')   // только браузер: в Cloudflare без метки html её не очистить
             ->header('X-Robots-Tag', 'noindex');
     }
 

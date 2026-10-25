@@ -12,6 +12,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Settings;
 use App\Services\Catalog;
+use App\Services\Cloudflare;
 use App\Services\SeoAudit;
 use App\Services\SeoVars;
 
@@ -35,6 +36,7 @@ final class SettingsController extends BaseController
         'shipping'   => 'Доставка и оплата',
         'currencies' => 'Валюты',
         'mail'       => 'Почта',
+        'cloudflare' => 'Cloudflare',
     ];
 
     /** Поля вкладки «Магазин»: ключ → [подпись, тип, подсказка] */
@@ -126,6 +128,7 @@ final class SettingsController extends BaseController
                 'shipping'   => $this->collectShipping(),
                 'currencies' => $this->collectCurrencies(),
                 'mail'       => $this->collectMail(),
+                'cloudflare' => $this->collectCloudflare(),
             };
             if (!$errors) {
                 $all = Settings::all();
@@ -190,10 +193,28 @@ final class SettingsController extends BaseController
                     'store_email' => (string) ($s['store_email'] ?? ''), 'admin' => Mailer::adminEmail(),
                 ];
                 break;
+            case 'cloudflare':
+                $data['values'] = $values ?? $s;
+                $data['cf'] = ['token' => (string) ($s['cloudflare.token'] ?? '') !== '', 'status' => Cloudflare::status(), 'pending' => Cloudflare::pending(),
+                    'ttl' => Cloudflare::edgeTtl(), 'host' => (string) (parse_url((string) App::config('base_url', ''), PHP_URL_HOST) ?: 'tomobuv.com.ua')];
+                break;
         }
         $r = $this->render('admin/settings/index', $data);
         if ($errors) $r->status = 422;
         return $r;
+    }
+
+    /** POST /admin/settings/cloudflare/purge/ — проверка токена: удалить страницы витрины из кэша Cloudflare сейчас */
+    public function cloudflarePurge(): Response
+    {
+        if (!Auth::isAdmin()) {
+            $this->flash('Изменять настройки может только администратор.', true);
+            return Response::redirect(self::tabUrl('cloudflare'));
+        }
+        $r = Cloudflare::purge();
+        $this->log('cloudflare_purge', 'settings', null, ['ok' => $r['ok']]);
+        $this->flash($r['ok'] ? 'Cloudflare: страницы сайта удалены из кэша — токен и Zone ID работают.' : 'Cloudflare: не удалось — ' . $r['error'], !$r['ok']);
+        return Response::redirect(self::tabUrl('cloudflare'));
     }
 
     // ------------------------------------------------------------------ сбор и проверка значений вкладок
@@ -374,6 +395,27 @@ final class SettingsController extends BaseController
         $all = Settings::all();
         // тот же адрес — в mail.admin_to (его правит и экран «Почта (SMTP)»): оба ключа всегда одинаковые
         return [['notify_email' => $v, 'mail.admin_to' => $v], $err, ['notify_email' => $v] + $all];
+    }
+
+    /**
+     * Вкладка «Cloudflare»: хранить готовые страницы на краю сети (App\Services\Cloudflare). Токен в форму не выводится:
+     * пусто — прежний; «удалить токен» — стереть.
+     */
+    private function collectCloudflare(): array
+    {
+        $all = Settings::all();
+        $err = [];
+        $edge = Request::post('cf_edge') === '1' ? '1' : '0';
+        $ttl = Request::postInt('cf_ttl', 5);
+        if ($ttl < 1 || $ttl > 60) $err['cf_ttl'] = 'Время хранения — от 1 до 60 минут';
+        $zone = strtolower(trim(mb_substr(Request::post('cf_zone'), 0, 64)));
+        if ($zone !== '' && !preg_match('/^[0-9a-f]{32}$/', $zone)) $err['cf_zone'] = 'Zone ID — 32 знака (цифры и буквы a–f): Cloudflare → сайт → «Обзор», справа внизу «API»';
+        $token = trim(UsersController::rawPost('cf_token'));
+        if ($token !== '' && !preg_match('/^[A-Za-z0-9_\-]{30,120}$/', $token)) $err['cf_token'] = 'API-токен — около 40 знаков: буквы, цифры, «-» и «_», без пробелов';
+        $tokenNew = Request::post('cf_token_clear') === '1' ? '' : ($token !== '' ? $token : (string) ($all['cloudflare.token'] ?? ''));
+        $changes = ['cloudflare.edge' => $edge, 'cloudflare.edge_ttl' => (string) max(1, min(60, $ttl)), 'cloudflare.zone_id' => $zone, 'cloudflare.token' => $tokenNew];
+        $values = ['cloudflare.edge' => $edge, 'cloudflare.edge_ttl' => (string) $ttl, 'cloudflare.zone_id' => $zone] + $all;
+        return [$changes, $err, $values];
     }
 
     // ------------------------------------------------------------------ вспомогательное

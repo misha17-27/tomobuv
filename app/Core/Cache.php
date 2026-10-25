@@ -70,6 +70,7 @@ final class Cache
         }
         self::$ver = $v;
         self::$mem = [];
+        \App\Services\Cloudflare::flushed();                               // страницы в Cloudflare — тоже (в конце запроса)
     }
 
     public static function get(string $key, $default = null)

@@ -46,6 +46,9 @@ $path = App\Core\Lang::detect($rawPath);
 Request::setPath($path);
 App\Core\DB::$localize = App\Core\Lang::isUk();
 
+// Cloudflare: отложенная очистка страниц (сброс кэша был меньше минуты после прошлой) — в конце этого запроса, после ответа
+if (\App\Services\Cloudflare::due()) \App\Services\Cloudflare::arm();
+
 if (PageCache::serve()) exit;
 
 $router = new Router();

@@ -38,6 +38,7 @@ $router->post('/admin/redirects/{id}/delete/', [Admin\RedirectsController::class
 
 // Настройки (вкладки)
 $router->any('/admin/settings/', [Admin\SettingsController::class, 'index']);
+$router->post('/admin/settings/cloudflare/purge/', [Admin\SettingsController::class, 'cloudflarePurge']);
 $router->any('/admin/settings/{tab}/', [Admin\SettingsController::class, 'index']);
 
 // Загрузка картинок для редактора и форм (JSON {ok, url})
