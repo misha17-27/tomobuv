@@ -39,6 +39,7 @@ final class Products
         $p['box_price'] = $p['price'] * $p['box_qty'];
         $p['link'] = '/product/' . $p['url'] . '/';
         $p['img'] = Image::product($p, '400');
+        $p['img_webp'] = Image::product($p, '400', 'webp');                // <picture> в карточке; поисковикам и соцсетям — jpg
         $p['img_small'] = Image::product($p, '200');
         $b = Catalog::brand(isset($p['brand_id']) ? (int) $p['brand_id'] : null);
         $p['brand'] = $b['name'] ?? '';

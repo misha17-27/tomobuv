@@ -189,18 +189,22 @@
   /* ---------- галерея ---------- */
   function initGallery() {
     var gal = $('#pp-gal'); if (!gal) return;
-    var imgs = [], sets = []; try { imgs = JSON.parse(gal.getAttribute('data-images') || '[]'); sets = JSON.parse(gal.getAttribute('data-srcset') || '[]'); } catch (e) { }
+    var imgs = [], sets = [], setsW = []; try { imgs = JSON.parse(gal.getAttribute('data-images') || '[]'); sets = JSON.parse(gal.getAttribute('data-srcset') || '[]'); setsW = JSON.parse(gal.getAttribute('data-srcsetw') || '[]'); } catch (e) { }
     var main = $('#gal-img', gal), lb = $('#gal-lb'), lbImg = lb ? $('#gal-lb-img', lb) : null, cur = 0, lastFocus = null;
     if (!main || !imgs.length) return;
+    // <picture>: webp-вариант (source) — его и меняем; браузер без webp показывает jpg (srcset самого img)
+    var srcW = main.parentNode && main.parentNode.tagName === 'PICTURE' ? $('source', main.parentNode) : null;
 
     function go(i) {
       var n = imgs.length; cur = (i + n) % n;
+      if (srcW) srcW.srcset = setsW[cur] || sets[cur] || '';
       main.srcset = sets[cur] || ''; main.src = imgs[cur];   // srcset (400/750/970) — браузер берёт размер по экрану; лайтбокс — 970
       if (lbImg) { lbImg.src = imgs[cur]; lbImg.classList.remove('zoom'); }
       $$('.gal-th', gal).forEach(function (t, k) { t.classList.toggle('on', k === cur); if (k === cur) t.setAttribute('aria-current', 'true'); else t.removeAttribute('aria-current'); });
       $$('[data-gal-cur]').forEach(function (el) { el.textContent = cur + 1; });
       var th = $$('.gal-th', gal)[cur]; if (th && th.scrollIntoView && th.parentNode.scrollWidth > th.parentNode.clientWidth) th.parentNode.scrollLeft = th.offsetLeft - 8;
-      if (n > 1) { var pre = new Image(), k = (cur + 1) % n; pre.sizes = main.sizes; pre.srcset = sets[k] || ''; pre.src = imgs[k]; }   // следующее — тот же размер, что покажет галерея
+      // следующее — тот же размер и формат, что покажет галерея (webp, если браузер взял webp)
+      if (n > 1) { var pre = new Image(), k = (cur + 1) % n, w = srcW && /\.webp(\?|$)/.test(main.currentSrc || ''); pre.sizes = main.sizes; pre.srcset = (w ? setsW[k] : sets[k]) || sets[k] || ''; pre.src = imgs[k]; }
     }
     function openLb() {
       if (!lb) return;

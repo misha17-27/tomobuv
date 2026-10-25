@@ -155,6 +155,7 @@ section.sec{padding:40px 0 10px}
 .pc{background:#fff;border-radius:16px;border:1px solid var(--line);display:flex;flex-direction:column;position:relative;transition:.2s}
 .pc:hover{box-shadow:var(--shadow);border-color:transparent}
 .pc .ph{aspect-ratio:1;padding:14px;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;position:relative}
+.pc .ph picture{display:contents}
 .pc .ph img{max-height:100%;object-fit:contain}
 .pc .badge{position:absolute;top:12px;left:12px;background:var(--orange);color:#fff;font-weight:800;font-size:12px;padding:3px 8px;border-radius:7px}
 .pc .badge.nw{background:var(--green)}

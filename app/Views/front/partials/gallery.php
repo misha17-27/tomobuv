@@ -32,12 +32,19 @@ foreach ($list as &$im) {
     $im['bw'] = $k ? (int) round($im['w'] * $k) : 970;
     $im['bh'] = $k ? (int) round($im['h'] * $k) : 970;
     $set = [$widthOf($im, '970') => $im['big']];
+    $setW = [$widthOf($im, '970') => Image::url($p['id'], $im['id'], $im['ext'], '970', $im['fn'], 'webp')];
     foreach (['750x0', '400'] as $size) {
         $w = $widthOf($im, $size);
-        if ($w < min(array_keys($set))) $set[$w] = Image::url($p['id'], $im['id'], $im['ext'], $size, $im['fn']);
+        if ($w < min(array_keys($set))) {
+            $set[$w] = Image::url($p['id'], $im['id'], $im['ext'], $size, $im['fn']);
+            $setW[$w] = Image::url($p['id'], $im['id'], $im['ext'], $size, $im['fn'], 'webp');
+        }
     }
     ksort($set);
+    ksort($setW);
     $im['set'] = implode(', ', array_map(static fn($w, $u) => $u . ' ' . $w . 'w', array_keys($set), $set));
+    // то же в webp (<picture>: браузер без webp берёт jpg; лайтбокс, соцсети и поисковики — jpg); фото без оригинала — только jpg
+    $im['setw'] = implode(', ', array_map(static fn($w, $u) => $u . ' ' . $w . 'w', array_keys($setW), $setW));
 }
 unset($im);
 // ширина фото на экране (30-product.css: колонка галереи 540px, на ≤980px — до 560px, на ≤680px — во всю ширину минус поля)
@@ -46,11 +53,11 @@ $n = count($list);
 $badge = $p['off'] ? '<span class="badge">−' . (int) $p['off'] . '%</span>' : ($p['is_new'] ? '<span class="badge nw">' . e(t('Новинка')) . '</span>' : '');
 $first = $list[0] ?? null;
 ?>
-<div class="gal" id="pp-gal" data-images="<?= e(json_encode(array_column($list, 'big'), JSON_UNESCAPED_SLASHES)) ?>" data-srcset="<?= e(json_encode(array_column($list, 'set'), JSON_UNESCAPED_SLASHES)) ?>">
+<div class="gal" id="pp-gal" data-images="<?= e(json_encode(array_column($list, 'big'), JSON_UNESCAPED_SLASHES)) ?>" data-srcset="<?= e(json_encode(array_column($list, 'set'), JSON_UNESCAPED_SLASHES)) ?>" data-srcsetw="<?= e(json_encode(array_column($list, 'setw'), JSON_UNESCAPED_SLASHES)) ?>">
   <div class="gal-main">
     <?php if ($first): ?>
       <button type="button" class="gal-open" data-gal-open aria-label="<?= e(t('Открыть фото на весь экран')) ?>">
-        <img id="gal-img" src="<?= e($first['big']) ?>" srcset="<?= e($first['set']) ?>" sizes="<?= e($sizes) ?>" alt="<?= e($first['d'] !== '' ? $first['d'] : $alt) ?>" width="<?= $first['bw'] ?>" height="<?= $first['bh'] ?>" fetchpriority="high" decoding="async">
+        <picture><?php if ($first['setw'] !== $first['set']): ?><source type="image/webp" srcset="<?= e($first['setw']) ?>" sizes="<?= e($sizes) ?>"><?php endif; ?><img id="gal-img" src="<?= e($first['big']) ?>" srcset="<?= e($first['set']) ?>" sizes="<?= e($sizes) ?>" alt="<?= e($first['d'] !== '' ? $first['d'] : $alt) ?>" width="<?= $first['bw'] ?>" height="<?= $first['bh'] ?>" fetchpriority="high" decoding="async"></picture>
       </button>
       <span class="gal-zoom" aria-hidden="true"><?= icon('zoom', 'width:20px;height:20px') ?></span>
     <?php else: ?>

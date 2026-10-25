@@ -46,7 +46,7 @@ final class ImageController
         if ($m[1] !== (string) $iid && $m[1] !== (string) $img['filename']) return Response::notFound();
         $src = Image::originalPath($pid, $iid, (string) $img['ext']);
         $dst = Image::thumbPath($pid, $iid, $m[1], $m[2], strtolower($m[3]));
-        $q = (int) App::config('images.jpeg_quality', 85);
+        $q = strtolower($m[3]) === 'webp' ? (int) App::config('images.webp_quality', 80) : (int) App::config('images.jpeg_quality', 85);
         if (is_file($dst)) {
             $body = (string) file_get_contents($dst);                       // сохранённая раньше
         } elseif (ctype_digit($m[2]) && (int) $img['width'] > 0 && max((int) $img['width'], (int) $img['height']) <= (int) $m[2]

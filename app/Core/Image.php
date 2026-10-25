@@ -24,24 +24,29 @@ final class Image
         return sprintf('%02d/%02d/%d', $productId % 100, intdiv($productId, 100) % 100, $productId);
     }
 
-    /** URL миниатюры товара */
-    public static function url(int $productId, ?int $imageId, ?string $ext, string $size = '400', string $filename = ''): string
+    /**
+     * URL миниатюры товара. $as — формат миниатюры (webp — для <picture> на витрине, в ~1,5–2 раза меньше jpg), если он
+     * отличается от оригинала: сервер делает её из оригинала (ImageController); фото без оригинала (перенесённые со старого
+     * сайта миниатюрами) — только в своём формате.
+     */
+    public static function url(int $productId, ?int $imageId, ?string $ext, string $size = '400', string $filename = '', ?string $as = null): string
     {
         if (!$imageId) return '/assets/img/no-photo.svg';
         $ext = $ext ?: 'jpg';
         $name = $filename !== '' ? $filename : (string) $imageId;
-        $path = '/wa-data/public/shop/products/' . self::productDir($productId) . '/images/' . $imageId . '/' . $name . '.' . $size . '.' . $ext;
-        if (is_file(self::originalPath($productId, (int) $imageId, $ext))) return $path;
+        $base = '/wa-data/public/shop/products/' . self::productDir($productId) . '/images/' . $imageId . '/' . $name . '.' . $size . '.';
+        $path = $base . $ext;
+        if (is_file(self::originalPath($productId, (int) $imageId, $ext))) return $base . ($as ?? $ext);
         $remote = (string) App::config('images.remote_base', '');
-        if ($remote !== '') return rtrim($remote, '/') . $path;   // разработка: фото с живого сайта
+        if ($remote !== '') return rtrim($remote, '/') . $base . ($as ?? $ext);   // разработка: фото с живого сайта
         // ни оригинала, ни готовой миниатюры (фото не перенесено) — заглушка вместо битой картинки (404)
         return is_file(self::thumbPath($productId, (int) $imageId, $name, $size, $ext)) ? $path : '/assets/img/no-photo.svg';
     }
 
-    /** Фото для карточки/строки товара */
-    public static function product(array $p, string $size = '400'): string
+    /** Фото для карточки/строки товара ($as — формат миниатюры, см. url) */
+    public static function product(array $p, string $size = '400', ?string $as = null): string
     {
-        return self::url((int) $p['id'], isset($p['image_id']) ? (int) $p['image_id'] : null, $p['image_ext'] ?? 'jpg', $size);
+        return self::url((int) $p['id'], isset($p['image_id']) ? (int) $p['image_id'] : null, $p['image_ext'] ?? 'jpg', $size, '', $as);
     }
 
     public static function originalPath(int $productId, int $imageId, string $ext): string
