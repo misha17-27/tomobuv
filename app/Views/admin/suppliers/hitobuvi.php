@@ -40,6 +40,17 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
 
 <?php if ($tab === 'overview'): ?>
 <?php ob_start(); ?>
+<?php $m = $mass; $ago = $m['log_at'] ? time() - $m['log_at'] : null; ?>
+<div class="card" id="massload">
+  <div class="card-hd"><h2>Массовая загрузка (Cron Jobs → bin/load-hitobuvi.sh)</h2>
+    <?php if ($m['errors'] || $m['done'] !== ''): ?><form method="post" action="<?= e($base . 'massload/reset/') ?>"><?= \App\Controllers\Admin\BaseController::tokenField() ?><button class="btn btn-sm" type="submit">Сбросить паузу и продолжить</button></form><?php endif; ?></div>
+  <dl class="detail pad">
+    <div><dt>Сейчас</dt><dd><?= $m['running'] ? '<b class="ok-txt">идёт загрузка</b>' : ($m['paused_until'] > time() ? '<span class="warn-txt">пауза после ' . (int) $m['errors'] . ' ошибок подряд — до ' . e(date('d.m H:i', $m['paused_until'])) . '</span>' : ($m['done'] !== '' ? 'всё загружено (' . e($m['done']) . ')' . ($m['done'] !== 'min_id=' . $m['min_id'] ? ' — порог изменён, продолжит' : '') : 'ждёт следующего вызова')) ?></dd></div>
+    <div><dt>Последняя запись в журнал</dt><dd><?= $m['log_at'] ? e(date('d.m.Y H:i', $m['log_at'])) . ($ago > 3 * 3600 ? ' — <span class="warn-txt">давно: проверьте, есть ли задание в cPanel → Cron Jobs (раз в 5 мин)</span>' : '') : '<span class="warn-txt">журнала нет — скрипт ещё не запускался: добавьте задание в cPanel → Cron Jobs</span>' ?></dd></div>
+    <?php if ($m['errors']): ?><div><dt>Ошибок подряд</dt><dd><?= (int) $m['errors'] ?> (после 3 — попытка раз в 6 ч)</dd></div><?php endif; ?>
+  </dl>
+  <?php if ($m['tail']): ?><details class="pad"><summary>Журнал — последние строки</summary><pre class="sup-log" style="white-space:pre-wrap;max-height:420px;overflow:auto;font-size:12px"><?= e(implode("\n", $m['tail'])) ?></pre></details><?php endif; ?>
+</div>
 <div class="card jg-acts">
   <h2 class="sup-acts-h">Проверка и пробный прогон</h2>
   <div class="jg-actrow">

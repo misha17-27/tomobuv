@@ -53,6 +53,7 @@ final class HitObuviController extends BaseController
         ];
         if ($tab === 'overview') {
             $data += $this->overviewData();
+            $data['mass'] = self::massStatus();
         } elseif ($tab === 'settings') {
             [, $attrErr] = HitObuvi::attributes();
             $data += ['attrErr' => $attrErr];
@@ -65,6 +66,51 @@ final class HitObuviController extends BaseController
         }
         $data['actions'] = $this->headerActions($data['live'] ?? null);
         return $this->render('admin/suppliers/hitobuvi', $data);
+    }
+
+    /**
+     * Массовая загрузка (bin/load-hitobuvi.sh из Cron Jobs хостинга, раз в 5 мин): журнал storage/logs/hitobuvi-load.log
+     * (последние строки), пауза после ошибок (storage/hitobuvi-load.errors: 3 подряд — раз в 6 ч), отметка «всё загружено»
+     * (storage/hitobuvi-load.done), идёт ли сейчас (блокировка storage/hitobuvi-load.lock) — чтобы видеть без cPanel.
+     */
+    private static function massStatus(): array
+    {
+        $log = STORAGE . '/logs/hitobuvi-load.log';
+        $tail = [];
+        if (is_file($log) && ($fh = @fopen($log, 'rb'))) {
+            $size = (int) filesize($log);
+            fseek($fh, max(0, $size - 16384));
+            $chunk = (string) stream_get_contents($fh);
+            fclose($fh);
+            $lines = preg_split('/\r?\n/', rtrim($chunk)) ?: [];
+            if ($size > 16384) array_shift($lines);                        // первая строка куска — обрывок
+            $tail = array_slice($lines, -30);
+        }
+        $err = STORAGE . '/hitobuvi-load.errors';
+        $errN = is_file($err) ? (int) @file_get_contents($err) : 0;
+        $running = false;
+        $lk = STORAGE . '/hitobuvi-load.lock';
+        if (is_file($lk) && ($fh = @fopen($lk, 'r'))) {
+            $running = !flock($fh, LOCK_SH | LOCK_NB);                      // скрипт держит блокировку — идёт загрузка
+            if (!$running) flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+        return [
+            'log_at' => is_file($log) ? (int) filemtime($log) : 0, 'tail' => $tail, 'running' => $running,
+            'errors' => $errN, 'paused_until' => $errN >= 3 ? (int) filemtime($err) + 355 * 60 : 0,
+            'done' => is_file(STORAGE . '/hitobuvi-load.done') ? trim((string) @file_get_contents(STORAGE . '/hitobuvi-load.done')) : '',
+            'min_id' => (int) HitObuvi::cfg('min_id'),
+        ];
+    }
+
+    /** POST …/massload/reset/ — снять паузу после ошибок и отметку «всё загружено»: следующий вызов скрипта (до 5 мин) продолжит загрузку */
+    public function massReset(): Response
+    {
+        @unlink(STORAGE . '/hitobuvi-load.errors');
+        @unlink(STORAGE . '/hitobuvi-load.done');
+        $this->log('supplier_massload_reset', 'supplier', null, ['supplier' => HitObuvi::CODE]);
+        $this->flash('Массовая загрузка: пауза и отметка «всё загружено» сняты — скрипт продолжит в течение 5 минут (если задание есть в Cron Jobs).');
+        return Response::redirect(self::BASE);
     }
 
     // настройки, проверка связи, запуск, отчёт, шаг, остановка — общие (SupplierPages)

@@ -39,6 +39,7 @@ $router->get('/admin/suppliers/hitobuvi/runs/{id}/', [HitObuviController::class,
 $router->post('/admin/suppliers/hitobuvi/runs/{id}/step/', [HitObuviController::class, 'step']);
 $router->post('/admin/suppliers/hitobuvi/runs/{id}/stop/', [HitObuviController::class, 'stop']);
 $router->post('/admin/suppliers/hitobuvi/excluded/restore/', [HitObuviController::class, 'excludedRestore']);
+$router->post('/admin/suppliers/hitobuvi/massload/reset/', [HitObuviController::class, 'massReset']);
 $router->post('/admin/suppliers/hitobuvi/map/save/', [HitObuviController::class, 'mapSave']);
 $router->post('/admin/suppliers/hitobuvi/map/type/', [HitObuviController::class, 'mapAddType']);
 $router->post('/admin/suppliers/hitobuvi/map/{id}/delete/', [HitObuviController::class, 'mapDelete']);

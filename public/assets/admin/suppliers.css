@@ -90,3 +90,5 @@
   .sup-ov-stats{grid-template-columns:1fr 1fr}
   .sup-h3 a{margin-left:0}
 }
+/* «Обзор» Хит обуви: массовая загрузка */
+.ok-txt{color:var(--ok,#15803d)}
