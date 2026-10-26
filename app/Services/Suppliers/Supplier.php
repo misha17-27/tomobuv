@@ -232,7 +232,12 @@ abstract class Supplier
         static::cleanup();
         $db = App::db();
         $stale = $db->row("SELECT * FROM supplier_runs WHERE supplier = ? AND status = 'running' ORDER BY id DESC LIMIT 1", [static::CODE]);
-        if ($stale && strtotime((string) ($stale['updated_at'] ?? $stale['started_at'])) > time() - static::STALE) {
+        $fresh = $stale && strtotime((string) ($stale['updated_at'] ?? $stale['started_at'])) > time() - static::STALE;
+        // боевой запуск cron / CLI ведёт drive — блокировка поставщика занята весь прогон; свободна — прошлый cron-час свои 40 мин
+        // закончил и запуск никто не ведёт: продолжить сейчас, а не через час (админка шагает по 12 с — её запуски по STALE)
+        $orphan = $fresh && $stale['kind'] === 'run' && in_array((string) $stale['origin'], ['cron', 'cli'], true)
+            && static::withLock(static function (): void {}, 0);
+        if ($fresh && !$orphan) {
             $say('Запуск №' . $stale['id'] . ' уже идёт — пропуск');
             return;
         }
@@ -594,6 +599,8 @@ abstract class Supplier
         $db = App::db();
         $days = max(1, (int) static::cfg('log_days'));
         $keep = array_map('intval', $db->col('SELECT id FROM supplier_runs WHERE supplier = ? ORDER BY id DESC LIMIT 5', [static::CODE]));
+        // последний полный проход — всегда (по нему решают «полный по расписанию» и массовая загрузка «Хит обуви»)
+        $keep[] = (int) $db->value("SELECT MAX(id) FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND state LIKE ?", [static::CODE, '%"mode":"full"%']);
         $old = array_map('intval', $db->col("SELECT id FROM supplier_runs WHERE supplier = ? AND status <> 'running' AND started_at < DATE_SUB(NOW(), INTERVAL ? DAY)", [static::CODE, $days]));
         $old = array_values(array_diff($old, $keep));
         foreach (array_chunk($old, 200) as $part) {

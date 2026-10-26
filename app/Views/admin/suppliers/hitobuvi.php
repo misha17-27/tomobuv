@@ -43,9 +43,17 @@ $schedule = sprintf('%02d:00–%02d:59', (int) $cfg['window_from'], (int) $cfg['
 <?php $m = $mass; $ago = $m['log_at'] ? time() - $m['log_at'] : null; ?>
 <div class="card" id="massload">
   <div class="card-hd"><h2>Массовая загрузка — догрузить все новые товары до порога id</h2>
-    <?php if ($m['errors'] || $m['done'] !== ''): ?><form method="post" action="<?= e($base . 'massload/reset/') ?>"><?= \App\Controllers\Admin\BaseController::tokenField() ?><button class="btn btn-sm" type="submit">Сбросить паузу и продолжить</button></form><?php endif; ?></div>
+    <?php if ($m['errors'] || $m['done'] !== '' || in_array($m['mass']['state'], ['held', 'backoff'], true)): ?><form method="post" action="<?= e($base . 'massload/reset/') ?>"><?= \App\Controllers\Admin\BaseController::tokenField() ?><button class="btn btn-sm" type="submit">Сбросить паузу и продолжить</button></form><?php endif; ?></div>
   <dl class="detail pad">
-    <div><dt>Сейчас</dt><dd><?= $active ? '<b class="ok-txt">идёт запуск №' . (int) $active['id'] . '</b> — ход вверху страницы' : ($m['pending'] ? 'не закончена — часовой cron сайта начнёт полный проход около ' . e(date('H:i', (intdiv(time(), 3600) + 1) * 3600)) . ' и ведёт его по 40 мин в час, пока не догрузит' : 'закончена: все новые товары с id от ' . number_format($m['min_id'], 0, '', ' ') . ' загружены (снизите порог в настройках — догрузит недостающие)') ?></dd></div>
+    <?php $nextH = e(date('H:i', (intdiv(time(), 3600) + 1) * 3600)); ?>
+    <div><dt>Сейчас</dt><dd><?= match (true) {
+        (bool) $active => '<b class="ok-txt">идёт запуск №' . (int) $active['id'] . '</b> — ход вверху страницы; между часами продолжает часовой cron (около ' . $nextH . ') или скрипт',
+        $m['mass']['state'] === 'done' => 'закончена: все новые товары с id от ' . number_format($m['min_id'], 0, '', ' ') . ' загружены (снизите порог в настройках — догрузит недостающие)',
+        $m['mass']['state'] === 'off' => '<span class="warn-txt">не идёт: автозагрузка выключена или не задана наценка</span>',
+        $m['mass']['state'] === 'held' => '<span class="warn-txt">остановлена вами — продолжится после «Запустить сейчас» (или «Сбросить паузу и продолжить»)</span>',
+        $m['mass']['state'] === 'backoff' => '<span class="warn-txt">пауза после ошибок поставщика — повтор около ' . e(date('d.m H:i', $m['mass']['until'])) . '</span>',
+        default => 'не закончена — часовой cron сайта начнёт полный проход около ' . $nextH . ' и ведёт его по 40 мин в час, пока не догрузит',
+    } ?></dd></div>
     <div><dt>Ускорение (необязательно)</dt><dd>задание в cPanel → Cron Jobs раз в 5 мин: <code>bin/load-hitobuvi.sh</code> — ведёт загрузку почти без перерывов. <?= $m['running'] ? '<b class="ok-txt">Скрипт сейчас работает.</b>' : ($m['paused_until'] > time() ? '<span class="warn-txt">Скрипт на паузе после ' . (int) $m['errors'] . ' ошибок подряд — до ' . e(date('d.m H:i', $m['paused_until'])) . '.</span>' : '') ?> Последняя запись скрипта в журнал: <?= $m['log_at'] ? e(date('d.m.Y H:i', $m['log_at'])) . ($ago > 3 * 3600 ? ' (задания, видимо, нет — загрузку ведёт часовой cron)' : '') : 'не было' ?>.</dd></div>
     <?php if ($m['errors']): ?><div><dt>Ошибок подряд</dt><dd><?= (int) $m['errors'] ?> (после 3 — попытка раз в 6 ч)</dd></div><?php endif; ?>
   </dl>

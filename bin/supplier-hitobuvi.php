@@ -80,7 +80,7 @@ try {
         // проход с более высоким порогом id (до 24.10.2026 в state порога нет — был 1 550 000) не считается: порог снизили —
         // нужен новый проход, он добавит только недостающие (загруженные узнаются по связи и только сверяются)
         $minId = (int) HitObuvi::cfg('min_id');
-        $isAll = static fn(array $r): bool => HitObuvi::massDone($r);   // то же правило, что у часового cron (HitObuvi::massPending)
+        $isAll = static fn(array $r): bool => HitObuvi::massDone($r);   // то же правило, что у часового cron (HitObuvi::massState)
         // всё уже загружено с этим порогом (отметка storage/hitobuvi-load.done) — выход без запросов (код 4: bin/load-hitobuvi.sh молчит)
         $doneFile = STORAGE . '/hitobuvi-load.done';
         $doneMark = 'min_id=' . $minId;
@@ -92,15 +92,14 @@ try {
             $say('Продолжаю запуск №' . $id);
             HitObuvi::log($id, 'info', 'Продолжение (bin/supplier-hitobuvi.php --load)');
             HitObuvi::flushLog();
-        } elseif ($last && $last['status'] === 'stopped' && $last['error'] === 'остановлен вручную') {
+        } elseif (HitObuvi::massHeld()) {
             // «Остановить» в админке между вызовами (cron, окно .bat) — новый проход не начинать; продолжить — «Запустить сейчас»
             // (остановленный иначе — прерван пробным прогоном, автозагрузка выключена — не мешает)
             $say('Последний запуск остановлен в админке — новый не начинаю (продолжить: «Запустить сейчас» в админке)');
             exit(3);
-        } elseif ($last && $last['status'] === 'done' && ($lr = HitObuvi::run((int) $last['id'])) && $isAll($lr)) {
-            // проход довёл до конца не этот процесс (bin/cron.php, вкладка админки) — новый не нужен
-            $say('Всё загружено: последний полный проход №' . $last['id'] . ' закончен');
-            @file_put_contents($doneFile, $doneMark);
+        } elseif (HitObuvi::massFinished()) {
+            // проход довёл до конца не этот процесс (bin/cron.php, вкладка админки) — новый не нужен (отметку пишет massFinished)
+            $say('Всё загружено: последний полный проход закончил массовую загрузку');
             exit(2);
         } else {
             $id = HitObuvi::start('run', $o);

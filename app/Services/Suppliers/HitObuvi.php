@@ -117,33 +117,99 @@ final class HitObuvi extends WebSupplier
     public const MASS_MAX_NEW = 50000;
     public const MASS_MAX_REQUESTS = 60000;
 
+    /** Отметки массовой загрузки (storage): закончена с порогом id («min_id=N»; её же пишет bin/supplier-hitobuvi.php --load), остановлена владельцем */
+    private const MASS_DONE_FILE = '/hitobuvi-load.done';
+    private const MASS_HOLD_FILE = '/hitobuvi-mass.hold';
+    /** После ошибок поставщика: 3 подряд или «нужна проверка» (блокировка) — повтор не раньше чем через столько секунд (как bin/load-hitobuvi.sh) */
+    private const MASS_BACKOFF = 6 * 3600;
+
     /**
-     * Массовая загрузка закончена этим запуском: полный проход завершён без отложенных по лимиту новых, прочитал все разделы
-     * (или ничего не добавил — повторять бесполезно), порог id не выше нынешнего (порог снизили — нужен новый проход: он добавит
-     * только недостающие; до 24.10.2026 в state порога нет — был 1 550 000)
+     * Массовая загрузка закончена этим запуском: полный проход завершён без отложенных по лимиту новых, не обрезан лимитом
+     * запросов (неполный из-за 404 или нечитаемой страницы раздела — повтор не поможет: недостающее добавят ночные проходы),
+     * без отбора (limit, ids), порог id не выше нынешнего (порог снизили — нужен новый проход: он добавит только недостающие;
+     * до 24.10.2026 в state порога нет — был 1 550 000)
      */
     public static function massDone(array $r): bool
     {
-        return $r['status'] === 'done' && ($r['state']['mode'] ?? '') === 'full'
-            && empty($r['stats']['skip']['limit_new']) && (!empty($r['state']['complete']) || (int) $r['stats']['created'] === 0)
-            && (int) ($r['state']['min_id'] ?? 1550000) <= (int) self::cfg('min_id');
+        $st = $r['state'];
+        $cap = max(10, (int) ($st['max_requests'] ?? self::cfg('max_requests')));
+        return $r['status'] === 'done' && ($st['mode'] ?? '') === 'full' && empty($st['limit']) && empty($st['ids'])
+            && empty($r['stats']['skip']['limit_new'])
+            && (!empty($st['complete']) || (int) ($r['stats']['requests'] ?? 0) < $cap)
+            && (int) ($st['min_id'] ?? 1550000) <= (int) self::cfg('min_id');
     }
 
     /**
-     * Нужна массовая загрузка (догрузить все новые товары до порога id; решение владельца 26.10.2026 — без отдельного задания
-     * в Cron Jobs: её начинает часовой bin/cron.php, по 40 мин в час, пока не догрузит): загрузка включена и наценка задана,
-     * сейчас ничего не идёт, последний запуск не остановлен владельцем («Остановить» — до «Запустить сейчас»), последний полный
-     * проход не закончил массовую загрузку (massDone). bin/load-hitobuvi.sh (если задание есть) делает то же чаще.
+     * Массовая загрузка закончена с нынешним порогом: отметка (с порогом не ниже нынешнего) или последний полный проход massDone —
+     * тогда отметка пишется: дальше её не отменит ни неудачный ночной проход, ни уборка старых запусков. Снять — снизить порог
+     * в настройках или «Сбросить паузу и продолжить» в «Обзоре».
      */
+    public static function massFinished(): bool
+    {
+        $minId = (int) self::cfg('min_id');
+        $f = STORAGE . self::MASS_DONE_FILE;
+        if (preg_match('/^min_id=(\d+)$/', trim((string) @file_get_contents($f)), $m) && (int) $m[1] <= $minId) return true;
+        $full = App::db()->value("SELECT id FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' AND state LIKE ? ORDER BY id DESC LIMIT 1", [self::CODE, '%"mode":"full"%']);
+        $r = $full ? self::run((int) $full) : null;
+        if ($r && self::massDone($r)) { @file_put_contents($f, 'min_id=' . $minId); return true; }
+        return false;
+    }
+
+    /** Владелец нажал «Остановить» боевого запуска — массовая загрузка ждёт «Запустить сейчас» (или «Сбросить паузу и продолжить») */
+    public static function massHeld(): bool
+    {
+        return is_file(STORAGE . self::MASS_HOLD_FILE);
+    }
+
+    /** Снять отметки «остановлена» и «закончена» (кнопка в «Обзоре»): массовая загрузка проверит всё заново */
+    public static function massReset(): void
+    {
+        @unlink(STORAGE . self::MASS_HOLD_FILE);
+        @unlink(STORAGE . self::MASS_DONE_FILE);
+    }
+
+    /**
+     * Массовая загрузка (догрузить все новые товары до порога id; решение владельца 26.10.2026 — без отдельного задания
+     * в Cron Jobs: её начинает и продолжает часовой bin/cron.php по 40 мин в час, bin/load-hitobuvi.sh — чаще):
+     * done — закончена; off — загрузка выключена или нет наценки; held — остановлена владельцем; running — запуск идёт
+     * (cron/скрипт продолжают его); backoff — пауза после ошибок поставщика (until — до когда); pending — нужен новый проход.
+     * @return array{state: string, until: int}
+     */
+    public static function massState(): array
+    {
+        if (self::massFinished()) return ['state' => 'done', 'until' => 0];
+        if (!self::enabled() || self::markup() === null) return ['state' => 'off', 'until' => 0];
+        if (self::massHeld()) return ['state' => 'held', 'until' => 0];
+        $last = App::db()->all("SELECT status, error, finished_at FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 3", [self::CODE]);
+        if ($last && $last[0]['status'] === 'running') return ['state' => 'running', 'until' => 0];
+        if ($last && $last[0]['status'] === 'error') {
+            $errs = 0;
+            foreach ($last as $r) { if ($r['status'] !== 'error') break; $errs++; }
+            $until = (int) strtotime((string) $last[0]['finished_at']) + self::MASS_BACKOFF;
+            if (($errs >= 3 || str_contains((string) $last[0]['error'], 'нужна проверка')) && $until > time()) return ['state' => 'backoff', 'until' => $until];
+        }
+        return ['state' => 'pending', 'until' => 0];
+    }
+
+    /** Нужен новый проход массовой загрузки (massState = pending) */
     public static function massPending(): bool
     {
-        if (!self::enabled() || self::markup() === null) return false;
-        $db = App::db();
-        $last = $db->row("SELECT id, status, error FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [self::CODE]);
-        if ($last && ($last['status'] === 'running' || ($last['status'] === 'stopped' && $last['error'] === 'остановлен вручную'))) return false;
-        $full = $db->value("SELECT id FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' AND state LIKE ? ORDER BY id DESC LIMIT 1", [self::CODE, '%"mode":"full"%']);
-        $r = $full ? self::run((int) $full) : null;
-        return !($r && self::massDone($r));
+        return self::massState()['state'] === 'pending';
+    }
+
+    /** «Остановить» боевого запуска владельцем — и массовая загрузка ждёт «Запустить сейчас» */
+    public static function stop(int $id): bool
+    {
+        $r = self::run($id);
+        $ok = parent::stop($id);
+        if ($ok && $r && $r['kind'] === 'run') @touch(STORAGE . self::MASS_HOLD_FILE);
+        return $ok;
+    }
+
+    /** cron: шаги кончаются к :40 часа (а не через 40 мин от начала) — следующий часовой cron всегда видит запуск без движения дольше STALE и продолжает его */
+    public static function cron(callable $say, float $maxTime = 2400.0): void
+    {
+        parent::cron($say, max(60.0, min($maxTime, 2400.0 - time() % 3600)));
     }
 
     /** Расписание: идёт массовая загрузка — запуск каждый час (вне окна и периода), иначе — как у всех */
@@ -210,6 +276,7 @@ final class HitObuvi extends WebSupplier
             'min_id' => (int) self::cfg('min_id'),
         ];
         $id = self::createRun($kind, $src, $origin, !empty($o['user_id']) ? (int) $o['user_id'] : null, $state);
+        if ($kind === 'run' && $origin === 'admin') @unlink(STORAGE . self::MASS_HOLD_FILE);   // «Запустить сейчас» — массовая загрузка снова идёт
         $m = self::markup();
         $what = match (true) {
             $kind === 'dry' => 'пробный прогон: в каталог ничего не записывается',

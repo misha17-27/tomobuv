@@ -99,7 +99,7 @@ final class HitObuviController extends BaseController
             'log_at' => is_file($log) ? (int) filemtime($log) : 0, 'tail' => $tail, 'running' => $running,
             'errors' => $errN, 'paused_until' => $errN >= 3 ? (int) filemtime($err) + 355 * 60 : 0,
             'done' => is_file(STORAGE . '/hitobuvi-load.done') ? trim((string) @file_get_contents(STORAGE . '/hitobuvi-load.done')) : '',
-            'min_id' => (int) HitObuvi::cfg('min_id'), 'pending' => HitObuvi::massPending(),
+            'min_id' => (int) HitObuvi::cfg('min_id'), 'mass' => HitObuvi::massState(),
         ];
     }
 
@@ -107,9 +107,9 @@ final class HitObuviController extends BaseController
     public function massReset(): Response
     {
         @unlink(STORAGE . '/hitobuvi-load.errors');
-        @unlink(STORAGE . '/hitobuvi-load.done');
+        HitObuvi::massReset();
         $this->log('supplier_massload_reset', 'supplier', null, ['supplier' => HitObuvi::CODE]);
-        $this->flash('Массовая загрузка: пауза и отметка «всё загружено» сняты — скрипт продолжит в течение 5 минут (если задание есть в Cron Jobs).');
+        $this->flash('Массовая загрузка: остановка, пауза и отметка «всё загружено» сняты — продолжит скрипт (до 5 мин) или часовой cron.');
         return Response::redirect(self::BASE);
     }
 
