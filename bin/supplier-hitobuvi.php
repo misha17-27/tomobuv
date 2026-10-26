@@ -80,9 +80,7 @@ try {
         // проход с более высоким порогом id (до 24.10.2026 в state порога нет — был 1 550 000) не считается: порог снизили —
         // нужен новый проход, он добавит только недостающие (загруженные узнаются по связи и только сверяются)
         $minId = (int) HitObuvi::cfg('min_id');
-        $isAll = static fn(array $r): bool => $r['status'] === 'done' && ($r['state']['mode'] ?? '') === 'full'
-            && empty($r['stats']['skip']['limit_new']) && (!empty($r['state']['complete']) || (int) $r['stats']['created'] === 0)
-            && (int) ($r['state']['min_id'] ?? 1550000) <= $minId;
+        $isAll = static fn(array $r): bool => HitObuvi::massDone($r);   // то же правило, что у часового cron (HitObuvi::massPending)
         // всё уже загружено с этим порогом (отметка storage/hitobuvi-load.done) — выход без запросов (код 4: bin/load-hitobuvi.sh молчит)
         $doneFile = STORAGE . '/hitobuvi-load.done';
         $doneMark = 'min_id=' . $minId;

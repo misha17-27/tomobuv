@@ -113,6 +113,59 @@ final class HitObuvi extends WebSupplier
 
     // ================================================================== запуски (статистика, cron по 40 мин, режим по расписанию — WebSupplier)
 
+    /** Лимиты запуска массовой загрузки (только этого запуска; настройки — для обычных) */
+    public const MASS_MAX_NEW = 50000;
+    public const MASS_MAX_REQUESTS = 60000;
+
+    /**
+     * Массовая загрузка закончена этим запуском: полный проход завершён без отложенных по лимиту новых, прочитал все разделы
+     * (или ничего не добавил — повторять бесполезно), порог id не выше нынешнего (порог снизили — нужен новый проход: он добавит
+     * только недостающие; до 24.10.2026 в state порога нет — был 1 550 000)
+     */
+    public static function massDone(array $r): bool
+    {
+        return $r['status'] === 'done' && ($r['state']['mode'] ?? '') === 'full'
+            && empty($r['stats']['skip']['limit_new']) && (!empty($r['state']['complete']) || (int) $r['stats']['created'] === 0)
+            && (int) ($r['state']['min_id'] ?? 1550000) <= (int) self::cfg('min_id');
+    }
+
+    /**
+     * Нужна массовая загрузка (догрузить все новые товары до порога id; решение владельца 26.10.2026 — без отдельного задания
+     * в Cron Jobs: её начинает часовой bin/cron.php, по 40 мин в час, пока не догрузит): загрузка включена и наценка задана,
+     * сейчас ничего не идёт, последний запуск не остановлен владельцем («Остановить» — до «Запустить сейчас»), последний полный
+     * проход не закончил массовую загрузку (massDone). bin/load-hitobuvi.sh (если задание есть) делает то же чаще.
+     */
+    public static function massPending(): bool
+    {
+        if (!self::enabled() || self::markup() === null) return false;
+        $db = App::db();
+        $last = $db->row("SELECT id, status, error FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' ORDER BY id DESC LIMIT 1", [self::CODE]);
+        if ($last && ($last['status'] === 'running' || ($last['status'] === 'stopped' && $last['error'] === 'остановлен вручную'))) return false;
+        $full = $db->value("SELECT id FROM supplier_runs WHERE supplier = ? AND kind = 'run' AND src = 'web' AND state LIKE ? ORDER BY id DESC LIMIT 1", [self::CODE, '%"mode":"full"%']);
+        $r = $full ? self::run((int) $full) : null;
+        return !($r && self::massDone($r));
+    }
+
+    /** Расписание: идёт массовая загрузка — запуск каждый час (вне окна и периода), иначе — как у всех */
+    public static function due(?int $now = null): array
+    {
+        if (self::massPending()) return [true, 'массовая загрузка: новые товары до порога id ещё не все'];
+        return parent::due($now);
+    }
+
+    /** Следующий запуск для экрана: идёт массовая загрузка — ближайший часовой cron (:00) */
+    public static function nextRun(): ?int
+    {
+        if (self::massPending()) return (intdiv(time(), 3600) + 1) * 3600;
+        return parent::nextRun();
+    }
+
+    /** cron начинает массовую загрузку — полный проход с её лимитами */
+    protected static function cronOptions(): array
+    {
+        return self::massPending() ? ['mode' => 'full', 'max_new' => self::MASS_MAX_NEW, 'max_requests' => self::MASS_MAX_REQUESTS] : [];
+    }
+
     /**
      * Начать запуск. $o: src — web | file; dir — папка сохранённых страниц для src = file (общий кэш проверок, страницы
      * прошлого запуска); cache — сквозной кэш для src = web (проверки: повторно не скачивать); mode — quick | full | auto;

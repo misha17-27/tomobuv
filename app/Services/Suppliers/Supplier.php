@@ -249,10 +249,16 @@ abstract class Supplier
             if ($stale) static::finishRun((int) $stale['id'], 'stopped', $stale['kind'] === 'run' ? 'остановлен: автозагрузка выключена' : 'прерван: не было движения больше ' . intdiv(static::STALE, 60) . ' мин');
             [$due, $why] = static::due();
             if (!$due) { $say('Автозагрузка ' . static::TITLE . ': не запускаю — ' . $why); return; }
-            $id = static::start('run', ['src' => static::liveSrc(), 'origin' => 'cron']);
+            $id = static::start('run', ['src' => static::liveSrc(), 'origin' => 'cron'] + static::cronOptions());
             $say('Запуск №' . $id . ' начат');
         }
         static::drive($id, $say, $maxTime);
+    }
+
+    /** Параметры запуска, который начинает cron (адаптер: режим, лимиты этого запуска — массовая загрузка «Хит обуви») */
+    protected static function cronOptions(): array
+    {
+        return [];
     }
 
     /** Начать запуск (адаптер): kind — run | dry, $o — источник, лимиты, origin, user_id. @return int id запуска */

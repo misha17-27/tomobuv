@@ -99,7 +99,7 @@ final class HitObuviController extends BaseController
             'log_at' => is_file($log) ? (int) filemtime($log) : 0, 'tail' => $tail, 'running' => $running,
             'errors' => $errN, 'paused_until' => $errN >= 3 ? (int) filemtime($err) + 355 * 60 : 0,
             'done' => is_file(STORAGE . '/hitobuvi-load.done') ? trim((string) @file_get_contents(STORAGE . '/hitobuvi-load.done')) : '',
-            'min_id' => (int) HitObuvi::cfg('min_id'),
+            'min_id' => (int) HitObuvi::cfg('min_id'), 'pending' => HitObuvi::massPending(),
         ];
     }
 
