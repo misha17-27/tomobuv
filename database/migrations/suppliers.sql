@@ -182,6 +182,8 @@ SET @wm_fix = ROW_COUNT();
 UPDATE `settings` SET `value` = '1' WHERE `name` = 'hitobuvi.watermark' AND @wm_fix = 1;
 
 ALTER TABLE `supplier_excluded` ADD COLUMN IF NOT EXISTS `ext_id` VARCHAR(64) NULL AFTER `name`;
+-- размерный ряд удалённого товара: «Хит обуви» выкладывает ту же модель заново под новым номером — не добавлять её по названию и ряду
+ALTER TABLE `supplier_excluded` ADD COLUMN IF NOT EXISTS `size` VARCHAR(64) NULL AFTER `name`;
 
 -- Один раз: товары, удалённые владельцем до supplier_excluded (23.10.2026), — по журналу изменений поставщиков (supplier_changes:
 -- код каждого добавленного / взятого под загрузчик товара). Товара больше нет и по этому коду нет живой связи — «удалён вручную»

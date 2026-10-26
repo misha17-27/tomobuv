@@ -60,6 +60,8 @@ final class HitObuviSync extends WebSync
     private array $brandProducts = [];
     /** Разбор названий товаров сайта для R4: [id => split()] */
     private array $splitCache = [];
+    /** excludedModel: forsage-коды и «название|ряд» удалённых вручную */
+    private ?array $excludedModels = null;
 
     public function __construct(int $runId, bool $dry, array &$stats, HitObuviClient $client)
     {
@@ -315,6 +317,32 @@ final class HitObuviSync extends WebSync
         unset($it);
     }
 
+    /**
+     * Ту же модель владелец уже удалял (supplier_excluded), а поставщик выложил её заново под новым номером: тот же
+     * forsage-код (ext_id связи) или то же название и размерный ряд удалённого товара — новый не создаётся (решение владельца
+     * 26.10.2026: удалённое вручную не возвращается). Вернуть — «Обзор» поставщика → «Удалены вручную».
+     */
+    private function excludedModel(array $it): bool
+    {
+        if ($this->excludedModels === null) {
+            $this->excludedModels = ['ext' => [], 'name' => []];
+            try {
+                foreach (App::db()->all('SELECT name, size, ext_id FROM supplier_excluded WHERE supplier = ?', [HitObuvi::CODE]) as $r) {
+                    if ((string) $r['ext_id'] !== '') $this->excludedModels['ext'][(string) $r['ext_id']] = true;
+                    if ((string) $r['name'] !== '' && (string) $r['size'] !== '') $this->excludedModels['name'][Importer::nk((string) $r['name']) . '|' . self::sz((string) $r['size'])] = true;
+                }
+            } catch (\PDOException) {
+                // таблицы / колонки ещё нет (до bin/install.php)
+            }
+        }
+        if ($it['forsage'] !== null && isset($this->excludedModels['ext'][(string) $it['forsage']])) return true;
+        if ($it['size'] === '') return false;
+        foreach (array_unique([Importer::nk($it['name']), Importer::nk($it['name_src'])]) as $k) {
+            if (isset($this->excludedModels['name'][$k . '|' . self::sz($it['size'])])) return true;
+        }
+        return false;
+    }
+
     /** Товары брендов (для R4): id, name, size, supplier — один раз за шаг */
     private function productsOfBrands(array $bids): array
     {
@@ -389,7 +417,7 @@ final class HitObuviSync extends WebSync
         }
         // нового товара на сайте нет
         if ($c['add_new'] !== '1') { $this->skip($it, 'noadd', ''); return; }
-        if ($this->excluded((string) $it['code'])) { $this->skip($it, 'excluded', ''); return; }
+        if ($this->excluded((string) $it['code']) || $this->excludedModel($it)) { $this->skip($it, 'excluded', ''); return; }
         if ($this->minId > 0 && $it['sid'] < $this->minId) { $this->skip($it, 'old', ''); return; }
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'категория «' . $it['map']['key'] . '»' . ($it['map']['type'] ? ' (тип «' . $it['map']['type'] . '»)' : '') . ' не сопоставлена — «' . $it['name'] . '» не добавлен'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'нет размерного ряда — «' . $it['name'] . '» (' . $it['code'] . ') не добавлен', 'warn'); return; }

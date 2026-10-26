@@ -246,8 +246,8 @@ final class AdminCatalog
             $db->transaction(static function ($db) use ($ph, $vals, $exclude) {
                 // товар поставщика удалил владелец — загрузчик его больше не создаёт (supplier_excluded; вернуть — «Обзор» поставщика)
                 if ($exclude) try {
-                    $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, ext_id, product_id, created_at)
-                        SELECT l.supplier, l.code, p.name, l.ext_id, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
+                    $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, size, ext_id, product_id, created_at)
+                        SELECT l.supplier, l.code, p.name, p.size, l.ext_id, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
                 } catch (\PDOException $e) {
                     \App\Core\Log::error('supplier_excluded: ' . $e->getMessage());     // нет таблицы (до bin/install.php) — удалить всё равно
                 }
