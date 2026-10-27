@@ -9,6 +9,29 @@ $fmt = static fn($n) => number_format((int) $n, 0, '', ' ');
 $shown = array_slice($tables, 0, 14);
 $rest = array_slice($tables, 14);
 ?>
+<?php $mt = $maint; ?>
+<section class="card" id="maint" aria-labelledby="maint-h">
+  <div class="card-hd"><h2 id="maint-h">Технические работы</h2></div>
+  <div class="pad">
+  <?php if ($mt): ?>
+    <p><b class="warn-txt">Сайт закрыт для посетителей</b> с <?= e(date('d.m.Y H:i', (int) $mt['at'])) ?><?= $mt['mode'] === 'auto' ? ' (включил deploy: в базе не было товаров)' : '' ?>: они видят «<?= e($mt['title']) ?>» (ответ 503 — поисковики ждут и страницы из поиска не убирают, если закрыто не дольше нескольких дней). Админка, загрузка товаров и cron работают.</p>
+    <?php if ($mt['mode'] === 'manual'): ?><p class="hint">Вы видите сайт как обычно, если включали с этого устройства (cookie предпросмотра).</p><?php endif; ?>
+    <?php if ($isAdmin): ?><form method="post" action="/admin/status/maintenance/" data-confirm="Открыть сайт для посетителей?"><?= \App\Controllers\Admin\BaseController::tokenField() ?><input type="hidden" name="action" value="off"><button class="btn btn-p" type="submit">Открыть сайт</button></form><?php endif; ?>
+  <?php else: ?>
+    <p>Сайт открыт. Закрыть на время работ — посетители и поисковики увидят страницу ниже (503 с «повторите позже»), админка, загрузка товаров и cron продолжат работать, вы сами будете видеть сайт как обычно.</p>
+    <?php if ($isAdmin): ?>
+    <form method="post" action="/admin/status/maintenance/" class="ed-form" data-confirm="Закрыть сайт для посетителей? Заказы с сайта до открытия не поступят.">
+      <?= \App\Controllers\Admin\BaseController::tokenField() ?><input type="hidden" name="action" value="on">
+      <div class="fld"><label class="lbl" for="mt-title">Заголовок</label><input id="mt-title" name="title" maxlength="120" value="<?= e(\App\Services\Maintenance::TITLE) ?>"></div>
+      <div class="fld"><label class="lbl" for="mt-text">Текст (каждый абзац — с новой строки; телефон для заказов добавляется сам)</label><textarea id="mt-text" name="text" rows="3" maxlength="2000"><?= e(\App\Services\Maintenance::TEXT) ?></textarea></div>
+      <button class="btn" type="submit">Закрыть сайт — технические работы</button>
+      <p class="hint">Закрывать надолго не стоит: больше 2–3 дней Google может начать убирать страницы из поиска, а оптовики не смогут оформить заказ на сайте.</p>
+    </form>
+    <?php else: ?><p class="hint">Включать технические работы может администратор.</p><?php endif; ?>
+  <?php endif; ?>
+  </div>
+</section>
+
 <div class="stats" id="sys-tally">
   <div class="stat" data-tally="ok"><span><?= (int) $tally['ok'] ?></span>В порядке</div>
   <div class="stat<?= $tally['warn'] ? ' hot' : '' ?>" data-tally="warn"><span><?= (int) $tally['warn'] ?></span>Стоит посмотреть</div>

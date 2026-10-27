@@ -400,3 +400,6 @@ i.lp.ru{background:var(--line-2);color:var(--steel)}
 .sl-newhint a{font-weight:700}
 .sl-pick-m{display:none}
 @media (max-width:700px){.sl-bulk .sl-pick-m{display:flex;margin:0 0 8px}}   /* таблица складывается в карточки, шапки с галочкой нет */
+/* цветной текст состояния (технические работы, загрузчики) */
+.warn-txt{color:#b45309}
+.ok-txt{color:var(--ok,#15803d)}

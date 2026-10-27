@@ -6,17 +6,32 @@
  */
 declare(strict_types=1);
 
-// Режим «Сайт обновляется»: есть файл storage/maintenance → 503 с Retry-After (поисковики не выкидывают страницы
-// из индекса). Админка работает — в ней загружают данные; статика (assets, wa-data, uploads, .well-known) отдаётся
-// Apache без PHP. Ставит и снимает bin/deploy.sh (пустая база) или владелец — создать/удалить файл в File Manager.
+// Режим «Технические работы» (App\Services\Maintenance): есть файл storage/maintenance → 503 с Retry-After (поисковики
+// не выкидывают страницы из индекса). Админка работает — в ней загружают данные; статика (assets, wa-data, uploads,
+// .well-known) отдаётся Apache без PHP. Включает и выключает администратор («Состояние системы»; JSON: заголовок, текст,
+// токен предпросмотра) или bin/deploy.sh (пустая база — слово «auto»). Включивший видит сайт по cookie с токеном —
+// ответы ему private, no-store (MAINT_PREVIEW): Cloudflare не сохранит открытую страницу для посетителей.
 if (is_file(__DIR__ . '/../storage/maintenance')
     && !preg_match('#^/(admin|ua/admin)(/|$)#', (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH))) {
-    http_response_code(503);
-    header('Retry-After: 3600');
-    header('Content-Type: text/html; charset=utf-8');
-    header('Cache-Control: no-store');
-    readfile(__DIR__ . '/../app/Views/errors/maintenance.html');
-    exit;
+    $mt = json_decode((string) @file_get_contents(__DIR__ . '/../storage/maintenance'), true);
+    $mtok = is_array($mt) ? (string) ($mt['token'] ?? '') : '';
+    if ($mtok !== '' && hash_equals($mtok, (string) ($_COOKIE['tomobuv_preview'] ?? ''))) {
+        define('MAINT_PREVIEW', true);
+    } else {
+        http_response_code(503);
+        header('Retry-After: 3600');
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-store');
+        $h = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+        $title = is_array($mt) && trim((string) ($mt['title'] ?? '')) !== '' ? (string) $mt['title'] : 'Сайт обновляется';
+        $text = is_array($mt) && trim((string) ($mt['text'] ?? '')) !== '' ? (string) $mt['text'] : '';
+        $page = (string) @file_get_contents(__DIR__ . '/../app/Views/errors/maintenance.html');
+        $page = str_replace('{{title}}', $h($title), $page);
+        // свой текст (абзацы — по пустой строке или переносу) вместо текста по умолчанию между <!--text--> … <!--/text-->
+        if ($text !== '') $page = (string) preg_replace('#<!--text-->.*?<!--/text-->#s', '<p>' . implode('</p><p>', array_map($h, preg_split('/\R+/u', trim($text)) ?: [])) . '</p>', $page);
+        echo $page;
+        exit;
+    }
 }
 
 require __DIR__ . '/../app/bootstrap.php';

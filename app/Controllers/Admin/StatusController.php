@@ -8,6 +8,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
 use App\Services\CatalogIndexer;
+use App\Services\Maintenance;
 use App\Services\SystemStatus;
 
 /**
@@ -33,9 +34,35 @@ final class StatusController extends BaseController
         }
         return $this->render('admin/status/index', [
             'title' => 'Состояние системы', 'groups' => $groups, 'tally' => SystemStatus::tally($groups),
-            'tables' => SystemStatus::tables(), 'isAdmin' => $isAdmin, 'local' => SystemStatus::isLocalBase(),
+            'tables' => SystemStatus::tables(), 'isAdmin' => $isAdmin, 'local' => SystemStatus::isLocalBase(), 'maint' => Maintenance::state(),
             'actions' => $actions, 'styles' => ['admin/system.css'], 'scripts' => ['admin/system.js'],
         ]);
+    }
+
+    /**
+     * POST /admin/status/maintenance/ — технические работы (только администратор): on — закрыть сайт для посетителей (заголовок,
+     * текст), off — открыть. Включивший получает cookie предпросмотра (видит сайт как обычно).
+     */
+    public function maintenance(): Response
+    {
+        if (!Auth::isAdmin()) {
+            $this->flash('Включать технические работы может только администратор.', true);
+            return Response::redirect('/admin/status/');
+        }
+        if (Request::post('action') === 'on') {
+            $title = trim(mb_substr(Request::post('title'), 0, 120));
+            $text = trim(mb_substr(Request::post('text'), 0, 2000));
+            $token = Maintenance::enable($title, $text, Auth::id() ?: null);
+            setcookie(Maintenance::COOKIE, $token, ['expires' => time() + 30 * 86400, 'path' => '/', 'secure' => \App\Core\Session::https(), 'httponly' => true, 'samesite' => 'Lax']);
+            $this->log('maintenance_on', 'settings', null, ['title' => $title]);
+            $this->flash('Сайт закрыт: посетители видят «' . ($title !== '' ? $title : Maintenance::TITLE) . '». Вы видите сайт как обычно (на этом устройстве). Админка, загрузка товаров и cron работают.');
+        } else {
+            Maintenance::disable();
+            setcookie(Maintenance::COOKIE, '', ['expires' => time() - 3600, 'path' => '/']);
+            $this->log('maintenance_off', 'settings', null);
+            $this->flash('Сайт открыт для посетителей.');
+        }
+        return Response::redirect('/admin/status/');
     }
 
     /** GET /admin/status/probe.json — закрыты ли служебные адреса на хостинге */

@@ -68,7 +68,7 @@ final class SecurityController extends BaseController
         'product_create' => 'Новый товар', 'product_update' => 'Изменение товара', 'product_delete' => 'Удаление товара', 'products_delete' => 'Удаление товаров',
         'product_images_upload' => 'Загрузка фото товара', 'product_image_delete' => 'Удаление фото товара', 'export_products' => 'Выгрузка товаров',
         'product_images_sort' => 'Порядок фото товара', 'product_bulk' => 'Товар: массовое действие', 'product_import' => 'Товар: импорт',
-        'product_autoname' => 'Товар: автоназвание', 'product_nophoto' => 'Товар: без фото', 'products_nophoto' => 'Скрытие товаров без фото', 'products_nophoto_delete' => 'Удаление товаров без фото', 'cloudflare_purge' => 'Очистка кэша Cloudflare', 'supplier_massload_reset' => 'Массовая загрузка: сброс паузы',
+        'product_autoname' => 'Товар: автоназвание', 'product_nophoto' => 'Товар: без фото', 'products_nophoto' => 'Скрытие товаров без фото', 'products_nophoto_delete' => 'Удаление товаров без фото', 'cloudflare_purge' => 'Очистка кэша Cloudflare', 'supplier_massload_reset' => 'Массовая загрузка: сброс паузы', 'maintenance_on' => 'Технические работы: сайт закрыт', 'maintenance_off' => 'Технические работы: сайт открыт',
         'category_create' => 'Новая категория', 'category_update' => 'Изменение категории', 'category_delete' => 'Удаление категории',
         'category_move' => 'Перемещение категории', 'category_parent' => 'Смена родительской категории', 'brand_delete' => 'Удаление бренда',
         'import_upload' => 'Загрузка прайса', 'import_start' => 'Запуск импорта', 'import_restart' => 'Повтор импорта', 'import_delete' => 'Удаление импорта',

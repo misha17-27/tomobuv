@@ -151,6 +151,7 @@ if (!Auth::isAdmin()) {
         </div>
       </div>
     </header>
+    <?php if (is_file(STORAGE . '/maintenance')): ?><div class="flash bad" role="status"><b>Сайт закрыт — технические работы.</b> Посетители видят заглушку (админка, загрузка товаров и cron работают). <a href="/admin/status/#maint">Открыть сайт →</a></div><?php endif; ?>
     <?php if (!empty($flash)): ?><div class="flash"><?= e($flash) ?></div><?php endif; ?>
     <?php if (!empty($flashError)): ?><div class="flash bad"><?= e($flashError) ?></div><?php endif; ?>
     <?= $content ?>

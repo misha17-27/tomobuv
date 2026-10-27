@@ -129,6 +129,8 @@ final class PageCache
      */
     public static function edgeHeaders(bool $allowDb = true): void
     {
+        // технические работы, а это предпросмотр сотрудника (public/index.php): открытую страницу Cloudflare хранить нельзя
+        if (defined('MAINT_PREVIEW')) { header('Cache-Control: private, no-store'); return; }
         $ajax = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
         $ttl = \App\Services\Cloudflare::edgeTtl($allowDb);
         $ok = self::enabled() && self::key() !== null && ($ajax ? (($_GET['_'] ?? null) === 'more') : !isset($_GET['_']));

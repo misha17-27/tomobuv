@@ -41,3 +41,4 @@ $router->get('/admin/status/probe.json/', [StatusController::class, 'probe']);
 $router->get('/admin/status/catalog.json', [StatusController::class, 'catalog']);
 $router->get('/admin/status/catalog.json/', [StatusController::class, 'catalog']);
 $router->post('/admin/status/reindex/', [StatusController::class, 'reindex']);
+$router->post('/admin/status/maintenance/', [StatusController::class, 'maintenance']);
