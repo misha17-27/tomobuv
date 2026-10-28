@@ -45,6 +45,7 @@ final class ImageController
         // имя файла — только id фото или его SEO-имя из базы: иначе любые имена (a.400.jpg, b.400.jpg…) плодили бы файлы на диске
         if ($m[1] !== (string) $iid && $m[1] !== (string) $img['filename']) return Response::notFound();
         $src = Image::originalPath($pid, $iid, (string) $img['ext']);
+        if (!is_file($src)) { clearstatcache(); $src = Image::originalPath($pid, $iid, (string) $img['ext']); }   // переносился в плоскую раскладку именно сейчас
         $dst = Image::thumbPath($pid, $iid, $m[1], $m[2], strtolower($m[3]));
         $q = strtolower($m[3]) === 'webp' ? (int) App::config('images.webp_quality', 80) : (int) App::config('images.jpeg_quality', 85);
         if (is_file($dst)) {

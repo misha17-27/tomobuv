@@ -274,7 +274,8 @@ final class SystemStatus
 
         // фото: папка со старого сайта + выборочная проверка последних фото
         $wa = (string) App::config('images.wa_data', 'wa-data');
-        $dir = PUBLIC_DIR . '/' . $wa . '/protected/shop/products';
+        $dir = PUBLIC_DIR . '/' . $wa . '/protected/shop/p';                    // плоская раскладка оригиналов (Image::flatPath)
+        if (!is_dir($dir)) $dir = PUBLIC_DIR . '/' . $wa . '/protected/shop/products';   // ещё не перенесены
         $remote = (string) App::config('images.remote_base', '');
         $checked = 0; $found = 0;
         foreach ($c['images'] as $im) {
@@ -283,7 +284,7 @@ final class SystemStatus
         }
         if (is_dir($dir)) {
             $state = $checked && $found < $checked ? 'warn' : 'ok';
-            $rows[] = self::row($state, 'Фото товаров перенесены', 'Папка public/' . $wa . '/protected/shop/products есть'
+            $rows[] = self::row($state, 'Фото товаров перенесены', 'Папка ' . substr($dir, strlen(PUBLIC_DIR) - 6) . ' есть'
                 . ($checked ? ' · последние фото: ' . $found . ' из ' . $checked . ' на месте' : ''),
                 $state === 'ok' ? 'Адреса фото те же, что на старом сайте'
                     : ($remote !== '' ? 'Сейчас недостающие фото берутся с ' . $remote . ' (images.remote_base, режим разработки). На хостинге скопируйте wa-data со старого сервера целиком и очистите remote_base'
@@ -355,6 +356,21 @@ final class SystemStatus
         [$bytes, $files, $complete] = $dirs['cache'];
         $rows[] = self::row('ok', 'Кэш сайта', 'Версия ' . Cache::version() . ' · ' . ($complete ? '' : 'более ') . self::size($bytes) . ', файлов: ' . ($complete ? '' : 'более ') . number_format($files, 0, '', ' '),
             'Старые версии удаляет cron через сутки. «Очистить кэш» делает все страницы свежими сразу');
+
+        // файлы и папки аккаунта (inodes): лимит хостинга 300 тыс., еженедельные бэкапы Namecheap — до 200 тыс. (InodeReport, cron раз в 3 ч)
+        $ir = \App\Services\InodeReport::last();
+        if (!$ir) {
+            $rows[] = self::row('warn', 'Файлы и папки на хостинге', 'Ещё не посчитаны', 'Посчитает cron в ближайший час (лимит хостинга — ' . number_format(\App\Services\InodeReport::LIMIT, 0, '', ' ') . ', бэкапы — до ' . number_format(\App\Services\InodeReport::BACKUP_LIMIT, 0, '', ' ') . ')');
+        } else {
+            $n = (int) $ir['total'];
+            $fmtN = static fn($v) => number_format((int) $v, 0, '', ' ');
+            $topTxt = implode(', ', array_map(static fn($k, $v) => $k . ' — ' . $fmtN($v), array_keys(array_slice($ir['home'], 0, 6, true)), array_slice($ir['home'], 0, 6, true)));
+            $siteTxt = implode(', ', array_map(static fn($k, $v) => $k . ' — ' . $fmtN($v), array_keys(array_slice($ir['site'], 0, 8, true)), array_slice($ir['site'], 0, 8, true)));
+            $rows[] = self::row($n > \App\Services\InodeReport::LIMIT * 0.9 ? 'bad' : ($n > \App\Services\InodeReport::BACKUP_LIMIT ? 'warn' : 'ok'), 'Файлы и папки на хостинге',
+                $fmtN($n) . ($ir['complete'] ? '' : '+') . ' из ' . $fmtN(\App\Services\InodeReport::LIMIT) . ' · посчитано ' . date('d.m H:i', (int) $ir['at']),
+                ($n > \App\Services\InodeReport::BACKUP_LIMIT ? 'Больше ' . $fmtN(\App\Services\InodeReport::BACKUP_LIMIT) . ' — Namecheap не делает еженедельный бэкап. ' : '')
+                . 'Больше всего: ' . $topTxt . '. В сайте: ' . $siteTxt);
+        }
 
         $log = STORAGE . '/logs/error-' . date('Y-m') . '.log';
         if (is_file($log)) {

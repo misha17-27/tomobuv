@@ -53,6 +53,26 @@ try {
     echo 'водяной знак: ошибка — ' . $e->getMessage() . "\n";
 }
 
+// Оригиналы фото — в плоскую раскладку (1 файл на фото вместо 3 записей на товар; лимит файлов хостинга): OriginalsFlatten,
+// не дольше 10 мин за час; всё перенесено — сразу выход
+try {
+    \App\Services\OriginalsFlatten::run(600.0, static function (string $m): void { echo $m . "\n"; });
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron originals: ' . $e->getMessage());
+    echo 'оригиналы фото: ошибка — ' . $e->getMessage() . "\n";
+}
+
+// Файлы и папки аккаунта (inodes) по папкам — раз в 3 ч, для «Состояния системы» (InodeReport, до 2 мин)
+try {
+    $inodes = \App\Services\InodeReport::last();
+    if (!$inodes || (int) $inodes['at'] < time() - 3 * 3600 + 300) {
+        $r = \App\Services\InodeReport::run(120.0);
+        echo 'файлов и папок на аккаунте: ' . $r['total'] . ($r['complete'] ? '' : '+') . ' (' . $r['sec'] . ' с)' . "\n";
+    }
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron inodes: ' . $e->getMessage());
+}
+
 // Миниатюры фото на диске (до 25.10.2026 сохранялись — ~7 файлов и папок на товар; хостинг ограничивает число файлов): у фото
 // с оригиналом — удалить (ThumbCleanup, не дольше 5 мин за час; всё пройдено — сразу выход), теперь их делает сервер и кэширует Cloudflare
 try {

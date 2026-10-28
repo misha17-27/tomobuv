@@ -49,7 +49,29 @@ final class Image
         return self::url((int) $p['id'], isset($p['image_id']) ? (int) $p['image_id'] : null, $p['image_ext'] ?? 'jpg', $size, '', $as);
     }
 
+    /**
+     * Оригинал фото (наружу не отдаётся — только миниатюры): плоско wa-data/protected/shop/p/{id%100}/{id}-{фото}.{ext}
+     * (с 28.10.2026 — 1 файл на фото: хостинг ограничивает число файлов и папок, у раскладки Webasyst было 3 записи на товар).
+     * Ещё не перенесённый (App\Services\OriginalsFlatten, bin/cron.php) — по прежнему пути legacyPath. Нет ни того ни другого —
+     * плоский (туда пишут новые фото).
+     */
     public static function originalPath(int $productId, int $imageId, string $ext): string
+    {
+        $flat = self::flatPath($productId, $imageId, $ext);
+        if (is_file($flat)) return $flat;
+        $old = self::legacyPath($productId, $imageId, $ext);
+        return is_file($old) ? $old : $flat;
+    }
+
+    /** Плоский путь оригинала */
+    public static function flatPath(int $productId, int $imageId, string $ext): string
+    {
+        return PUBLIC_DIR . '/' . App::config('images.wa_data', 'wa-data') . '/protected/shop/p/' . sprintf('%02d', $productId % 100)
+            . '/' . $productId . '-' . $imageId . '.' . $ext;
+    }
+
+    /** Прежний путь оригинала (как в Webasyst) */
+    public static function legacyPath(int $productId, int $imageId, string $ext): string
     {
         return PUBLIC_DIR . '/' . App::config('images.wa_data', 'wa-data') . '/protected/shop/products/'
             . self::productDir($productId) . '/images/' . $imageId . '.' . $ext;

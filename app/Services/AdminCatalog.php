@@ -382,7 +382,8 @@ final class AdminCatalog
     /** Удалить файлы одного фото: оригинал + папка миниатюр */
     public static function deleteImageFiles(int $pid, int $iid, string $ext): void
     {
-        @unlink(Image::originalPath($pid, $iid, $ext));
+        @unlink(Image::flatPath($pid, $iid, $ext));
+        @unlink(Image::legacyPath($pid, $iid, $ext));
         self::rmTree(self::waData() . '/public/shop/products/' . Image::productDir($pid) . '/images/' . $iid);
     }
 
@@ -390,6 +391,8 @@ final class AdminCatalog
     public static function deleteProductFiles(int $pid): void
     {
         if ($pid <= 0) return;
+        // оригиналы в плоской раскладке: p/{id%100}/{id}-{фото}.{ext} (шаблон «{id}-*» не захватит другой товар: дальше — «-»)
+        foreach (glob(dirname(Image::flatPath($pid, 0, 'jpg')) . '/' . $pid . '-*') ?: [] as $f) if (is_file($f)) @unlink($f);
         foreach (['protected', 'public'] as $zone) {
             $dir = self::waData() . '/' . $zone . '/shop/products/' . Image::productDir($pid);
             if (!is_dir($dir)) continue;
