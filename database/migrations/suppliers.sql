@@ -184,6 +184,22 @@ UPDATE `settings` SET `value` = '1' WHERE `name` = 'hitobuvi.watermark' AND @wm_
 ALTER TABLE `supplier_excluded` ADD COLUMN IF NOT EXISTS `ext_id` VARCHAR(64) NULL AFTER `name`;
 -- размерный ряд удалённого товара: «Хит обуви» выкладывает ту же модель заново под новым номером — не добавлять её по названию и ряду
 ALTER TABLE `supplier_excluded` ADD COLUMN IF NOT EXISTS `size` VARCHAR(64) NULL AFTER `name`;
+-- бренд удалённого товара: товары, удалённые вместе с брендом, «Бренды → Удалённые → Вернуть с товарами» возвращает к загрузке
+ALTER TABLE `supplier_excluded` ADD COLUMN IF NOT EXISTS `brand_id` INT UNSIGNED NULL AFTER `product_id`;
+ALTER TABLE `supplier_excluded` ADD INDEX IF NOT EXISTS `brand` (`brand_id`);
+
+-- Бренды, которые владелец удалил на сайте (28.10.2026): загрузчики новые товары этих брендов не создают (DeletedBrands;
+-- bkey — HitObuviSync::bkey названия). Список и «Вернуть» — «Бренды → Удалённые».
+CREATE TABLE IF NOT EXISTS `brand_excluded` (
+  `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `bkey`       VARCHAR(190) NOT NULL,
+  `name`       VARCHAR(255) NOT NULL,
+  `brand_id`   INT UNSIGNED NULL,                     -- удалённый бренд сайта (supplier_excluded.brand_id — его товары)
+  `products`   INT UNSIGNED NOT NULL DEFAULT 0,       -- товаров удалено вместе с брендом
+  `created_at` DATETIME     NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `bkey` (`bkey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Один раз: товары, удалённые владельцем до supplier_excluded (23.10.2026), — по журналу изменений поставщиков (supplier_changes:
 -- код каждого добавленного / взятого под загрузчик товара). Товара больше нет и по этому коду нет живой связи — «удалён вручную»

@@ -3,11 +3,22 @@
  * Список брендов.
  * @var array $rows @var int $total @var App\Core\Paginator $pg @var string $q @var string $show @var string $sort
  * @var array $sorts @var array $counts
+ * @var array $all [id => все товары бренда] @var array $twins [id => дубль с тем же ключом] @var array $locked [id => категория]
+ * @var array $deleted удалённые бренды (вкладка «Удалённые»)
  */
+use App\Controllers\Admin\BaseController;
 use App\Core\Request;
 use App\Services\Catalog;
 
 $fmt = static fn($n) => number_format((int) $n, 0, '', ' ');
+$dt = static fn(?string $d) => $d ? date('d.m.Y H:i', strtotime($d)) : '—';
+// вопрос перед удалением: с товарами — сколько удалится; дубль — товары пойдут в оставшийся бренд
+$ask = static function (array $b, int $n, ?string $twin) use ($fmt): string {
+    $q = $n ? 'Удалить бренд «' . $b['name'] . '» и все его товары (' . $fmt($n) . ' шт., включая скрытые)?' . "\n\n" . 'Товары удалятся с сайта навсегда.'
+        : 'Удалить бренд «' . $b['name'] . '»?';
+    return $q . "\n\n" . ($twin !== null ? 'Такой же бренд «' . $twin . '» остаётся — новые товары поставщиков пойдут в него.'
+        : 'Поставщики не будут загружать ' . ($n ? 'ни эти, ни новые товары бренда' : 'товары этого бренда') . '. Вернуть — вкладка «Удалённые».');
+};
 $tab = static fn(string $v) => e(Request::withQuery(['show' => $v, 'page' => null]));
 ?>
 <nav class="tabs" aria-label="Отбор брендов">
@@ -16,7 +27,38 @@ $tab = static fn(string $v) => e(Request::withQuery(['show' => $v, 'page' => nul
   <a href="<?= $tab('hidden') ?>" class="<?= $show === 'hidden' ? 'on' : '' ?>">Скрытые <i><?= $fmt($counts['hidden']) ?></i></a>
   <a href="<?= $tab('empty') ?>" class="<?= $show === 'empty' ? 'on' : '' ?>">Без товаров <i><?= $fmt($counts['empty']) ?></i></a>
   <a href="<?= $tab('nouk') ?>" class="<?= $show === 'nouk' ? 'on' : '' ?>" title="Есть описание, но нет украинского перевода">Без перевода UA <i><?= $fmt($counts['nouk'] ?? 0) ?></i></a>
+  <?php if ($counts['deleted'] || $show === 'deleted'): ?><a href="<?= $tab('deleted') ?>" class="<?= $show === 'deleted' ? 'on' : '' ?>" title="Удалённые бренды — поставщики их не загружают">Удалённые <i><?= $fmt($counts['deleted']) ?></i></a><?php endif; ?>
 </nav>
+<form id="bact" method="post" action="/admin/brands/"><?= BaseController::tokenField() ?></form>
+
+<?php if ($show === 'deleted'): ?>
+<div class="card flush">
+  <div class="card-hd"><h2>Удалённые бренды: <?= $fmt($total) ?></h2></div>
+  <?php if (!$deleted): ?>
+    <div class="empty-card"><h2>Удалённых брендов нет</h2><p>Бренд, удалённый в списке, появится здесь — поставщики его товары не загружают.</p><a class="btn" href="/admin/brands/">Все бренды</a></div>
+  <?php else: ?>
+  <p class="hint pad">Поставщики («Хит обуви», Jong•Golf, Tom.m) новые товары этих брендов не загружают. «Вернуть» — снова загружать новые товары бренда (бренд появится сам с первым товаром), «с товарами» — и удалённые товары бренда (если они ещё есть у поставщика).</p>
+  <div class="table-scroll">
+    <table class="tbl">
+      <thead><tr><th>Бренд</th><th>Удалён</th><th class="num">Товаров удалено</th><th></th></tr></thead>
+      <tbody>
+      <?php foreach ($deleted as $d): $did = (int) $d['id']; ?>
+        <tr>
+          <td class="ac-pname"><?= e((string) $d['name']) ?><?php if ($d['brand_id'] !== null): ?><small>был №<?= (int) $d['brand_id'] ?></small><?php endif; ?></td>
+          <td class="nowrap"><?= e($dt($d['created_at'])) ?></td>
+          <td class="num"><?= (int) $d['products'] ? $fmt($d['products']) : '<span class="muted">0</span>' ?></td>
+          <td class="nowrap right">
+            <button class="btn btn-sm" type="submit" form="bact" formaction="/admin/brands/deleted/<?= $did ?>/restore/" data-confirm="Снова загружать бренд «<?= e((string) $d['name']) ?>»? Поставщики добавят его новые товары при следующих загрузках.">Вернуть</button>
+            <?php if ((int) $d['left']): ?><button class="btn btn-sm" type="submit" form="bact" formaction="/admin/brands/deleted/<?= $did ?>/restore/" name="products" value="1" data-confirm="Снова загружать бренд «<?= e((string) $d['name']) ?>» и его удалённые товары (<?= $fmt($d['left']) ?>)? Поставщики добавят те, что у них ещё есть.">Вернуть с товарами (<?= $fmt($d['left']) ?>)</button><?php endif; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php endif; ?>
+</div>
+<?php else: ?>
 
 <form class="filter-bar" method="get" action="/admin/brands/" role="search">
   <?php if ($show !== ''): ?><input type="hidden" name="show" value="<?= e($show) ?>"><?php endif; ?>
@@ -49,7 +91,9 @@ $tab = static fn(string $v) => e(Request::withQuery(['show' => $v, 'page' => nul
             <?php if ((int) $b['has_uk']): ?><span class="ac-ltag uk" title="Есть украинский перевод">UA</span><?php endif; ?>
           </td>
           <td><?= (int) $b['hidden'] ? '<span class="pill">скрыт</span>' : '<span class="pill ok">на сайте</span>' ?></td>
-          <td class="nowrap"><a class="btn btn-sm" href="<?= e(Catalog::brandUrl($b)) ?>" target="_blank" rel="noopener" aria-label="Открыть «<?= e($b['name']) ?>» на сайте">На сайте ↗</a></td>
+          <td class="nowrap"><a class="btn btn-sm" href="<?= e(Catalog::brandUrl($b)) ?>" target="_blank" rel="noopener" aria-label="Открыть «<?= e($b['name']) ?>» на сайте">На сайте ↗</a>
+            <?php if (isset($locked[$bid])): ?><button class="btn btn-sm btn-d" type="button" disabled title="Используется в условии категории «<?= e($locked[$bid]) ?>» — сначала измените условие">Удалить</button>
+            <?php else: $n = (int) ($all[$bid] ?? 0); ?><button class="btn btn-sm btn-d" type="submit" form="bact" formaction="/admin/brands/<?= $bid ?>/delete/" name="n" value="<?= $n ?>" data-confirm="<?= e($ask($b, $n, $twins[$bid] ?? null)) ?>" aria-label="Удалить бренд «<?= e($b['name']) ?>»<?= $n ? ' и его товары' : '' ?>">Удалить</button><?php endif; ?></td>
         </tr>
       <?php endforeach; ?>
       </tbody>
@@ -58,4 +102,6 @@ $tab = static fn(string $v) => e(Request::withQuery(['show' => $v, 'page' => nul
   <?php endif; ?>
 </div>
 <?= $pg->html() ?>
-<p class="hint">Точки: Title · Description · описание на странице бренда (зелёная — заполнено, серая — по названию, красная — пусто).</p>
+<p class="hint">Точки: Title · Description · описание на странице бренда (зелёная — заполнено, серая — по названию, красная — пусто).
+  «Удалить» — бренд и все его товары (и скрытые): поставщики не загружают ни их, ни новые товары бренда; вернуть — вкладка «Удалённые».</p>
+<?php endif; ?>

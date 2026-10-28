@@ -229,6 +229,8 @@ final class AdminCatalog
     /**
      * Удалить товары полностью (строки во всех таблицах + файлы фото). Возвращает количество. Товары поставщиков (связи
      * supplier_links) запоминаются в supplier_excluded — загрузчики их снова не добавляют (решение владельца 23.10.2026);
+     * Товар без связи (Forsage, вручную) — тоже, для «Хит обуви» (по forsage-коду и названию с рядом); бренд товара — brand_id
+     * (удалили вместе с брендом — «Бренды → Удалённые» вернёт их к загрузке).
      * $exclude = false — не запоминаются (удаление товаров без фото, NoPhoto::purge: модель с фото загрузчик добавит снова).
      * Индекс — точечно, как после сохранения: снимок (фильтры, бренды) до удаления, CatalogIndexer::products после.
      * Строки catalog_index удалённых товаров убирает он же — по ним видно, в каких категориях уменьшить фильтры и счётчики.
@@ -246,8 +248,15 @@ final class AdminCatalog
             $db->transaction(static function ($db) use ($ph, $vals, $exclude) {
                 // товар поставщика удалил владелец — загрузчик его больше не создаёт (supplier_excluded; вернуть — «Обзор» поставщика)
                 if ($exclude) try {
-                    $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, size, ext_id, product_id, created_at)
-                        SELECT l.supplier, l.code, p.name, p.size, l.ext_id, l.product_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
+                    $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, size, ext_id, product_id, brand_id, created_at)
+                        SELECT l.supplier, l.code, p.name, p.size, l.ext_id, l.product_id, p.brand_id, NOW() FROM supplier_links l JOIN products p ON p.id = l.product_id WHERE l.product_id IN ($ph)", $vals);
+                    // товар без связи (Forsage, заведён вручную, «Хит обуви» ещё не дошёл до него): «Хит обуви» нашёл бы его
+                    // по forsage-коду или названию с рядом, а без него создал бы заново — модель запоминается (код «site:id»)
+                    $db->query("INSERT IGNORE INTO supplier_excluded (supplier, code, name, size, ext_id, product_id, brand_id, created_at)
+                        SELECT ?, CONCAT('site:', p.id), p.name, p.size, IF(p.supplier = 'forsage', NULLIF(p.supplier_code, ''), NULL), p.id, p.brand_id, NOW()
+                        FROM products p WHERE p.id IN ($ph) AND COALESCE(p.supplier, '') IN ('', 'forsage', ?)
+                          AND (p.size <> '' OR p.supplier = 'forsage' AND p.supplier_code <> '') AND NOT EXISTS (SELECT 1 FROM supplier_links l WHERE l.product_id = p.id)",
+                        array_merge([\App\Services\Suppliers\HitObuvi::CODE], $vals, [\App\Services\Suppliers\HitObuvi::CODE]));
                 } catch (\PDOException $e) {
                     \App\Core\Log::error('supplier_excluded: ' . $e->getMessage());     // нет таблицы (до bin/install.php) — удалить всё равно
                 }

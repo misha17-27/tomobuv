@@ -1,7 +1,8 @@
 <?php
 /**
  * Бренд: создание / редактирование.
- * @var array $b @var array $errors @var int $all @var array $dynCats @var App\Core\View $view
+ * @var array $b @var array $errors @var int $all @var array $dynCats @var ?array $deletedAs запись «Удалённые» с таким названием
+ * @var App\Core\View $view
  */
 use App\Controllers\Admin\BaseController;
 use App\Services\AdminCatalog;
@@ -19,6 +20,7 @@ $ukAuto = AdminCatalog::seoAuto('brand', $b, 'uk');
 $ukFb = ['title' => trim((string) ($b['title'] ?? '')) ?: $ukAuto['title'], 'meta_description' => trim((string) ($b['meta_description'] ?? '')) ?: $ukAuto['desc'], 'h1' => $ruH1];
 ?>
 <?php if ($errors): ?><div class="flash bad">Не сохранено: <?= e(implode(' ', $errors)) ?></div><?php endif; ?>
+<?php if ($deletedAs): ?><div class="flash warn">Бренд «<?= e((string) $deletedAs['name']) ?>» удаляли <?= e(date('d.m.Y', strtotime((string) $deletedAs['created_at']))) ?> — поставщики его новые товары не загружают. Снова загружать: <a href="/admin/brands/?show=deleted">«Бренды → Удалённые»</a> → «Вернуть».</div><?php endif; ?>
 
 <form method="post" enctype="multipart/form-data" id="brand-form" class="ac-form ed-form" data-lang="ru" action="<?= $id ? '/admin/brands/' . $id . '/' : '/admin/brands/new/' ?>">
 <?= BaseController::tokenField() ?>
@@ -100,10 +102,12 @@ $ukFb = ['title' => trim((string) ($b['title'] ?? '')) ?: $ukAuto['title'], 'met
   <a class="btn" href="/admin/brands/">К списку</a>
   <span class="hint hide-sm">Ctrl+S — сохранить</span>
   <span class="sp"></span>
-  <?php if ($id && !$all && !$dynCats): ?><button type="submit" class="btn btn-d" form="del-form">Удалить бренд</button><?php endif; ?>
+  <?php if ($id && !$dynCats): ?><button type="submit" class="btn btn-d" form="del-form"><?= $all ? 'Удалить бренд и товары (' . number_format($all, 0, '', ' ') . ')' : 'Удалить бренд' ?></button><?php endif; ?>
 </div>
 </form>
-<?php if ($id && !$all && !$dynCats): ?>
-<form id="del-form" method="post" action="/admin/brands/<?= $id ?>/delete/" data-confirm="Удалить бренд «<?= e($name) ?>»?"><?= BaseController::tokenField() ?></form>
+<?php if ($id && !$dynCats): ?>
+<form id="del-form" method="post" action="/admin/brands/<?= $id ?>/delete/" data-confirm="<?= e(($all
+    ? 'Удалить бренд «' . $name . '» и все его товары (' . number_format($all, 0, '', ' ') . ' шт., включая скрытые)?' . "\n\n" . 'Товары удалятся с сайта навсегда.'
+    : 'Удалить бренд «' . $name . '»?') . "\n\n" . 'Поставщики не будут загружать товары этого бренда (если на сайте нет такого же бренда-дубля). Вернуть — «Бренды → Удалённые».') ?>"><?= BaseController::tokenField() ?><input type="hidden" name="n" value="<?= $all ?>"></form>
 <?php endif; ?>
 <?= $view->partial('admin/partials/editor') ?>

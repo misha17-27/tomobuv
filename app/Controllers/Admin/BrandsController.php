@@ -11,6 +11,7 @@ use App\Core\Response;
 use App\Services\AdminCatalog;
 use App\Services\Catalog;
 use App\Services\HtmlSanitizer;
+use App\Services\Suppliers\DeletedBrands;
 
 /**
  * Админка → Бренды. Бренд = значение характеристики «Бренд» (id совпадают, как в Webasyst):
@@ -34,7 +35,7 @@ final class BrandsController extends BaseController
     {
         $db = App::db();
         $q = mb_substr(Request::get('q'), 0, 100);
-        $show = in_array(Request::get('show'), ['visible', 'hidden', 'empty', 'nouk'], true) ? Request::get('show') : '';
+        $show = in_array(Request::get('show'), ['visible', 'hidden', 'empty', 'nouk', 'deleted'], true) ? Request::get('show') : '';
         $sort = isset(self::SORTS[Request::get('sort')]) ? Request::get('sort') : 'name';
         $w = []; $p = [];
         if ($q !== '') {
@@ -48,15 +49,40 @@ final class BrandsController extends BaseController
         $noUkSql = "(b.description IS NOT NULL AND b.description <> '' AND (b.description_uk IS NULL OR b.description_uk = ''))";
         if ($show === 'nouk') $w[] = $noUkSql;
         $where = $w ? implode(' AND ', $w) : '1';
-        $total = (int) $db->value("SELECT COUNT(*) FROM brands b WHERE $where", $p);
-        $pg = new Paginator($total, self::PER_PAGE, Request::page());
-        $rows = $db->all("SELECT b.id, b.name, b.url, b.image, b.hidden, b.product_count, b.title, b.meta_description,
+        // «Удалённые»: бренды, которые поставщики больше не загружают (DeletedBrands) — свой список, без поиска и страниц
+        $deleted = $show === 'deleted' ? DeletedBrands::all() : [];
+        if ($show === 'deleted') $where = '0';
+        $total = $show === 'deleted' ? count($deleted) : (int) $db->value("SELECT COUNT(*) FROM brands b WHERE $where", $p);
+        $pg = new Paginator($show === 'deleted' ? 0 : $total, self::PER_PAGE, Request::page());
+        $rows = $show === 'deleted' ? [] : $db->all("SELECT b.id, b.name, b.url, b.image, b.hidden, b.product_count, b.title, b.meta_description,
             (b.description IS NOT NULL AND b.description <> '') AS has_desc,
             (COALESCE(b.title_uk, '') <> '' OR COALESCE(b.description_uk, '') <> '' OR COALESCE(b.meta_description_uk, '') <> '') AS has_uk
             FROM brands b WHERE $where ORDER BY " . self::SORTS[$sort][0] . ' LIMIT ' . self::PER_PAGE . ' OFFSET ' . $pg->offset, $p);
+        // для «Удалить»: все товары бренда (и скрытые — product_count только товары на сайте) и бренды из условий категорий
+        $all = [];
+        if ($rows) {
+            [$ph, $vals] = $db->in(array_map(static fn($r) => (int) $r['id'], $rows));
+            $brandF = AdminCatalog::brandFeatureId();
+            $all = array_map('intval', $brandF
+                ? $db->pairs("SELECT x.bid, COUNT(DISTINCT x.pid) FROM (SELECT brand_id AS bid, id AS pid FROM products WHERE brand_id IN ($ph)
+                    UNION SELECT value_id, product_id FROM product_features WHERE feature_id = ? AND value_id IN ($ph)) x GROUP BY x.bid", array_merge($vals, [$brandF], $vals))
+                : $db->pairs("SELECT brand_id, COUNT(*) FROM products WHERE brand_id IN ($ph) GROUP BY brand_id", $vals));
+        }
+        // дубль с тем же ключом («Ok Shoes» / «OK-SHOES»): после удаления загрузка не запрещается — товары пойдут в оставшийся
+        $twins = [];
+        if ($rows) {
+            $byKey = [];
+            foreach ($db->all('SELECT id, name FROM brands') as $r) $byKey[DeletedBrands::key((string) $r['name'])][(int) $r['id']] = (string) $r['name'];
+            foreach ($rows as $r) {
+                $k = DeletedBrands::key((string) $r['name']);
+                $others = $k !== '' ? array_diff_key($byKey[$k] ?? [], [(int) $r['id'] => 1]) : [];
+                if ($others) $twins[(int) $r['id']] = reset($others);
+            }
+        }
         // счётчики вкладок — одним запросом (брендов сотни)
         $counts = array_map('intval', $db->row("SELECT COUNT(*) AS `all`, COALESCE(SUM(b.hidden = 0), 0) AS visible, COALESCE(SUM(b.hidden = 1), 0) AS hidden,
             COALESCE(SUM(b.product_count = 0), 0) AS `empty`, COALESCE(SUM($noUkSql), 0) AS nouk FROM brands b") ?? []);   // EMPTY — зарезервированное слово MySQL 8
+        $counts['deleted'] = $show === 'deleted' ? count($deleted) : DeletedBrands::count();
         return $this->render('admin/brands/index', [
             'title'   => 'Бренды',
             'actions' => '<a class="btn btn-p" href="/admin/brands/new/">+ Добавить бренд</a>',
@@ -69,7 +95,32 @@ final class BrandsController extends BaseController
             'sort'    => $sort,
             'sorts'   => array_map(static fn($s) => $s[1], self::SORTS),
             'counts'  => $counts,
+            'all'     => $all,
+            'twins'   => $twins,
+            'locked'  => self::inConditions(),
+            'deleted' => $deleted,
         ]);
+    }
+
+    /** Бренды из условий динамических категорий: [id бренда => название категории] — такой бренд не удаляется */
+    private static function inConditions(): array
+    {
+        $out = [];
+        foreach (App::db()->all("SELECT name, conditions FROM categories WHERE type = 1 AND conditions LIKE '%brand.value_id%'") as $c) {
+            if (preg_match('/brand\.value_id\s*=\s*([\d,]+)/', (string) $c['conditions'], $m)) {
+                foreach (array_map('intval', explode(',', $m[1])) as $bid) $out[$bid] ??= (string) $c['name'];
+            }
+        }
+        return $out;
+    }
+
+    /** Товары бренда: по brand_id и по характеристике «Бренд» */
+    private static function productIds(int $bid, int $brandF): array
+    {
+        $db = App::db();
+        $ids = $db->col('SELECT id FROM products WHERE brand_id = ?', [$bid]);
+        if ($brandF) $ids = array_merge($ids, $db->col('SELECT DISTINCT product_id FROM product_features WHERE feature_id = ? AND value_id = ?', [$brandF, $bid]));
+        return array_values(array_unique(array_map('intval', $ids)));
     }
 
     public function create(): Response
@@ -177,13 +228,14 @@ final class BrandsController extends BaseController
                 if (!empty($old['image']) && $old['image'] !== $d['image']) AdminCatalog::deleteUpload($old['image']);
                 Cache::flush();
                 $this->log($old['id'] ? 'brand_update' : 'brand_create', 'brand', $id, ['name' => $d['name']]);
-                $this->flash(($old['id'] ? 'Бренд сохранён.' : 'Бренд создан.') . HtmlSanitizer::notice());
+                $this->flash(($old['id'] ? 'Бренд сохранён.' : 'Бренд создан.') . HtmlSanitizer::notice()
+                    . (DeletedBrands::find($d['name']) ? ' Товары бренда поставщики не загружают (бренд удаляли) — вернуть: «Бренды → Удалённые».' : ''));
                 return Response::redirect('/admin/brands/' . $id . '/');
             }
             $b = array_merge($b, $d, ['image' => $picked === false ? $b['image'] : $picked]);
         }
 
-        $all = $id ? (int) $db->value('SELECT COUNT(*) FROM products WHERE brand_id = ?', [$id]) : 0;
+        $all = $id ? count(self::productIds($id, $brandF)) : 0;
         $cats = [];
         if ($id) {
             foreach ($db->all("SELECT id, name, conditions FROM categories WHERE type = 1 AND conditions LIKE '%brand.value_id%'") as $c) {
@@ -200,29 +252,58 @@ final class BrandsController extends BaseController
             'errors'  => $errors,
             'all'     => $all,
             'dynCats' => $cats,
+            'deletedAs' => $b['name'] !== '' ? DeletedBrands::find((string) $b['name']) : null,
         ]);
     }
 
-    /** Удаление — только бренда без товаров и не используемого в условиях категорий */
+    /**
+     * Удалить бренд (решение владельца 28.10.2026). С товарами — только подтверждённое (n — сколько товаров было в вопросе):
+     * товары удаляются навсегда (AdminCatalog::deleteProducts — поставщики их снова не загрузят). Бренд запоминается
+     * (DeletedBrands) — новые товары бренда загрузчики не создают; вернуть — «Бренды → Удалённые». Бренд из условия
+     * динамической категории не удаляется. Товаров больше, чем успевает за раз, — удаляется часть, бренд остаётся.
+     */
     public function delete(string $id): Response
     {
         $db = App::db();
         $b = ctype_digit($id) ? $db->row('SELECT id, name, url, image FROM brands WHERE id = ?', [(int) $id]) : null;
         if (!$b) { $this->flash('Бренд не найден.', true); return Response::redirect('/admin/brands/'); }
         $bid = (int) $b['id'];
+        $back = AdminCatalog::backUrl('/admin/brands/');
+        if (str_starts_with($back, '/admin/brands/' . $bid . '/')) $back = '/admin/brands/';      // со страницы бренда — в список
+        if (($cat = self::inConditions()[$bid] ?? null) !== null) {
+            $this->flash('Бренд используется в условии категории «' . $cat . '» — сначала измените условие.', true);
+            return Response::redirect($back);
+        }
         $brandF = AdminCatalog::brandFeatureId();
-        $n = (int) $db->value('SELECT COUNT(*) FROM products WHERE brand_id = ?', [$bid])
-            + ($brandF ? (int) $db->value('SELECT COUNT(*) FROM product_features WHERE feature_id = ? AND value_id = ?', [$brandF, $bid]) : 0);
-        if ($n) {
-            $this->flash('У бренда есть товары — удалить нельзя. Перенесите товары на другой бренд или объедините бренды в разделе «Характеристики».', true);
-            return Response::redirect('/admin/brands/' . $bid . '/');
+        $ids = self::productIds($bid, $brandF);
+        $n = count($ids);
+        // подтвердили меньше, чем стало (загрузчик добавил товары, пока страница была открыта), — спросить ещё раз с новым числом
+        $asked = max(0, Request::postInt('n'));
+        if ($n && ($asked === 0 || $n > $asked + max(20, intdiv($asked, 10)))) {
+            $this->flash('У бренда «' . $b['name'] . '» сейчас ' . $n . ' ' . plural($n, 'товар', 'товара', 'товаров') . ($asked ?' (было ' . $asked . ')' : '') . ' — нажмите «Удалить» ещё раз и подтвердите удаление вместе с товарами.', true);
+            return Response::redirect($back);
         }
-        foreach ($db->all("SELECT name, conditions FROM categories WHERE type = 1 AND conditions LIKE '%brand.value_id%'") as $c) {
-            if (preg_match('/brand\.value_id\s*=\s*([\d,]+)/', (string) $c['conditions'], $m) && in_array($bid, array_map('intval', explode(',', $m[1])), true)) {
-                $this->flash('Бренд используется в условии категории «' . $c['name'] . '» — сначала измените условие.', true);
-                return Response::redirect('/admin/brands/' . $bid . '/');
-            }
+        @set_time_limit(300);                                              // тысячи товаров с файлами фото
+        ignore_user_abort(true);                                           // закрыли вкладку — удаление всё равно доходит до конца
+        // сначала запомнить: загрузчик, который идёт сейчас, со следующей порции новые товары бренда уже не создаёт
+        $kept = DeletedBrands::add($bid, (string) $b['name'], 0);
+        $t0 = microtime(true);
+        $done = 0;
+        foreach (array_chunk($ids, 500) as $part) {
+            if ($done && microtime(true) - $t0 > 200) break;
+            $done += AdminCatalog::deleteProducts($part, true, false);
         }
+        if ($done < $n) {
+            if ($kept) DeletedBrands::addProducts($bid, $done);
+            Cache::flush();
+            Cache::forget('admin.category_direct_counts');
+            $this->log('brand_delete_products', 'brand', $bid, ['name' => $b['name'], 'products' => $done, 'left' => $n - $done]);
+            $this->flash('Удалено товаров бренда «' . $b['name'] . '»: ' . $done . ' из ' . $n . '. Осталось ' . ($n - $done) . ' — нажмите «Удалить» ещё раз.', true);
+            return Response::redirect($back);
+        }
+        // товары, которые загрузчик успел записать, пока шло удаление
+        if ($late = self::productIds($bid, $brandF)) $done += AdminCatalog::deleteProducts($late, true, false);
+        if ($kept) DeletedBrands::addProducts($bid, $done);
         $db->transaction(static function ($db) use ($bid, $brandF) {
             $db->delete('brands', 'id = ?', [$bid]);
             if ($brandF) $db->delete('feature_values', 'id = ? AND feature_id = ?', [$bid, $brandF]);
@@ -230,8 +311,22 @@ final class BrandsController extends BaseController
         AdminCatalog::deleteUpload($b['image'] ?? null);
         AdminCatalog::dropRedirectsTo([Catalog::brandUrl($b), rawurldecode(Catalog::brandUrl($b))]);
         Cache::flush();
-        $this->log('brand_delete', 'brand', $bid, ['name' => $b['name']]);
-        $this->flash('Бренд «' . $b['name'] . '» удалён.');
-        return Response::redirect('/admin/brands/');
+        if ($done) Cache::forget('admin.category_direct_counts');
+        $this->log('brand_delete', 'brand', $bid, ['name' => $b['name'], 'products' => $done, 'excluded' => $kept]);
+        $this->flash('Бренд «' . $b['name'] . '» удалён' . ($done ? ' вместе с товарами (' . $done . ')' : '') . '. '
+            . ($kept ? 'Поставщики его товары больше не загружают — вернуть: вкладка «Удалённые».'
+                : 'Такой же бренд на сайте остался — новые товары поставщиков пойдут в него.'));
+        return Response::redirect($back);
+    }
+
+    /** POST /admin/brands/deleted/{id}/restore/ — снова загружать удалённый бренд; products=1 — и его удалённые товары */
+    public function restore(string $id): Response
+    {
+        $r = ctype_digit($id) ? DeletedBrands::restore((int) $id, Request::post('products') === '1') : null;
+        if (!$r) { $this->flash('Бренд не найден в удалённых.', true); return Response::redirect('/admin/brands/?show=deleted'); }
+        $this->log('brand_restore', 'brand', null, ['name' => $r['name'], 'products' => $r['products']]);
+        $this->flash('Бренд «' . $r['name'] . '» снова загружается: поставщики добавят его новые товары при следующих загрузках'
+            . ($r['products'] ? ', и его удалённые товары (' . $r['products'] . ') — те, что у поставщика ещё есть' : '') . '.');
+        return Response::redirect('/admin/brands/?show=deleted');
     }
 }

@@ -178,7 +178,7 @@ $s = $p['stats'] ?? [];
   <div class="table-scroll"><table class="grid"><thead><tr><th>Товар</th><th>Код у поставщика</th><th>Удалён</th><th></th></tr></thead><tbody>
   <?php foreach ($excluded['rows'] as $r): ?><tr>
     <td><?= $r['name'] !== null && $r['name'] !== '' ? e((string) $r['name']) : '<span class="muted">товар №' . (int) $r['product_id'] . '</span>' ?></td>
-    <td><?= e($sup::codeLabel((string) $r['code'], null)) ?></td>
+    <td><?= str_starts_with((string) $r['code'], 'site:') ? '<span class="muted">не был связан' . ((string) $r['ext_id'] !== '' ? ', Forsage ' . e((string) $r['ext_id']) : '') . '</span>' : e($sup::codeLabel((string) $r['code'], null)) ?></td>
     <td class="nowrap"><?= e($dt($r['created_at'])) ?></td>
     <td class="right"><form method="post" action="<?= e($base . 'excluded/restore/') ?>" class="inline"><?= \App\Controllers\Admin\BaseController::tokenField() ?><input type="hidden" name="code" value="<?= e((string) $r['code']) ?>"><button class="btn btn-sm" type="submit">Вернуть</button></form></td>
   </tr><?php endforeach; ?>

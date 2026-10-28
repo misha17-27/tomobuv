@@ -517,6 +517,17 @@ abstract class SupplierSync
         return ['file' => $dst, 'w' => $cw, 'h' => $ch];
     }
 
+    /**
+     * Бренд (любое из названий) владелец удалил на сайте — новый товар не создавать (DeletedBrands, решение 28.10.2026;
+     * вернуть — «Бренды → Удалённые»)
+     */
+    protected function brandDeleted(string ...$names): bool
+    {
+        $keys = DeletedBrands::keys();
+        if ($keys) foreach ($names as $n) if (trim($n) !== '' && isset($keys[DeletedBrands::key($n)])) return true;
+        return false;
+    }
+
     /** Товар с этим кодом владелец удалил на сайте — новый не создавать (supplier_excluded; вернуть — «Обзор» поставщика) */
     protected function excluded(string $code): bool
     {

@@ -40,7 +40,7 @@ final class TommSync extends WebSync
         stock, in_stock, status, image_id, image_ext';
     protected const UPDATABLE = ['sku', 'supplier', 'supplier_code', 'category_id', 'price', 'compare_price', 'purchase_price', 'box_qty', 'min_qty', 'size',
         'stock', 'in_stock', 'status', 'updated_at'];
-    protected const MASS_SKIP = ['nostock', 'noadd', 'excluded', 'limit_new', 'dup', 'taken', 'foreign', 'cat_skip'];
+    protected const MASS_SKIP = ['nostock', 'noadd', 'excluded', 'brand_deleted', 'limit_new', 'dup', 'taken', 'foreign', 'cat_skip'];
     protected const CHANGE_NAMES = ['price' => 'цена', 'compare_price' => 'старая цена', 'purchase_price' => 'закупочная', 'status' => 'на сайте', 'in_stock' => 'наличие',
         'stock' => 'остаток', 'sku' => 'артикул', 'size' => 'размер', 'box_qty' => 'пар в ящике', 'min_qty' => 'мин. заказ', 'supplier' => 'поставщик',
         'supplier_code' => 'код поставщика', 'category_id' => 'категория'];
@@ -48,7 +48,7 @@ final class TommSync extends WebSync
     public const SKIP = [
         'cat_skip' => 'раздел бренда не загружается (настройка)', 'category' => 'раздел бренда не сопоставлен с категорией сайта',
         'price' => 'в наличии у бренда, но без цены', 'box' => 'не определить пар в ящике', 'size' => 'нет размерного ряда',
-        'nostock' => 'нет в наличии у бренда — новый товар не создаётся', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'excluded_recode' => 'новая модель под id удалённого вручную — не добавлена (проверьте)', 'noadd' => 'новые товары не добавляются (настройка)',
+        'nostock' => 'нет в наличии у бренда — новый товар не создаётся', 'excluded' => 'удалён на сайте вручную — снова не добавляется', 'excluded_recode' => 'новая модель под id удалённого вручную — не добавлена (проверьте)', 'brand_deleted' => 'бренд удалён на сайте вручную — новые товары бренда не добавляются', 'noadd' => 'новые товары не добавляются (настройка)',
         'limit_new' => 'лимит новых товаров за запуск', 'nophoto' => 'нет фото у бренда', 'photo' => 'фото не скачалось',
         'existing' => 'есть на сайте (Forsage / вручную) — не взят под загрузчик', 'ambiguous' => 'похож на несколько товаров сайта',
         'recode' => 'у бренда сменился код товара — товар сайта не изменён (проверьте)', 'dup' => 'повтор товара в запуске',
@@ -402,6 +402,7 @@ final class TommSync extends WebSync
         if ($it['cat_id'] === null) { $this->skip($it, 'category', 'раздел «' . $it['map']['key'] . '» не сопоставлен — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен'); return; }
         if ($it['size'] === '') { $this->skip($it, 'size', 'нет размерного ряда — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен', 'warn'); return; }
         if (!$it['photo_urls']) { $this->skip($it, 'nophoto', 'нет фото — ' . $it['name'] . ' (' . $it['code'] . ') не добавлен', 'warn'); return; }
+        if ($this->brandDeleted(...(preg_split('/\R/', (string) ($this->cfg['brands'] ?? '')) ?: []))) { $this->skip($it, 'brand_deleted', ''); return; }
         if (!$this->brandIds) { $this->skip($it, 'noadd', 'на сайте нет бренда Tom.m (настройка «Бренды Tom.m на сайте»)', 'error'); return; }
         if ((int) $c['max_new'] > 0 && (int) $this->stats['created'] + $this->plannedNew >= (int) $c['max_new']) { $this->skip($it, 'limit_new', ''); return; }
         $this->plannedNew++;

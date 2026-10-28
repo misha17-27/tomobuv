@@ -40,6 +40,7 @@ $router->get('/admin/brands/', [BrandsController::class, 'index']);
 $router->any('/admin/brands/new/', [BrandsController::class, 'create']);
 $router->any('/admin/brands/{id}/', [BrandsController::class, 'edit']);
 $router->post('/admin/brands/{id}/delete/', [BrandsController::class, 'delete']);
+$router->post('/admin/brands/deleted/{id}/restore/', [BrandsController::class, 'restore']);
 
 // ---------------------------------------------------------------- характеристики
 $router->get('/admin/features/', [FeaturesController::class, 'index']);

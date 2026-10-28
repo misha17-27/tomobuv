@@ -37,7 +37,7 @@ final class SupplierOverview
         $db = App::db();
         try {
             return ['n' => (int) $db->value('SELECT COUNT(*) FROM supplier_excluded WHERE supplier = ?', [$cls::CODE]),
-                'rows' => $db->all('SELECT code, name, product_id, created_at FROM supplier_excluded WHERE supplier = ? ORDER BY created_at DESC, code LIMIT ' . max(1, $limit), [$cls::CODE])];
+                'rows' => $db->all('SELECT code, name, ext_id, product_id, created_at FROM supplier_excluded WHERE supplier = ? ORDER BY created_at DESC, code LIMIT ' . max(1, $limit), [$cls::CODE])];
         } catch (\PDOException) {
             return ['n' => 0, 'rows' => []];
         }
