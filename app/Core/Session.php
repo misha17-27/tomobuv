@@ -68,6 +68,29 @@ final class Session
         session_regenerate_id(true);
     }
 
+    /**
+     * Продолжить существующую сессию $sid вместо только что начатой (вход по «Запомнить меня» во вкладке, открытой
+     * одновременно с первой: Auth::fromRemember). Её файла нет — false. Пока первый запрос не закончился, ждёт его (блокировка файла).
+     */
+    public static function adopt(string $sid): bool
+    {
+        if (PHP_SAPI === 'cli' || !preg_match('/^[A-Za-z0-9,-]{16,256}$/', $sid) || !is_file(STORAGE . '/sessions/sess_' . $sid)) return false;
+        if (session_status() === PHP_SESSION_ACTIVE) session_abort();
+        session_id($sid);
+        $_COOKIE['tsid'] = $sid;                                            // Session::exists — сессия есть
+        self::start();
+        return session_status() === PHP_SESSION_ACTIVE && session_id() === $sid;
+    }
+
+    /** Новая пустая сессия вместо текущей (её изменения не сохраняются) */
+    public static function fresh(): void
+    {
+        if (PHP_SAPI === 'cli') return;
+        if (session_status() === PHP_SESSION_ACTIVE) session_abort();
+        session_id(session_create_id() ?: bin2hex(random_bytes(16)));
+        self::start();
+    }
+
     public static function destroy(): void
     {
         self::start();

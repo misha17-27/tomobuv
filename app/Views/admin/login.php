@@ -1,7 +1,7 @@
 <?php
 /**
  * Вход в админку; с $logout = true — подтверждение выхода (/admin/logout/ открыли без токена).
- * @var string $error @var string $login @var ?bool $logout @var ?bool $stale @var ?array $user
+ * @var string $error @var string $login @var ?bool $remember @var ?bool $logout @var ?bool $stale @var ?array $user
  */
 use App\Controllers\Admin\BaseController;
 
@@ -29,6 +29,8 @@ $logout = !empty($logout);
     <?= BaseController::tokenField() ?>
     <label class="fld"><span>E-mail или телефон</span><input name="login" value="<?= e($login) ?>" required autofocus autocomplete="username"></label>
     <label class="fld"><span>Пароль</span><input name="password" type="password" required autocomplete="current-password"></label>
+    <label class="chk auth-remember"><input type="checkbox" name="remember" value="1"<?= !empty($remember) ? ' checked' : '' ?>> Запомнить меня на <?= \App\Core\Auth::REMEMBER_DAYS ?> дней</label>
+    <p class="hint auth-remember-hint">Не отмечайте на чужом или общем компьютере. Выйти — кнопка «Выйти» в админке.</p>
     <button class="btn btn-p">Войти</button>
     <p class="hint" style="margin-top:14px">Пароль тот же, что был в админке Webasyst. Нет доступа — на сервере: <code>php bin/create-admin.php e-mail пароль</code></p>
   </form>

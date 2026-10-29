@@ -268,6 +268,7 @@ final class UsersController extends BaseController
         if ($generated) $password = self::generatePassword();
         App::db()->update('customers', ['password' => password_hash($password, PASSWORD_DEFAULT), 'reset_token' => null, 'reset_expires' => null], 'id = ?', [$uid]);
         $ended = self::endSessions($uid);           // пароль сбрасывают, когда его могли узнать — открытые сеансы со старым паролем закрываем
+        Auth::forgetTokens($uid);                   // и «Запомнить меня» на его устройствах
         $this->log('staff_password', 'staff', $uid, ['generated' => $generated, 'sessions_ended' => $ended]);
         if ($generated) Session::flash('sys_newpass', ['id' => $uid, 'password' => $password, 'email' => (string) $u['email']]);
         $this->flash('Пароль изменён. Старый больше не подходит' . ($ended ? ', открытые сеансы сотрудника (' . $ended . ') завершены' : '')
@@ -371,6 +372,9 @@ final class UsersController extends BaseController
                 return 'Это единственный действующий администратор — сначала назначьте администратором кого-то ещё.';
             }
             $db->update('customers', $data, 'id = ?', [$uid]);
+            // отключили или сняли роль сотрудника — токены «Запомнить меня» удалить: включили снова — входить с паролем
+            $staff = in_array((string) ($data['role'] ?? $cur['role']), ['admin', 'manager'], true) && (int) ($data['status'] ?? $cur['status']) === 1;
+            if (!$staff) Auth::forgetTokens($uid);
             return '';
         });
     }
@@ -424,18 +428,7 @@ final class UsersController extends BaseController
      */
     public static function endSessions(int $uid): int
     {
-        if ($uid <= 0) return 0;
-        $mine = session_status() === PHP_SESSION_ACTIVE ? 'sess_' . session_id() : '';
-        $re = '/(?:^|[;}])uid\|i:' . $uid . ';|s:3:"uid";i:' . $uid . ';/';
-        $n = 0;
-        $end = microtime(true) + 2.0;
-        foreach (glob(STORAGE . '/sessions/sess_*', GLOB_NOSORT) ?: [] as $f) {
-            if (microtime(true) > $end) break;
-            if (basename($f) === $mine || (int) @filesize($f) > 65536) continue;
-            $s = @file_get_contents($f);
-            if (is_string($s) && preg_match($re, $s) && @unlink($f)) $n++;
-        }
-        return $n;
+        return Auth::endSessions($uid);
     }
 
     /** Пароль из формы как есть (без trim); массив вместо строки (password[]=…) — пустая строка */

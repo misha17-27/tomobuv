@@ -39,6 +39,8 @@ abstract class BaseController
             exit('Доступ запрещён');
         }
         Session::start();
+        // сессия закончилась (закрыли браузер, сервер удалил старую), а при входе отметили «Запомнить меня» — войти по токену
+        if (!Auth::isStaff()) Auth::fromRemember(['admin', 'manager']);
         if (!Auth::isStaff()) {
             if (Request::isAjax()) { Response::json(['ok' => false, 'error' => 'Требуется вход'], 401)->send(); exit; }
             Response::redirect('/admin/login/?back=' . rawurlencode($_SERVER['REQUEST_URI'] ?? '/admin/'))->send();

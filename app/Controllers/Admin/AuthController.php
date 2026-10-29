@@ -17,7 +17,7 @@ use App\Core\View;
  * Вход в админку и выход (не наследует BaseController — страницы доступны без входа).
  * Лимит перебора считает только неудачные попытки: 10 за 15 минут с одного IP (сотрудники одного офиса
  * за общим NAT своими успешными входами друг друга не блокируют) и 10 за 15 минут на один логин
- * (перебор пароля с разных IP).
+ * (перебор пароля с разных IP). «Запомнить меня» — Auth::remember (вход без пароля на этом устройстве Auth::REMEMBER_DAYS дней).
  */
 final class AuthController
 {
@@ -31,7 +31,7 @@ final class AuthController
         Session::start();
         $back = Request::get('back', '/admin/');
         if (!str_starts_with($back, '/admin/') || str_starts_with($back, '/admin/login')) $back = '/admin/';
-        if (Auth::isStaff()) return Response::redirect($back);
+        if (Auth::isStaff() || (!Request::isPost() && Auth::fromRemember(['admin', 'manager']))) return Response::redirect($back);
         $error = '';
         if (Request::isPost()) {
             if (!Csrf::checkSession()) {
@@ -44,7 +44,10 @@ final class AuthController
                 $u = Auth::attempt(Request::post('login'), UsersController::rawPost('password'));
                 if ($u && in_array($u['role'], ['admin', 'manager'], true)) {
                     Auth::login($u);
-                    App::db()->insert('admin_log', ['user_id' => $u['id'], 'action' => 'login', 'ip' => Request::ip()]);
+                    $remember = Request::post('remember') === '1';
+                    if ($remember) Auth::remember($u);
+                    App::db()->insert('admin_log', ['user_id' => $u['id'], 'action' => 'login', 'ip' => Request::ip(),
+                        'details' => $remember ? 'запомнить на ' . Auth::REMEMBER_DAYS . ' дней' : null]);
                     return Response::redirect($back);
                 }
                 // считаем только неудачные попытки — успешный вход счётчики не увеличивает
@@ -55,7 +58,8 @@ final class AuthController
                 $error = 'Неверный логин или пароль.';
             }
         }
-        return Response::html(View::render('admin/login', ['error' => $error, 'login' => Request::post('login')], null));
+        return Response::html(View::render('admin/login', ['error' => $error, 'login' => Request::post('login'),
+            'remember' => Request::post('remember') === '1'], null));
     }
 
     /**
@@ -66,12 +70,18 @@ final class AuthController
      */
     public function logout(): Response
     {
-        if (!Session::exists()) return Response::redirect('/admin/login/');
+        // вход по «Запомнить меня» ниже — только с разрешённых IP, как вход с паролем (выйти из открытой сессии — с любого)
+        $ips = BaseController::allowedIps();
+        $ipOk = !$ips || in_array(Request::ip(), $ips, true);
+        if (!Session::exists() && !($ipOk && Auth::remembered())) return Response::redirect('/admin/login/');
         $ok = Request::isPost() ? Csrf::checkSession() : Auth::checkLogoutToken(Request::get('t'), true);
         if ($ok) {
             Auth::logout();
             return Response::redirect('/admin/login/');
         }
+        // сессия на сервере уже закончилась, а «Запомнить меня» есть: страница входа впустила бы снова — подтвердить выход
+        // кнопкой (токен удалится)
+        if (!Auth::check() && $ipOk) Auth::fromRemember(['admin', 'manager']);
         if (!Auth::check()) return Response::redirect('/admin/login/');
         return Response::html(View::render('admin/login', [
             'logout' => true, 'stale' => Request::isPost(), 'user' => Auth::user(), 'error' => '', 'login' => '',

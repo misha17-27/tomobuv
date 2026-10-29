@@ -15,6 +15,10 @@ $removed = Cache::gc();
 $carts = $db->query('DELETE FROM cart_items WHERE updated_at < DATE_SUB(NOW(), INTERVAL 60 DAY)')->rowCount();
 $db->query('DELETE FROM rate_limits WHERE reset_at < ?', [time() - 3600]);
 foreach (glob(STORAGE . '/sessions/sess_*') ?: [] as $f) if (filemtime($f) < time() - 86400 * 2) @unlink($f);
+try {
+    $db->query('DELETE FROM auth_tokens WHERE expires_at < NOW()');          // «Запомнить меня»: срок вышел
+} catch (\PDOException) {
+}
 // импорт: старые задания и их файлы, разобранные строки, брошенные загрузки (import/tmp); задания в работе не трогаются
 \App\Services\Import\Importer::cleanup();
 $prev = (int) @file_get_contents(STORAGE . '/cron-last') ?: time() - 3600;
