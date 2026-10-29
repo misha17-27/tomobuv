@@ -215,6 +215,7 @@ abstract class WebSync extends SupplierSync
         $sup = static::SUPPLIER;
         $out = [];
         $first = true;
+        $fails = 0;
         foreach ($items as $i => $it) {
             if (empty($it['photo']) || !in_array($it['action'], ['create', 'update'], true)) continue;
             foreach ($this->photoUrls($it) as $k => $url) {
@@ -228,7 +229,16 @@ abstract class WebSync extends SupplierSync
                     $res = ['error' => 'фото закрыто robots.txt поставщика (или не на его сайте) — не запрашиваю'];   // запроса нет
                 } else {
                     $first = false;
-                    $r = $this->client->get($url, true);
+                    try {
+                        $r = $this->client->get($url, true);
+                    } catch (SupplierError $e) {
+                        // одно фото с ответом 403 (права файла у поставщика), 5xx или без ответа — ошибка этого фото: новый товар
+                        // не создаётся («фото не скачалось»), следующий запуск попробует снова (29.10.2026: раньше оно обрывало
+                        // каждый запуск на том же товаре). Проверка браузера, фильтр, лимит, robots, три фото подряд — весь запуск
+                        if (!($e->kind === 'retry' || ($e->kind === 'blocked' && $e->why === 'denied')) || ++$fails >= 3) throw $e;
+                        $r = ['code' => $e->http ?: 0, 'body' => ''];
+                    }
+                    if ((int) $r['code'] === 200) $fails = 0;
                     if (!empty($r['missing'])) $res = ['error' => 'нет среди сохранённых ответов'];
                     elseif ($r['code'] !== 200) $res = ['error' => 'ответ ' . $r['code']];
                     else {

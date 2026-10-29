@@ -288,8 +288,20 @@ final class HitObuviSync extends WebSync
             foreach ($db->all("SELECT product_id, category_id FROM category_products WHERE product_id IN ($iph)", $iv) as $r) $cats[(int) $r['product_id']][] = (int) $r['category_id'];
             foreach ($rows as $pid => &$r) $r['cats'] = $cats[$pid] ?? [];
             unset($r);
-            foreach ($db->all("SELECT product_id, code FROM supplier_links WHERE supplier = ? AND product_id IN ($iph)", array_merge([HitObuvi::CODE], $iv)) as $r) $taken[(int) $r['product_id']] = (string) $r['code'];
+            foreach ($db->all("SELECT product_id, code, missed, hidden, cost FROM supplier_links WHERE supplier = ? AND product_id IN ($iph)", array_merge([HitObuvi::CODE], $iv)) as $r) {
+                $taken[(int) $r['product_id']][(string) $r['code']] = ['missed' => (int) $r['missed'], 'hidden' => (int) $r['hidden'], 'cost' => $r['cost'] !== null ? (float) $r['cost'] : null];
+            }
         }
+        // товар сайта связан с другим номером поставщика, которого уже нет (не было в последнем полном проходе или скрыт как пропавший)
+        // и нет в этой порции — поставщик перевыложил модель под новым номером: связь переходит на новый (решение 29.10.2026; иначе
+        // новый номер навсегда «занят», а товар через 2 прохода скрывается). Прежний номер ещё у поставщика — настоящий дубль: «taken»
+        $portion = array_flip(array_map(static fn($x) => (string) $x['code'], $items));
+        $others = static fn(int $pid, string $code): array => array_diff_key($taken[$pid] ?? [], [$code => 1]);
+        $gone = static fn(string $code, array $l): bool => !isset($portion[$code]) && ($l['missed'] >= 1 || $l['hidden'] === 1);
+        $free = static function (int $pid, string $code) use ($others, $gone): bool {
+            foreach ($others($pid, $code) as $c => $l) if (!$gone((string) $c, $l)) return false;
+            return true;
+        };
         // один товар — один поставщик: связанные с другим поставщиком (Tom.m, Jong•Golf) и товары пропускаемых брендов сайта — не наши
         $foreign = $this->foreignLinked(array_keys($ids));
         $skipBids = [];
@@ -299,7 +311,8 @@ final class HitObuviSync extends WebSync
         foreach ($items as $i => &$it) {
             if (!isset($found[$i])) continue;
             [$via, $all] = $found[$i];
-            $list = array_values(array_filter($all, static fn($pid) => isset($rows[$pid]) && ($via === 'link' || (!$alien($pid) && (!isset($taken[$pid]) || $taken[$pid] === $it['code'])))));
+            $code = (string) $it['code'];
+            $list = array_values(array_filter($all, static fn($pid) => isset($rows[$pid]) && ($via === 'link' || (!$alien($pid) && $free((int) $pid, $code)))));
             if (!$list) {
                 if ($via === 'link') continue;
                 $al = array_values(array_filter($all, $alien));
@@ -314,6 +327,10 @@ final class HitObuviSync extends WebSync
             $it['ex'] = $rows[$pid];
             $it['via'] = $via;
             $it['link'] = $links[$it['code']] ?? null;
+            if ($via !== 'link' && ($old = $others((int) $pid, $code))) {
+                $it['recode'] = array_map('strval', array_keys($old));         // apply: прежние связи товара — на этот номер
+                $it['link'] ??= reset($old);                                    // скрыт загрузчиком, прошлая цена поставщика — от прежнего номера
+            }
         }
         unset($it);
     }
@@ -382,8 +399,10 @@ final class HitObuviSync extends WebSync
             // «обновлять цены» — иначе журнал повторял бы одно и то же изменение), у взятого под загрузчик — закупочная в карточке
             $it['old_cost'] = $it['link']['cost'] ?? ((float) $ex['purchase_price'] > 0 ? (float) $ex['purchase_price'] : null);
             $missed = (int) ($it['link']['missed'] ?? 0);
+            $recode = !empty($it['recode']) ? 'номер у поставщика ' . implode(', ', $it['recode']) . ' → ' . $it['code'] . ' (перевыложен)' : '';
             if ($c['update_existing'] !== '1' && $ours) {
                 $it['action'] = 'same'; $it['changes'] = []; $it['link_set'] = 1;
+                if ($recode !== '') $it['warn'][] = $recode;
                 if ($missed > 0 && (int) $ex['status'] === 1) $it['returned'] = 'снова есть у поставщика (не было ' . $missed . ' полн. проходов)';
                 return;
             }
@@ -412,8 +431,9 @@ final class HitObuviSync extends WebSync
             $this->diff($it, $ex, $upd);
             if (!empty($it['relink']) && !isset($it['upd']['category_id'])) $it['changes'][] = 'привязка к категории → ' . ($this->ci['path'][$it['cat_id']] ?? $it['cat_id']);
             if (!empty($it['photo'])) $it['changes'][] = 'фото';
+            if ($recode !== '') $it['changes'][] = $recode;
             $it['link_set'] = 1;
-            $it['action'] = $it['upd'] || !empty($it['relink']) || !empty($it['photo']) ? 'update' : 'same';
+            $it['action'] = $it['upd'] || !empty($it['relink']) || !empty($it['photo']) || $recode !== '' ? 'update' : 'same';
             return;
         }
         // нового товара на сайте нет
@@ -561,6 +581,12 @@ final class HitObuviSync extends WebSync
             if (!$it['id'] || !in_array($it['action'], ['create', 'update', 'same'], true)) continue;
             $links[] = [HitObuvi::CODE, $it['code'], (int) $it['id'], $it['forsage'] !== null ? mb_substr($it['forsage'], 0, 64) : null,
                 (int) ($it['upd']['status'] ?? $it['ex']['status'] ?? 1) === 1 ? 0 : (int) ($it['link']['hidden'] ?? 0), $now, $it['pair'] > 0 ? round($it['pair'], 2) : null, $now, $now];
+        }
+        // перевыложен под новым номером: прежние связи товара убрать (иначе прежний номер «пропал» бы и скрыл товар)
+        foreach ($items as $it) {
+            if (empty($it['recode']) || !$it['id'] || !in_array($it['action'], ['update', 'same'], true)) continue;
+            [$ph, $v] = $db->in($it['recode']);
+            $db->query("DELETE FROM supplier_links WHERE supplier = ? AND product_id = ? AND code IN ($ph)", array_merge([HitObuvi::CODE, (int) $it['id']], $v));
         }
         // связанный, но пропущенный (не загружаемая категория, бренд, нет цены) — у поставщика он есть: только отметка
         $touch = [];

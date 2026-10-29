@@ -135,10 +135,10 @@ class SiteClient
     }
 
     /** Ошибка обмена класса наследника */
-    protected static function err(string $msg, string $kind, int $http = 0): SupplierError
+    protected static function err(string $msg, string $kind, int $http = 0, string $why = ''): SupplierError
     {
         $c = static::ERROR;
-        return new $c($msg, $kind, $http);
+        return new $c($msg, $kind, $http, $why);
     }
 
     /**
@@ -215,9 +215,9 @@ class SiteClient
         $this->used++;
         $this->journal[] = [$res['code'], $res['time'], $url];
         if ($res['error'] !== '' && $res['code'] === 0) throw static::err('Нет ответа от сайта поставщика: ' . $res['error'], 'retry', 0);
-        if (self::filtered($res['body'])) throw static::err('Запрос к сайту поставщика закрыт сетевым фильтром (блок-страница, ответ ' . $res['code'] . ') — нужна проверка: загрузка остановлена, обходить фильтр загрузчик не будет', 'blocked', $res['code']);
-        if (self::challenge($res['body'], $res['headers'])) throw static::err('Сайт поставщика включил проверку браузера (Cloudflare, ответ ' . $res['code'] . ') — нужна проверка: загрузка остановлена, обходить защиту загрузчик не будет', 'blocked', $res['code']);
-        if ($res['code'] === 403) throw static::err('Сайт поставщика отказал в доступе (403) — нужна проверка: загрузка остановлена', 'blocked', 403);
+        if (self::filtered($res['body'])) throw static::err('Запрос к сайту поставщика закрыт сетевым фильтром (блок-страница, ответ ' . $res['code'] . ') — нужна проверка: загрузка остановлена, обходить фильтр загрузчик не будет', 'blocked', $res['code'], 'filter');
+        if (self::challenge($res['body'], $res['headers'])) throw static::err('Сайт поставщика включил проверку браузера (Cloudflare, ответ ' . $res['code'] . ') — нужна проверка: загрузка остановлена, обходить защиту загрузчик не будет', 'blocked', $res['code'], 'challenge');
+        if ($res['code'] === 403) throw static::err('Сайт поставщика отказал в доступе (403) — нужна проверка: загрузка остановлена', 'blocked', 403, 'denied');
         if ($res['code'] === 429 || $res['code'] >= 500) throw static::err('Сайт поставщика ответил ' . $res['code'] . ($res['code'] === 429 ? ' (слишком много запросов)' : ' (ошибка сервера)'), 'retry', $res['code']);
         return $res;
     }

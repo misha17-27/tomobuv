@@ -47,6 +47,7 @@ foreach (\App\Services\Suppliers\Suppliers::all() as $code => $cls) {
         echo $code . ': ошибка — ' . $e->getMessage() . "\n";
     }
 }
+@set_time_limit(0);   // шаг загрузчика ставит set_time_limit(150) — он действовал бы и на задачи ниже (водяной знак, фото, NoPhoto, SEO)
 
 // Фото «Хит обуви», загруженные до замены водяного знака: надпись поставщика → «tomobuv.com.ua» под новым адресом фото
 // (HitObuviWatermark::backlog — порциями не дольше 10 мин; новые фото загрузчик обрабатывает сам; всё сделано — сразу выход)

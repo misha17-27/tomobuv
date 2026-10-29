@@ -469,16 +469,37 @@ final class HitObuvi extends WebSupplier
             if (is_file($file)) {
                 $html = (string) file_get_contents($file);                      // получена до обрыва шага
             } else {
-                $r = $client->get($url);
-                $st['fails'] = 0;
-                if ($r['code'] === 404) {
-                    self::log($id, 'error', 'Раздел ' . $root . ' не найден у поставщика (404) — пропущен, проход неполный');
+                try {
+                    $r = $client->get($url);
+                } catch (SupplierError $e) {
+                    // 5xx или нет ответа: пауза и повтор (onSiteError); третий раз подряд на этой странице — сама страница у поставщика
+                    // не отдаётся (сломан товар в списке): пропустить её, проход неполный (29.10.2026: иначе каждый проход падал бы
+                    // на ней, а следующий начинал сначала). Две страницы подряд — недоступен сайт: остановка, как раньше
+                    if ($e->kind !== 'retry') throw $e;
+                    $st['pfail'] = ($st['pfail_url'] ?? '') === $url ? (int) ($st['pfail'] ?? 0) + 1 : 1;
+                    $st['pfail_url'] = $url;
+                    if ($st['pfail'] < 3 || !empty($st['pskip'])) throw $e;
+                    self::log($id, 'error', 'Страница ' . $url . ' трижды подряд не отдалась (' . $e->getMessage() . ') — пропущена, проход неполный, товары не скрываются');
+                    $run['stats']['errors']++;
+                    $st['broken'] = true;
+                    $st['pskip'] = 1; $st['pfail'] = 0; $st['fails'] = 0;
+                    $limit = max(20, min(200, (int) self::cfg('page_limit')));
+                    if (($st['last'] ?? null) !== null && (int) $st['start'] + $limit <= (int) $st['last']) $st['start'] = (int) $st['start'] + $limit;
+                    else { $st['r']++; $st['start'] = 0; $st['last'] = null; $st['rpages'] = 0; }
+                    return false;
+                }
+                if ($r['code'] !== 200 && $r['code'] !== 429 && $r['code'] < 500) {
+                    // 404, переадресация (301/302 — раздел переименовали), 410, 400: повтор не поможет — остаток раздела пропущен
+                    // (до 29.10.2026 ответы, кроме 404, сбрасывали счётчик сбоев — повтор раз в минуту без конца)
+                    self::log($id, 'error', 'Раздел ' . $root . ': ответ ' . $r['code'] . ' на ' . $url . ($r['code'] === 404 ? ' (не найден у поставщика)' : '')
+                        . ' — остаток раздела пропущен, проход неполный');
                     $run['stats']['errors']++;
                     $st['broken'] = true;
                     $st['badlist'] = 0; $st['r']++; $st['start'] = 0; $st['last'] = null; $st['rpages'] = 0;
                     return false;
                 }
                 if ($r['code'] !== 200) throw new HitObuviError('Страница ' . $url . ': ответ ' . $r['code'], 'retry', $r['code']);
+                $st['fails'] = 0; $st['pfail'] = 0; $st['pskip'] = 0;             // страница отдалась — сбои считаются заново
                 $html = $r['body'];
                 file_put_contents($file, $html);
             }
@@ -510,6 +531,7 @@ final class HitObuvi extends WebSupplier
         $pageCat = $path !== $root ? HitObuviMap::category($path, null) : null;
         file_put_contents($dir . '/page-' . $n . '.json', json_encode(['url' => $url, 'code' => 200, 'root' => $root, 'path' => $path, 'cat' => $pageCat['category'] ?? null], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ($n === 1 || empty($st['menu_done'])) self::checkMenu($run, $html);
+        self::learnCatIds($run, $client);
         $mf = HitObuviParser::manufacturers($html);
         if ($mf) @file_put_contents(self::dir() . '/manufacturers.json', json_encode($mf, JSON_UNESCAPED_UNICODE));
         $run['stats']['pages']++;
@@ -550,6 +572,53 @@ final class HitObuvi extends WebSupplier
         $file = $run && $run['state']['mode'] === 'files' ? ($run['state']['files'][$n - 1][1] ?? '') : $dir . '/page-' . $n . '.html';
         $memo = [$k => [HitObuviParser::listPage((string) @file_get_contents($file)), $meta]];
         return $memo[$k];
+    }
+
+    /**
+     * Категории поставщика без id (новые в меню — HitObuviMap::addCategory, черновик): товары с адресом /product/view/{id}/…
+     * их не находят, и выбранная владельцем категория сайта для них не действует. id — по странице самой категории: в ссылках
+     * корзины её товаров category_id = id категории (проверено 29.10.2026 на baletki-d = 49, c-krossovki = 20). Боевой запуск,
+     * не больше 2 категорий за запуск, каждая — не чаще раза в 7 дней (пустые у поставщика id не дают).
+     */
+    private static function learnCatIds(array &$run, HitObuviClient $client): void
+    {
+        $st = &$run['state'];
+        if (!empty($st['catids_done']) || $run['kind'] !== 'run' || $st['mode'] === 'files') return;
+        $st['catids_done'] = true;
+        $db = App::db();
+        $file = self::dir() . '/cat-ids.json';
+        $tried = json_decode((string) @file_get_contents($file), true);
+        if (!is_array($tried)) $tried = [];
+        $known = HitObuviMap::index()['id'];
+        $n = 0;
+        foreach ($db->all("SELECT id, category FROM supplier_category_map WHERE supplier = ? AND kind = 'cat' AND (ext_id IS NULL OR ext_id = '') AND mode <> 'skip' ORDER BY sort, id", [self::CODE]) as $r) {
+            $path = (string) $r['category'];
+            if (substr_count($path, '/') < 2 || (int) ($tried[$path] ?? 0) > time() - 7 * 86400) continue;
+            if (++$n > 2) break;
+            $tried[$path] = time();
+            $url = HitObuviClient::BASE . $path . '?limit=20';
+            if (!$client->allowed($url)) continue;
+            try {
+                $res = $client->get($url);
+            } catch (SupplierError $e) {
+                if ($e->kind === 'retry') continue;                             // в следующий раз (через 7 дней)
+                throw $e;
+            }
+            if ($res['code'] !== 200) continue;
+            $ids = array_count_values(array_filter(array_map(static fn($i) => (int) ($i['category_id'] ?? 0), HitObuviParser::listPage($res['body'])['items'])));
+            if (!$ids) continue;
+            arsort($ids);
+            $cid = (int) array_key_first($ids);
+            if ($ids[$cid] < max(3, array_sum($ids) * 0.8) || isset($known[(string) $cid])) {
+                self::log((int) $run['id'], 'info', 'Категория поставщика ' . $path . ': id не узнан (в ссылках корзины ' . json_encode($ids) . ')');
+                continue;
+            }
+            $db->update('supplier_category_map', ['ext_id' => (string) $cid, 'updated_at' => date('Y-m-d H:i:s')], "id = ? AND (ext_id IS NULL OR ext_id = '')", [(int) $r['id']]);
+            HitObuviMap::forget();
+            $known = HitObuviMap::index()['id'];
+            self::log((int) $run['id'], 'info', 'Категория поставщика ' . $path . ': id ' . $cid . ' (по ссылкам корзины её товаров) — записан в таблицу категорий');
+        }
+        @file_put_contents($file, json_encode($tried, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
     /** Меню сайта поставщика: новые категории — в таблицу без категории сайта (боевой запуск), пропавшие — в отчёт */
