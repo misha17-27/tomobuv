@@ -35,7 +35,23 @@ if (!is_file($cfgFile)) {
     http_response_code(500);
     exit('Не найден config/config.php — скопируйте config/config.example.php и заполните.');
 }
-App\Core\App::init(require $cfgFile);
+// config.php испорчен (не возвращает массив настроек — 10.11.2026 на хостинге в нём оказался текст «tes»): не отдавать его
+// вывод с кодом 200 — Cloudflare и поисковики сохранили бы его как страницу; 503 без кэширования, причина — в журнал сервера
+ob_start();
+$cfg = require $cfgFile;
+$cfgOut = (string) ob_get_clean();
+if (!is_array($cfg)) {
+    error_log('tomobuv: config/config.php не возвращает массив настроек (' . gettype($cfg) . ', вывод ' . strlen($cfgOut) . ' байт: '
+        . substr(preg_replace('/\s+/', ' ', $cfgOut), 0, 40) . ') — восстановите файл (docs/DEPLOY-CPANEL.md)');
+    if (PHP_SAPI === 'cli') { fwrite(STDERR, "config/config.php испорчен: не возвращает массив настроек\n"); exit(1); }
+    http_response_code(503);
+    header('Retry-After: 600');
+    header('Cache-Control: no-store');
+    header('Content-Type: text/html; charset=utf-8');
+    exit('<!doctype html><meta charset="utf-8"><title>Сайт временно недоступен</title><p style="font:16px sans-serif;margin:40px">Сайт временно недоступен — скоро вернёмся.</p>');
+}
+App\Core\App::init($cfg);
+unset($cfg, $cfgOut);
 
 $debug = (bool) App\Core\App::config('debug', false);
 error_reporting(E_ALL);
