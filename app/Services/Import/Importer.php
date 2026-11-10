@@ -2204,7 +2204,7 @@ final class Importer
                 $loc = (string) (curl_getinfo($ch, CURLINFO_REDIRECT_URL) ?: '');
                 $cerr = $info['result'] !== CURLE_OK ? curl_error($ch) : '';
                 curl_multi_remove_handle($mh, $ch);
-                curl_close($ch);
+                unset($ch);
                 if ($code >= 300 && $code < 400 && $loc !== '' && $j['hops'] < 3) {
                     @unlink($j['tmp']);
                     $add($j['key'], $loc, $j['hops'] + 1);
@@ -2227,12 +2227,11 @@ final class Importer
         } while ($running || $jobs);
         foreach ($jobs as $j) {                                              // не уложились в общий лимит времени
             curl_multi_remove_handle($mh, $j['ch']);
-            curl_close($j['ch']);
             @fclose($j['fh']);
             @unlink($j['tmp']);
             $out[$j['key']] = ['error' => 'превышено время ожидания', 'retry' => true];
         }
-        curl_multi_close($mh);
+        unset($mh);
         return $out;
     }
 
@@ -2333,7 +2332,7 @@ final class Importer
             'webp' => @imagewebp($img, $dst, $q),
             default => @imagejpeg($img, $dst, 90),
         };
-        imagedestroy($img);
+        unset($img);
         if (!$saved) {
             $db->delete('product_images', 'id = ?', [$iid]);
             return 'не удалось сохранить файл';

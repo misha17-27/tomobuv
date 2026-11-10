@@ -93,7 +93,7 @@ final class Image
         if (!$out) return false;
         @mkdir(dirname($dst), 0775, true);
         $ok = self::encode($out, strtolower(pathinfo($dst, PATHINFO_EXTENSION)), $quality, $dst);
-        imagedestroy($out);
+        unset($out);
         return $ok;
     }
 
@@ -105,7 +105,7 @@ final class Image
         ob_start();
         $ok = self::encode($out, strtolower($ext), $quality, null);
         $data = (string) ob_get_clean();
-        imagedestroy($out);
+        unset($out);
         return $ok && $data !== '' ? $data : null;
     }
 
@@ -150,7 +150,7 @@ final class Image
             imagesavealpha($out, true);
         }
         imagecopyresampled($out, $img, 0, 0, $cx, $cy, $tw, $th, $cw, $ch);
-        imagedestroy($img);
+        unset($img);
         return $out;
     }
 

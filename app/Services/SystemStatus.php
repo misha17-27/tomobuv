@@ -529,7 +529,7 @@ final class SystemStatus
         // на хостинге часть функций curl бывает отключена (disable_functions, чаще всего curl_multi_exec) — тогда запасной путь через fopen
         $curl = true;
         foreach (['curl_init', 'curl_setopt_array', 'curl_multi_init', 'curl_multi_add_handle', 'curl_multi_exec', 'curl_multi_select',
-            'curl_multi_info_read', 'curl_getinfo', 'curl_error', 'curl_strerror', 'curl_multi_remove_handle', 'curl_close', 'curl_multi_close'] as $fn) {
+            'curl_multi_info_read', 'curl_getinfo', 'curl_error', 'curl_strerror', 'curl_multi_remove_handle'] as $fn) {
             if (!function_exists($fn)) { $curl = false; break; }
         }
         if ($curl) {
@@ -557,9 +557,8 @@ final class SystemStatus
                 if ($err === '') $err = isset($res[$p]) ? ($res[$p] !== CURLE_OK ? curl_strerror($res[$p]) : '') : 'нет ответа за 3 с';
                 $codes[$p] = [(int) curl_getinfo($h, CURLINFO_RESPONSE_CODE), $err];
                 curl_multi_remove_handle($mh, $h);
-                curl_close($h);
             }
-            curl_multi_close($mh);
+            unset($mh, $hs);
         } elseif (!filter_var(ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN)) {
             foreach (self::PROBE_PATHS as $p) $codes[$p] = [0, 'на хостинге выключены curl и allow_url_fopen — откройте адрес в браузере'];
         } else {

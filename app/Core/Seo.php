@@ -103,7 +103,7 @@ final class Seo
             $kept[$i] = [$text, $optional];
         }
         $out = self::join($kept);
-        $max = self::LIMITS[$field][1] ?? null;
+        $max = $field !== null ? (self::LIMITS[$field][1] ?? null) : null;   // null — keywords (null как ключ массива устарел в PHP 8.5)
         if ($max !== null) {
             // длиннее нормы — убираем необязательные части справа налево
             $opt = array_keys(array_filter($kept, static fn($x) => $x[1]));

@@ -18,7 +18,8 @@
 6. Перенос со старого сайта, админ, переводы — разовыми заданиями **Cron Jobs** (см. ниже), результат — в файлах журналов.
 
 Журнал деплоя: `repositories/tomobuv-site/storage/logs/deploy.log`. Путь к PHP для консоли деплой записывает в
-`storage/php-cli-path`.
+`storage/php-cli-path`. Ошибки PHP — `storage/logs/php-error.log`; больше 20 МБ — `bin/cron.php` оставляет последние 2 МБ
+в `php-error.old.log`.
 
 ## Обновления
 

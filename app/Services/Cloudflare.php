@@ -132,7 +132,7 @@ final class Cloudflare
             $body = curl_exec($ch);
             $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err = curl_error($ch);
-            curl_close($ch);
+            unset($ch);
             $j = is_string($body) ? json_decode($body, true) : null;
             if (is_array($j) && !empty($j['success'])) {
                 $out['ok'] = true;

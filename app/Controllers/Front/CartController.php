@@ -183,7 +183,8 @@ final class CartController
                     $f['shipping'] = (string) $last['shipping_method'];
                     if (!$shipping[$f['shipping']]['pickup']) $f['address'] = (string) $last['address'];
                 }
-                if (isset($payment[$last['payment_method']])) $f['payment'] = (string) $last['payment_method'];
+                // оплата может быть пустой (заказ «в 1 клик», которому менеджер выбрал только доставку): null как ключ — устарел в PHP 8.5
+                if (isset($payment[(string) $last['payment_method']])) $f['payment'] = (string) $last['payment_method'];
                 if ($last['city']) $f['city'] = (string) $last['city'];
                 if (isset(Orders::REGIONS[(string) $last['region']])) $f['region'] = (string) $last['region'];
             }

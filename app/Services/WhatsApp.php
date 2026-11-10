@@ -131,14 +131,15 @@ final class WhatsApp
             $resp = curl_exec($ch);
             $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err = curl_error($ch);
-            curl_close($ch);
+            unset($ch);
             if ($resp === false) throw new \RuntimeException('Нет связи с сервисом: ' . $err);
             return [$code, (string) $resp];
         }
         $ctx = stream_context_create(['http' => ['method' => 'POST', 'header' => implode("\r\n", $headers), 'content' => $body, 'timeout' => 12, 'ignore_errors' => true]]);
         $resp = @file_get_contents($url, false, $ctx);
         if ($resp === false) throw new \RuntimeException('Нет связи с сервисом');
-        $code = preg_match('#HTTP/\S+\s+(\d+)#', $http_response_header[0] ?? '', $m) ? (int) $m[1] : 0;
+        $rh = function_exists('http_get_last_response_headers') ? (http_get_last_response_headers() ?? []) : ($http_response_header ?? []);   // переменная устарела в PHP 8.5
+        $code = preg_match('#HTTP/\S+\s+(\d+)#', $rh[0] ?? '', $m) ? (int) $m[1] : 0;
         return [$code, (string) $resp];
     }
 

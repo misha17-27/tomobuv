@@ -508,11 +508,11 @@ abstract class SupplierSync
         $scale = min($cw / $w, $ch / $h);                                      // вписать с сохранением пропорций (как старый: и увеличивая)
         $tw = max(1, (int) round($w * $scale)); $th = max(1, (int) round($h * $scale));
         imagecopyresampled($canvas, $img, intdiv($cw - $tw, 2), intdiv($ch - $th, 2), 0, 0, $tw, $th, $w, $h);
-        imagedestroy($img);
+        unset($img);
         $this->retouch($canvas);
         $tmp = $dst . '.part';                                              // целиком или никак: недописанный файл не примется за готовый
         $ok = imagejpeg($canvas, $tmp, max(30, min(100, (int) $this->cfg['photo_quality'])));
-        imagedestroy($canvas);
+        unset($canvas);
         if (!$ok || !@rename($tmp, $dst)) { @unlink($tmp); return ['error' => 'не удалось сохранить JPEG']; }
         return ['file' => $dst, 'w' => $cw, 'h' => $ch];
     }

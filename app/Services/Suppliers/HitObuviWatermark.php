@@ -132,7 +132,7 @@ final class HitObuviWatermark
                 if ($v > $max) $max = $v;
             }
         }
-        if ($max <= 0) { imagedestroy($tpl); return 0.0; }
+        if ($max <= 0) return 0.0;
         // затемнение — в картинку и к размеру образца
         $src = imagecreatetruecolor($w, $h);
         foreach ($D as $yy => $row) foreach ($row as $xx => $v) { $c = (int) round($v / $max * 255); imagesetpixel($src, $xx, $yy, ($c << 16) | ($c << 8) | $c); }
@@ -140,7 +140,7 @@ final class HitObuviWatermark
         imagecopyresampled($dst, $src, 0, 0, 0, 0, $tw, $th, $w, $h);
         $A = []; $B = [];
         for ($y = 0; $y < $th; $y++) for ($x = 0; $x < $tw; $x++) { $A[] = imagecolorat($dst, $x, $y) & 255; $B[] = imagecolorat($tpl, $x, $y) & 255; }
-        imagedestroy($src); imagedestroy($dst); imagedestroy($tpl);
+        unset($src, $dst, $tpl);
         $ma = array_sum($A) / count($A); $mb = array_sum($B) / count($B);
         $sab = $saa = $sbb = 0.0;
         foreach ($A as $i => $va) { $da = $va - $ma; $db = $B[$i] - $mb; $sab += $da * $db; $saa += $da * $da; $sbb += $db * $db; }
@@ -178,7 +178,7 @@ final class HitObuviWatermark
         $th = $y1 - $y0 + 4;
         $tw = (int) round(imagesx($mask) * $th / imagesy($mask));
         $xs = $x1 - $tw + 1; $ys = $y1 - $th + 1;
-        if ($xs < 0 || $ys < 0) { imagedestroy($mask); return; }
+        if ($xs < 0 || $ys < 0) return;
         $m = imagecreatetruecolor($tw, $th);
         imagecopyresampled($m, $mask, 0, 0, 0, 0, $tw, $th, imagesx($mask), imagesy($mask));
         for ($y = 0; $y < $th; $y++) {
@@ -189,7 +189,7 @@ final class HitObuviWatermark
                 imagesetpixel($im, $xs + $x, $ys + $y, self::rgb((($c >> 16) & 255) * (1 - $k), (($c >> 8) & 255) * (1 - $k), ($c & 255) * (1 - $k)));
             }
         }
-        imagedestroy($m); imagedestroy($mask);
+        unset($m, $mask);
     }
 
     private static function gray(\GdImage $im, int $x, int $y): int
@@ -299,17 +299,17 @@ final class HitObuviWatermark
             default => false,
         } : false;
         if (!$im) return false;
-        if (!self::apply($im)) { imagedestroy($im); return false; }
-        if ($dry) { imagedestroy($im); return true; }
+        if (!self::apply($im)) return false;
+        if ($dry) return true;
         $db = App::db();
-        if ($db->query('DELETE FROM product_images WHERE id = ?', [$iid])->rowCount() !== 1) { imagedestroy($im); return false; }
+        if ($db->query('DELETE FROM product_images WHERE id = ?', [$iid])->rowCount() !== 1) return false;
         $row = $r; unset($row['id']);
         $row['ext'] = 'jpg';
         $new = $db->insert('product_images', $row);
         $dst = Image::originalPath($pid, $new, 'jpg');
         @mkdir(dirname($dst), 0775, true);
         $ok = imagejpeg($im, $dst . '.part', $quality) && @rename($dst . '.part', $dst);
-        imagedestroy($im);
+        unset($im);
         if (!$ok) {                                                             // не записалось — вернуть как было
             @unlink($dst . '.part');
             $db->query('DELETE FROM product_images WHERE id = ?', [$new]);

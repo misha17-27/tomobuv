@@ -19,6 +19,12 @@ try {
     $db->query('DELETE FROM auth_tokens WHERE expires_at < NOW()');          // «Запомнить меня»: срок вышел
 } catch (\PDOException) {
 }
+try {
+    $big = \App\Core\Log::rotatePhpErrors();                                // журнал ошибок PHP больше 20 МБ — оставить последние 2 МБ
+    if ($big) echo 'журнал ошибок PHP: был ' . round($big / 1048576) . " МБ, последние строки — в php-error.old.log\n";
+} catch (\Throwable $e) {
+    \App\Core\Log::error('cron php-error.log: ' . $e->getMessage());
+}
 // импорт: старые задания и их файлы, разобранные строки, брошенные загрузки (import/tmp); задания в работе не трогаются
 \App\Services\Import\Importer::cleanup();
 $prev = (int) @file_get_contents(STORAGE . '/cron-last') ?: time() - 3600;

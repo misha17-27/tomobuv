@@ -251,14 +251,15 @@ final class SitemapController
     private function stream(string $sql, array $params, callable $fn): void
     {
         $pdo = App::db()->pdo();
-        $buffered = $pdo->getAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY);
-        $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        $attr = \App\Core\DB::bufferedQueryAttr();
+        $buffered = $pdo->getAttribute($attr);
+        $pdo->setAttribute($attr, false);
         try {
             $st = App::db()->query($sql, $params);
             while ($r = $st->fetch(PDO::FETCH_ASSOC)) $fn($r);
             $st->closeCursor();
         } finally {
-            $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, $buffered);
+            $pdo->setAttribute($attr, $buffered);
         }
     }
 

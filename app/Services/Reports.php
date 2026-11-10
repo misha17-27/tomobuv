@@ -227,12 +227,13 @@ final class Reports
     {
         $db = App::db();
         $pdo = $db->pdo();
-        $was = $pdo->getAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY);
-        $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        $attr = \App\Core\DB::bufferedQueryAttr();
+        $was = $pdo->getAttribute($attr);
+        $pdo->setAttribute($attr, false);
         try {
             return $fn($db);
         } finally {
-            $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, $was);
+            $pdo->setAttribute($attr, $was);
         }
     }
 

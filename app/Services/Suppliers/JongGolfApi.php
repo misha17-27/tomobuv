@@ -116,7 +116,7 @@ final class JongGolfApi
             $res = curl_exec($ch);
             $err = curl_error($ch);
             $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-            curl_close($ch);
+            unset($ch);
             if ($res === false) {
                 if ($try < self::TRIES) { sleep(1); continue; }
                 throw new JongGolfError('Нет связи с поставщиком: ' . $this->mask($err ?: 'ошибка соединения'));

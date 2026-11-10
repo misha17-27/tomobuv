@@ -45,6 +45,15 @@ final class DB
         return $this->pdo;
     }
 
+    /**
+     * Атрибут PDO «буферизовать результат» (MySQL): Pdo\Mysql::ATTR_USE_BUFFERED_QUERY (PHP 8.4+) — PDO::MYSQL_ATTR_*
+     * с PHP 8.5 устарели (на каждый вызов — строка в журнале ошибок); cron на хостинге может идти на PHP 8.1
+     */
+    public static function bufferedQueryAttr(): int
+    {
+        return \defined('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') ? \Pdo\Mysql::ATTR_USE_BUFFERED_QUERY : \PDO::MYSQL_ATTR_USE_BUFFERED_QUERY;
+    }
+
     public function query(string $sql, array $params = []): PDOStatement
     {
         $this->queries++;

@@ -558,7 +558,6 @@ final class Media
             $o = (int) (@exif_read_data($src)['Orientation'] ?? 1);
             $deg = [3 => 180, 6 => -90, 8 => 90][$o] ?? 0;
             if ($deg && ($rot = imagerotate($img, $deg, 0))) {
-                imagedestroy($img);
                 $img = $rot;
                 [$w, $h] = [imagesx($img), imagesy($img)];
                 $scale = min(1, self::MAX_SIDE / max($w, $h));
@@ -576,24 +575,24 @@ final class Media
             imagefill($out, 0, 0, imagecolorallocatealpha($out, 0, 0, 0, 127));
         }
         imagecopyresampled($out, $img, 0, 0, 0, 0, $tw, $th, $w, $h);
-        imagedestroy($img);
+        unset($img);
 
         $dirRel = date('Y') . '/' . date('m');
         $dir = self::root() . '/' . $dirRel;
-        if (!self::ensureDir($dir)) { imagedestroy($out); return self::fail('Нет доступа к папке public/uploads — проверьте права'); }
+        if (!self::ensureDir($dir)) return self::fail('Нет доступа к папке public/uploads — проверьте права');
 
         $file = self::base($origName);
         $dot = strrpos($file, '.');
         $base = rtrim(Str::slug($dot === false ? $file : substr($file, 0, $dot), 80), '-');   // обрезка до 80 могла оставить «-» в конце
         if ($base === '' || $base === 'item') $base = 'image';
         [$name, $dst] = self::reserve($dir, $base, $ext);
-        if ($name === null) { imagedestroy($out); return self::fail('Не удалось создать файл в папке uploads'); }
+        if ($name === null) return self::fail('Не удалось создать файл в папке uploads');
         $ok = match ($ext) {
             'png'  => imagepng($out, $dst, 6),
             'webp' => imagewebp($out, $dst, 85),
             default => imagejpeg($out, $dst, (int) App::config('images.jpeg_quality', 85)),
         };
-        imagedestroy($out);
+        unset($out);
         clearstatcache(true, $dst);
         if (!$ok || !filesize($dst)) { @unlink($dst); return self::fail('Не удалось сохранить картинку'); }
         self::forget();

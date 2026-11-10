@@ -208,7 +208,7 @@ class SiteClient
             $ok = curl_exec($ch);
             $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             $err = $ok === false ? curl_error($ch) : '';
-            curl_close($ch);
+            unset($ch);
             $res = ['code' => $code, 'body' => $body, 'type' => strtolower((string) ($headers['content-type'] ?? '')), 'url' => $url,
                 'time' => round(microtime(true) - $t, 2), 'cached' => false, 'headers' => $headers, 'error' => $err];
         });

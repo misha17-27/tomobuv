@@ -110,13 +110,14 @@ $httpGet = static function (string $url): array {
         $body = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $err = $body === false ? curl_error($ch) : '';
-        curl_close($ch);
+        unset($ch);
     } else {
         $ctx = stream_context_create(['http' => ['method' => 'GET', 'timeout' => 60, 'ignore_errors' => true, 'follow_location' => 1,
             'max_redirects' => 3, 'header' => "User-Agent: " . UA . "\r\nAccept: image/*\r\n"]]);
         $body = @file_get_contents($url, false, $ctx, 0, MAX_BYTES + 1);
         $code = 0;
-        foreach ($http_response_header ?? [] as $line) {
+        $rh = function_exists('http_get_last_response_headers') ? (http_get_last_response_headers() ?? []) : ($http_response_header ?? []);   // переменная устарела в PHP 8.5
+        foreach ($rh as $line) {
             if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) { $code = (int) $m[1]; $h = []; }
             elseif (($p = strpos($line, ':')) !== false) $h[strtolower(trim(substr($line, 0, $p)))] = trim(substr($line, $p + 1));
         }
